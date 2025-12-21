@@ -21,3 +21,4 @@ notify.workspace = true
 dirs.workspace = true
 portable-pty.workspace = true
 rusqlite.workspace = true
+regex.workspace = true

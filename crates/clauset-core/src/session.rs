@@ -1,6 +1,6 @@
 //! Session manager orchestrating processes and persistence.
 
-use crate::{ClausetError, ProcessEvent, ProcessManager, Result, SessionStore, SpawnOptions};
+use crate::{ClausetError, ProcessEvent, ProcessManager, Result, SessionActivity, SessionBuffers, SessionStore, SpawnOptions};
 use clauset_types::{Session, SessionMode, SessionStatus, SessionSummary};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -48,6 +48,7 @@ pub struct SessionManager {
     process_manager: Arc<ProcessManager>,
     event_tx: broadcast::Sender<ProcessEvent>,
     active_sessions: Arc<RwLock<Vec<Uuid>>>,
+    buffers: Arc<SessionBuffers>,
 }
 
 impl SessionManager {
@@ -56,6 +57,7 @@ impl SessionManager {
         let db = Arc::new(SessionStore::open(&config.db_path)?);
         let process_manager = Arc::new(ProcessManager::new(config.claude_path.clone()));
         let (event_tx, _) = broadcast::channel(256);
+        let buffers = Arc::new(SessionBuffers::new());
 
         let manager = Self {
             config,
@@ -63,6 +65,7 @@ impl SessionManager {
             process_manager,
             event_tx,
             active_sessions: Arc::new(RwLock::new(Vec::new())),
+            buffers,
         };
 
         // Clean up orphaned sessions from previous runs
@@ -319,6 +322,52 @@ impl SessionManager {
             session_id, model, cost, input_tokens / 1000, output_tokens / 1000, context_percent
         );
         Ok(())
+    }
+
+    /// Append terminal output to session buffer and parse for activity.
+    /// Returns Some(activity) if the activity changed.
+    pub async fn append_terminal_output(&self, session_id: Uuid, data: &[u8]) -> Option<SessionActivity> {
+        let activity = self.buffers.append(session_id, data).await;
+
+        // If activity changed, update the database with new stats
+        if let Some(ref act) = activity {
+            if !act.model.is_empty() {
+                let _ = self.db.update_stats(
+                    session_id,
+                    &act.model,
+                    act.cost,
+                    act.input_tokens,
+                    act.output_tokens,
+                    act.context_percent,
+                );
+            }
+            // Update preview with current activity if meaningful
+            if !act.current_activity.is_empty() {
+                let _ = self.db.update_preview(session_id, &act.current_activity);
+            }
+        }
+
+        activity
+    }
+
+    /// Get the terminal buffer for a session (for replay on reconnect).
+    pub async fn get_terminal_buffer(&self, session_id: Uuid) -> Option<Vec<u8>> {
+        self.buffers.get_buffer(session_id).await
+    }
+
+    /// Get current activity for a session.
+    pub async fn get_activity(&self, session_id: Uuid) -> Option<SessionActivity> {
+        self.buffers.get_activity(session_id).await
+    }
+
+    /// Get the session buffers for external use.
+    pub fn buffers(&self) -> Arc<SessionBuffers> {
+        self.buffers.clone()
+    }
+
+    /// Clear terminal buffer for a session.
+    pub async fn clear_terminal_buffer(&self, session_id: Uuid) {
+        self.buffers.clear(session_id).await;
     }
 }
 

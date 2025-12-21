@@ -75,6 +75,8 @@ pub enum WsServerMessage {
     },
     /// Raw terminal output (PTY mode).
     TerminalOutput { data: Vec<u8> },
+    /// Terminal buffer for replay on reconnect.
+    TerminalBuffer { data: Vec<u8> },
     /// Session status changed.
     StatusChange {
         old_status: SessionStatus,
@@ -90,6 +92,33 @@ pub enum WsServerMessage {
         status: SessionStatus,
         messages: Vec<StoredMessage>,
     },
+    /// Activity update (for real-time dashboard).
+    ActivityUpdate {
+        session_id: Uuid,
+        model: String,
+        cost: f64,
+        input_tokens: u64,
+        output_tokens: u64,
+        context_percent: u8,
+        current_activity: String,
+        /// Current tool/step being executed
+        current_step: Option<String>,
+        /// Recent actions with details for rich preview
+        recent_actions: Vec<RecentAction>,
+    },
+}
+
+/// A single action/step performed by Claude (for activity updates)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecentAction {
+    /// Action type: "bash", "read", "write", "edit", "thinking", "searching", etc.
+    pub action_type: String,
+    /// Short summary of the action
+    pub summary: String,
+    /// Optional detail (file path, command, etc.)
+    pub detail: Option<String>,
+    /// Timestamp in milliseconds
+    pub timestamp: u64,
 }
 
 /// A stored message for state recovery.

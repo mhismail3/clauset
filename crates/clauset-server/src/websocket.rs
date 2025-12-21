@@ -19,7 +19,7 @@ pub async fn handle_websocket(
     // Subscribe to session events
     let mut event_rx = state.session_manager.subscribe();
 
-    // Get initial session state
+    // Get initial session state and send init message
     if let Ok(Some(session)) = state.session_manager.get_session(session_id) {
         let init_msg = WsServerMessage::SessionInit {
             session_id: session.id,
@@ -30,6 +30,16 @@ pub async fn handle_websocket(
         };
         let json = serde_json::to_string(&init_msg)?;
         ws_tx.send(Message::Text(json.into())).await?;
+    }
+
+    // Send terminal buffer for replay (if any)
+    if let Some(buffer) = state.session_manager.get_terminal_buffer(session_id).await {
+        if !buffer.is_empty() {
+            tracing::debug!("Sending terminal buffer ({} bytes) for session {}", buffer.len(), session_id);
+            let buffer_msg = WsServerMessage::TerminalBuffer { data: buffer };
+            let json = serde_json::to_string(&buffer_msg)?;
+            ws_tx.send(Message::Text(json.into())).await?;
+        }
     }
 
     // Spawn task to forward events to WebSocket
@@ -105,7 +115,36 @@ pub async fn handle_websocket(
                     }
                 }
                 ProcessEvent::TerminalOutput { session_id: sid, data } if *sid == session_id => {
+                    // Just forward to client - buffering is done by background event processor
                     Some(WsServerMessage::TerminalOutput { data: data.clone() })
+                }
+                ProcessEvent::ActivityUpdate {
+                    session_id: sid,
+                    model,
+                    cost,
+                    input_tokens,
+                    output_tokens,
+                    context_percent,
+                    current_activity,
+                    current_step,
+                    recent_actions,
+                } if *sid == session_id => {
+                    Some(WsServerMessage::ActivityUpdate {
+                        session_id: *sid,
+                        model: model.clone(),
+                        cost: *cost,
+                        input_tokens: *input_tokens,
+                        output_tokens: *output_tokens,
+                        context_percent: *context_percent,
+                        current_activity: current_activity.clone(),
+                        current_step: current_step.clone(),
+                        recent_actions: recent_actions.iter().map(|a| clauset_types::RecentAction {
+                            action_type: a.action_type.clone(),
+                            summary: a.summary.clone(),
+                            detail: a.detail.clone(),
+                            timestamp: a.timestamp,
+                        }).collect(),
+                    })
                 }
                 ProcessEvent::Exited { session_id: sid, .. } if *sid == session_id => {
                     // Update session status

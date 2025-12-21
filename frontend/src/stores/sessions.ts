@@ -1,10 +1,16 @@
 import { createSignal } from 'solid-js';
-import { api, Session, SessionListResponse } from '../lib/api';
+import { createStore } from 'solid-js/store';
+import { api, Session, SessionListResponse, RecentAction } from '../lib/api';
+import type { ActivityUpdate } from '../lib/globalWs';
 
-const [sessions, setSessions] = createSignal<Session[]>([]);
+// Use a store for more granular reactivity (avoids re-rendering entire cards)
+const [sessionsStore, setSessionsStore] = createStore<{ list: Session[] }>({ list: [] });
 const [activeCount, setActiveCount] = createSignal(0);
 const [loading, setLoading] = createSignal(false);
 const [error, setError] = createSignal<string | null>(null);
+
+// Accessor to maintain API compatibility
+const sessions = () => sessionsStore.list;
 
 export async function fetchSessions() {
   setLoading(true);
@@ -12,13 +18,52 @@ export async function fetchSessions() {
 
   try {
     const response: SessionListResponse = await api.sessions.list();
-    setSessions(response.sessions);
+    // Ensure recent_actions is always an array
+    const sessionsWithDefaults = response.sessions.map(s => ({
+      ...s,
+      recent_actions: s.recent_actions || [],
+    }));
+    setSessionsStore('list', sessionsWithDefaults);
     setActiveCount(response.active_count);
   } catch (e) {
     setError(e instanceof Error ? e.message : 'Failed to fetch sessions');
   } finally {
     setLoading(false);
   }
+}
+
+/**
+ * Update a session from an activity update received via global WebSocket.
+ * Uses produce() for fine-grained reactivity - only updates changed fields.
+ * This prevents the entire card from flickering on updates.
+ */
+export function updateSessionFromActivity(update: ActivityUpdate) {
+  setSessionsStore('list', (sessions) =>
+    sessions.map((session) => {
+      if (session.id === update.session_id) {
+        // Create updated session with new values
+        return {
+          ...session,
+          model: update.model || session.model,
+          total_cost_usd: update.cost,
+          input_tokens: update.input_tokens,
+          output_tokens: update.output_tokens,
+          context_percent: update.context_percent,
+          preview: update.current_activity || session.preview,
+          current_step: update.current_step,
+          recent_actions: update.recent_actions || session.recent_actions || [],
+        };
+      }
+      return session;
+    })
+  );
+}
+
+/**
+ * Get a specific session by ID with reactive access
+ */
+export function getSession(id: string): Session | undefined {
+  return sessionsStore.list.find(s => s.id === id);
 }
 
 export function getStatusVariant(status: Session['status']): 'active' | 'starting' | 'idle' | 'completed' | 'error' {

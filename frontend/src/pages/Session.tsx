@@ -18,7 +18,7 @@ import {
   updateToolCallResult,
 } from '../stores/messages';
 import { getStatusVariant, getStatusLabel } from '../stores/sessions';
-import { appendTerminalOutput, getTerminalHistory } from '../stores/terminal';
+import { appendTerminalOutput, clearTerminalHistory } from '../stores/terminal';
 
 // Parse Claude's status line: "Model | $Cost | InputK/OutputK | ctx:X%"
 interface StatusInfo {
@@ -148,6 +148,43 @@ export default function SessionPage() {
         setError(message);
         break;
       }
+      case 'terminal_buffer': {
+        // Server sends buffered terminal output on reconnect for replay
+        // This is the source of truth - replaces any localStorage data
+        const { data } = msg as { data: number[] };
+        const bytes = new Uint8Array(data);
+        console.log(`Received terminal buffer: ${bytes.length} bytes`);
+
+        // Clear localStorage for this session since server is source of truth
+        clearTerminalHistory(params.id);
+
+        // Write buffer to terminal for display
+        if (terminalWriteFn) {
+          terminalWriteFn(bytes);
+        } else {
+          setTerminalData((prev) => [...prev, bytes]);
+        }
+
+        // Parse status from buffer
+        const text = new TextDecoder().decode(bytes);
+        outputBuffer = text.slice(-2000); // Keep last 2KB for status parsing
+        const status = parseStatusLine(outputBuffer);
+        if (status) {
+          lastStatus = status;
+          const currentSession = session();
+          if (currentSession) {
+            setSession({
+              ...currentSession,
+              model: status.model,
+              total_cost_usd: status.cost,
+              input_tokens: status.inputTokens,
+              output_tokens: status.outputTokens,
+              context_percent: status.contextPercent,
+            });
+          }
+        }
+        break;
+      }
       case 'terminal_output': {
         const { data } = msg as { data: number[] };
         const bytes = new Uint8Array(data);
@@ -213,19 +250,43 @@ export default function SessionPage() {
         }
         break;
       }
+      case 'activity_update': {
+        // Activity update from global broadcast - update local session state
+        const { model, cost, input_tokens, output_tokens, context_percent, current_step, recent_actions } = msg as {
+          model: string;
+          cost: number;
+          input_tokens: number;
+          output_tokens: number;
+          context_percent: number;
+          current_step?: string;
+          recent_actions?: Array<{ action_type: string; summary: string; detail?: string; timestamp: number }>;
+        };
+        const currentSession = session();
+        if (currentSession) {
+          setSession({
+            ...currentSession,
+            model: model || currentSession.model,
+            total_cost_usd: cost,
+            input_tokens,
+            output_tokens,
+            context_percent,
+            current_step,
+            recent_actions: recent_actions || currentSession.recent_actions || [],
+          });
+        }
+        break;
+      }
     }
   }
 
   function registerTerminalWrite(writeFn: (data: Uint8Array) => void) {
     terminalWriteFn = writeFn;
 
-    // Replay history from persistent store
-    const history = getTerminalHistory(params.id);
-    if (history.length > 0) {
-      history.forEach((data) => writeFn(data));
-    }
+    // Don't replay from localStorage - server buffer is the source of truth
+    // Server sends terminal_buffer on WebSocket connect with full history
+    // localStorage is only used as backup for persistence, not for display
 
-    // Flush queued data
+    // Flush queued data (this includes server buffer if received before terminal mounted)
     const queued = terminalData();
     if (queued.length > 0) {
       queued.forEach((data) => writeFn(data));

@@ -1,17 +1,14 @@
-import { For, Show, onMount, createSignal, createEffect, onCleanup } from 'solid-js';
-import { A, useNavigate } from '@solidjs/router';
+import { For, Show, onMount, createSignal, onCleanup } from 'solid-js';
+import { useNavigate } from '@solidjs/router';
 import { Button } from '../components/ui/Button';
-import { Badge } from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
+import { SessionCard } from '../components/SessionCard';
 import {
   sessions,
   activeCount,
   loading,
   error,
   fetchSessions,
-  getStatusVariant,
-  getStatusLabel,
-  formatRelativeTime,
 } from '../stores/sessions';
 import { NewSessionModal } from '../components/chat/NewSessionModal';
 import { api, Session } from '../lib/api';
@@ -131,10 +128,12 @@ export default function Sessions() {
             padding: '16px 20px',
           }}
         >
-          <div>
-            <h1 class="text-brand" style={{ color: 'var(--color-accent)', "font-size": '22px' }}>
-              Clauset
-            </h1>
+          <div style={{ display: 'flex', "align-items": 'center', gap: '10px' }}>
+            <img src="/logo.svg" alt="Clauset logo" style={{ width: '36px', height: '36px' }} />
+            <div>
+              <h1 class="text-brand" style={{ color: 'var(--color-accent)', "font-size": '22px', margin: '0' }}>
+                Clauset
+              </h1>
             <p
               class="text-mono"
               style={{
@@ -147,6 +146,7 @@ export default function Sessions() {
                 {activeCount()} active
               </Show>
             </p>
+            </div>
           </div>
           <Button onClick={() => setShowNewSession(true)} size="sm">
             + new
@@ -209,130 +209,10 @@ export default function Sessions() {
           <div style={{ display: 'flex', "flex-direction": 'column', gap: '12px' }}>
             <For each={sessions()}>
               {(session) => (
-                <div
-                  class="card-retro card-pressable animate-fade-in"
-                  style={{ overflow: 'hidden', position: 'relative' }}
-                >
-                  <A
-                    href={`/session/${session.id}`}
-                    style={{
-                      display: 'block',
-                      padding: '16px',
-                      "text-decoration": 'none',
-                      color: 'inherit',
-                    }}
-                  >
-                    {/* Top row: Project name + Badge + Menu */}
-                    <div style={{ display: 'flex', "align-items": 'center', gap: '12px', "margin-bottom": '8px' }}>
-                      <div style={{ flex: '1', "min-width": '0', display: 'flex', "align-items": 'center', gap: '8px' }}>
-                        <span
-                          class="text-mono"
-                          style={{
-                            "font-size": '14px',
-                            "font-weight": '600',
-                            color: 'var(--color-text-primary)',
-                            overflow: 'hidden',
-                            "text-overflow": 'ellipsis',
-                            "white-space": 'nowrap',
-                          }}
-                        >
-                          {session.project_path.split('/').pop() || 'Unknown'}
-                        </span>
-                        <Badge variant={getStatusVariant(session.status)}>
-                          {getStatusLabel(session.status)}
-                        </Badge>
-                      </div>
-                      <button
-                        onClick={(e) => openMenu(e, session)}
-                        class="pressable"
-                        style={{
-                          width: '32px',
-                          height: '32px',
-                          display: 'flex',
-                          "align-items": 'center',
-                          "justify-content": 'center',
-                          color: 'var(--color-text-muted)',
-                          background: 'var(--color-bg-elevated)',
-                          border: '1px solid var(--color-bg-overlay)',
-                          "border-radius": '8px',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
-                          <circle cx="4" cy="10" r="1.5" />
-                          <circle cx="10" cy="10" r="1.5" />
-                          <circle cx="16" cy="10" r="1.5" />
-                        </svg>
-                      </button>
-                    </div>
-
-                    {/* Preview text */}
-                    <p
-                      style={{
-                        "font-size": '14px',
-                        color: 'var(--color-text-secondary)',
-                        "margin-bottom": '12px',
-                        display: '-webkit-box',
-                        "-webkit-line-clamp": '2',
-                        "-webkit-box-orient": 'vertical',
-                        overflow: 'hidden',
-                        "line-height": '1.4',
-                      }}
-                    >
-                      {session.preview || 'No preview available'}
-                    </p>
-
-                    {/* Bottom row: Time info */}
-                    <div
-                      class="text-mono"
-                      style={{
-                        display: 'flex',
-                        "align-items": 'center',
-                        gap: '6px',
-                        "font-size": '11px',
-                        color: 'var(--color-text-muted)',
-                        "margin-bottom": '12px',
-                      }}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                      <span>{formatRelativeTime(session.last_activity_at)}</span>
-                    </div>
-
-                    {/* Status line - Claude Code style */}
-                    <div
-                      class="text-mono"
-                      style={{
-                        display: 'flex',
-                        "align-items": 'center',
-                        gap: '8px',
-                        "font-size": '11px',
-                        color: 'var(--color-text-tertiary)',
-                        padding: '8px 10px',
-                        background: 'var(--color-bg-base)',
-                        "border-radius": '8px',
-                        "margin": '0 -4px',
-                        "flex-wrap": 'wrap',
-                      }}
-                    >
-                      <span>{session.model}</span>
-                      <span style={{ color: 'var(--color-text-muted)' }}>|</span>
-                      <span>${session.total_cost_usd.toFixed(2)}</span>
-                      <Show when={session.input_tokens > 0 || session.output_tokens > 0}>
-                        <span style={{ color: 'var(--color-text-muted)' }}>|</span>
-                        <span>
-                          {(session.input_tokens / 1000).toFixed(1)}K/{(session.output_tokens / 1000).toFixed(1)}K
-                        </span>
-                      </Show>
-                      <Show when={session.context_percent > 0}>
-                        <span style={{ color: 'var(--color-text-muted)' }}>|</span>
-                        <span>ctx:{session.context_percent}%</span>
-                      </Show>
-                    </div>
-                  </A>
-                </div>
+                <SessionCard
+                  session={session}
+                  onMenuOpen={openMenu}
+                />
               )}
             </For>
           </div>

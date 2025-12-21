@@ -23,6 +23,18 @@ pub enum ProcessEvent {
     Exited { session_id: Uuid, exit_code: Option<i32> },
     /// Error occurred.
     Error { session_id: Uuid, message: String },
+    /// Session activity updated (for dashboard).
+    ActivityUpdate {
+        session_id: Uuid,
+        model: String,
+        cost: f64,
+        input_tokens: u64,
+        output_tokens: u64,
+        context_percent: u8,
+        current_activity: String,
+        current_step: Option<String>,
+        recent_actions: Vec<crate::buffer::RecentAction>,
+    },
 }
 
 /// Options for spawning a Claude process.

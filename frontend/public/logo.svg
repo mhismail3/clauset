@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- Cabinet frame -->
+  <rect x="8" y="8" width="84" height="84" fill="#3d3d3d" rx="2"/>
+
+  <!-- Top bar -->
+  <rect x="4" y="4" width="92" height="10" fill="#4a4a4a" rx="1"/>
+
+  <!-- Cabinet legs -->
+  <rect x="12" y="88" width="8" height="8" fill="#4a4a4a"/>
+  <rect x="80" y="88" width="8" height="8" fill="#4a4a4a"/>
+
+  <!-- Interior darkness -->
+  <rect x="14" y="18" width="72" height="42" fill="#1a1a1a"/>
+
+  <!-- Open door (left side, angled) -->
+  <polygon points="14,18 14,65 36,60 36,23" fill="#5a5a5a"/>
+  <polygon points="14,18 14,65 12,64 12,19" fill="#707070"/>
+
+  <!-- Door handles -->
+  <rect x="16" y="30" width="3" height="6" fill="#e8e8e8" rx="1"/>
+  <rect x="16" y="50" width="3" height="6" fill="#e8e8e8" rx="1"/>
+
+  <!-- Orange creature (space invader style) -->
+  <!-- Main body -->
+  <rect x="48" y="28" width="32" height="24" fill="#d97052"/>
+  <!-- Eyes -->
+  <rect x="54" y="34" width="6" height="6" fill="#1a1a1a"/>
+  <rect x="68" y="34" width="6" height="6" fill="#1a1a1a"/>
+  <!-- Tentacles/legs -->
+  <rect x="52" y="52" width="6" height="8" fill="#d97052"/>
+  <rect x="62" y="52" width="6" height="8" fill="#d97052"/>
+  <rect x="72" y="52" width="6" height="8" fill="#d97052"/>
+  <!-- Protrusion/nose -->
+  <rect x="80" y="36" width="6" height="10" fill="#d97052"/>
+
+  <!-- Bottom drawer section -->
+  <rect x="14" y="64" width="72" height="20" fill="#4a4a4a"/>
+  <rect x="16" y="66" width="68" height="16" fill="#3d3d3d" stroke="#5a5a5a" stroke-width="2"/>
+  <!-- Drawer handle -->
+  <rect x="47" y="72" width="6" height="4" fill="#e8e8e8" rx="1"/>
+</svg>

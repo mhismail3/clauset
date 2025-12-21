@@ -1,5 +1,12 @@
 // API client for Clauset server
 
+export interface RecentAction {
+  action_type: string;
+  summary: string;
+  detail?: string;
+  timestamp: number;
+}
+
 export interface Session {
   id: string;
   claude_session_id: string;
@@ -14,6 +21,8 @@ export interface Session {
   output_tokens: number;
   context_percent: number;
   preview: string;
+  current_step?: string;
+  recent_actions: RecentAction[];
 }
 
 export interface SessionListResponse {

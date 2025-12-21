@@ -1,12 +1,19 @@
 //! Clauset server - HTTP/WebSocket server for Claude Code session management.
 
 mod config;
+mod event_processor;
+mod global_ws;
 mod routes;
 mod state;
 mod websocket;
 
 use anyhow::Result;
 use axum::{
+    extract::{
+        ws::{WebSocket, WebSocketUpgrade},
+        State,
+    },
+    response::Response,
     routing::{delete, get, post, put},
     Router,
 };
@@ -21,6 +28,20 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use config::Config;
 use state::AppState;
+
+/// Handler for global events WebSocket upgrade.
+async fn global_events_ws(
+    State(state): State<Arc<AppState>>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    ws.on_upgrade(move |socket| handle_global_events(socket, state))
+}
+
+async fn handle_global_events(socket: WebSocket, state: Arc<AppState>) {
+    if let Err(e) = global_ws::handle_global_websocket(socket, state).await {
+        tracing::error!("Global WebSocket error: {}", e);
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -41,6 +62,10 @@ async fn main() -> Result<()> {
     let state = Arc::new(AppState::new(config.clone())?);
     tracing::info!("Initialized application state");
 
+    // Start background event processor for continuous terminal buffering
+    event_processor::spawn_event_processor(state.clone());
+    tracing::info!("Started background event processor");
+
     // Build router
     let api_routes = Router::new()
         .route("/sessions", get(routes::sessions::list))
@@ -57,7 +82,8 @@ async fn main() -> Result<()> {
         .route("/health", get(routes::health));
 
     let ws_routes = Router::new()
-        .route("/sessions/{id}", get(routes::ws::upgrade));
+        .route("/sessions/{id}", get(routes::ws::upgrade))
+        .route("/events", get(global_events_ws));
 
     let app = Router::new()
         .nest("/api", api_routes)
