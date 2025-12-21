@@ -12,7 +12,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
   const navigate = useNavigate();
   const [projectPath, setProjectPath] = createSignal('');
   const [prompt, setPrompt] = createSignal('');
-  const [terminalMode, setTerminalMode] = createSignal(false);
+  const [terminalMode, setTerminalMode] = createSignal(true);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
@@ -28,7 +28,6 @@ export function NewSessionModal(props: NewSessionModalProps) {
         terminal_mode: terminalMode(),
       });
 
-      // Start the session
       await api.sessions.start(response.session_id, prompt());
 
       props.onClose();
@@ -40,81 +39,226 @@ export function NewSessionModal(props: NewSessionModalProps) {
     }
   }
 
+  function handleBackdropClick(e: MouseEvent) {
+    if (e.target === e.currentTarget) {
+      props.onClose();
+    }
+  }
+
   return (
     <Show when={props.isOpen}>
-      <div class="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
-        {/* Backdrop */}
+      {/* Backdrop - uses fixed positioning with explicit dimensions */}
+      <div
+        class="overlay-backdrop animate-fade-in"
+        style={{
+          position: "fixed",
+          top: "0",
+          left: "0",
+          right: "0",
+          bottom: "0",
+          "z-index": "50",
+          display: "flex",
+          "align-items": "center",
+          "justify-content": "center",
+          padding: "16px",
+        }}
+        onClick={handleBackdropClick}
+      >
+        {/* Modal - explicit width that doesn't depend on flex */}
         <div
-          class="absolute inset-0 bg-black/50"
-          onClick={props.onClose}
-        />
-
-        {/* Modal */}
-        <div class="relative bg-bg-surface rounded-t-2xl sm:rounded-2xl w-full max-w-lg safe-bottom">
-          <div class="p-4 border-b border-bg-elevated">
-            <h2 class="text-lg font-semibold">New Session</h2>
+          class="bg-bg-surface rounded-2xl animate-slide-up overflow-hidden"
+          style={{
+            width: "min(448px, calc(100vw - 32px))",
+            "max-height": "calc(100vh - 32px)",
+            "max-height": "calc(100dvh - 32px)",
+          }}
+        >
+          {/* Header */}
+          <div
+            class="border-b border-bg-overlay"
+            style={{
+              display: "flex",
+              "align-items": "center",
+              "justify-content": "space-between",
+              padding: "16px 20px",
+            }}
+          >
+            <h2 style={{ "font-size": "20px", "font-weight": "600", margin: "0" }}>
+              New Session
+            </h2>
+            <button
+              onClick={props.onClose}
+              class="bg-bg-elevated text-text-muted hover:text-text-primary transition-colors"
+              style={{
+                width: "32px",
+                height: "32px",
+                display: "flex",
+                "align-items": "center",
+                "justify-content": "center",
+                "border-radius": "50%",
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
           </div>
 
-          <form onSubmit={handleSubmit} class="p-4 space-y-4">
-            <Show when={error()}>
-              <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-red-400 text-sm">
-                {error()}
+          {/* Form */}
+          <form
+            onSubmit={handleSubmit}
+            class="scrollable"
+            style={{
+              padding: "20px",
+              "max-height": "calc(100vh - 100px)",
+              "max-height": "calc(100dvh - 100px)",
+            }}
+          >
+            <div style={{ display: "flex", "flex-direction": "column", gap: "20px" }}>
+              <Show when={error()}>
+                <div
+                  class="bg-status-error/10 text-status-error"
+                  style={{
+                    padding: "12px 16px",
+                    "border-radius": "12px",
+                    border: "1px solid rgba(255, 69, 58, 0.2)",
+                    "font-size": "14px",
+                  }}
+                >
+                  {error()}
+                </div>
+              </Show>
+
+              {/* Project Path */}
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    "font-size": "14px",
+                    "font-weight": "500",
+                    "margin-bottom": "8px",
+                    color: "var(--color-text-secondary)",
+                  }}
+                >
+                  Project Path
+                </label>
+                <input
+                  type="text"
+                  value={projectPath()}
+                  onInput={(e) => setProjectPath(e.currentTarget.value)}
+                  placeholder="/path/to/your/project"
+                  required
+                  class="text-text-primary placeholder:text-text-muted"
+                  style={{
+                    width: "100%",
+                    "box-sizing": "border-box",
+                    padding: "12px 16px",
+                    "font-size": "16px",
+                    "border-radius": "12px",
+                    border: "1px solid var(--color-bg-overlay)",
+                    background: "var(--color-bg-base)",
+                    outline: "none",
+                  }}
+                />
               </div>
-            </Show>
 
-            <div>
-              <label class="block text-sm font-medium mb-1">Project Path</label>
-              <input
-                type="text"
-                value={projectPath()}
-                onInput={(e) => setProjectPath(e.currentTarget.value)}
-                placeholder="/Users/moose/projects/my-project"
-                class="w-full bg-bg-base border border-bg-overlay rounded-lg px-3 py-2 text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent"
-                required
-              />
-            </div>
+              {/* Initial Prompt */}
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    "font-size": "14px",
+                    "font-weight": "500",
+                    "margin-bottom": "8px",
+                    color: "var(--color-text-secondary)",
+                  }}
+                >
+                  Initial Prompt
+                </label>
+                <textarea
+                  value={prompt()}
+                  onInput={(e) => setPrompt(e.currentTarget.value)}
+                  placeholder="What would you like Claude to help with?"
+                  rows={4}
+                  required
+                  class="text-text-primary placeholder:text-text-muted"
+                  style={{
+                    width: "100%",
+                    "box-sizing": "border-box",
+                    padding: "12px 16px",
+                    "font-size": "16px",
+                    "border-radius": "12px",
+                    border: "1px solid var(--color-bg-overlay)",
+                    background: "var(--color-bg-base)",
+                    outline: "none",
+                    resize: "none",
+                    "font-family": "inherit",
+                  }}
+                />
+              </div>
 
-            <div>
-              <label class="block text-sm font-medium mb-1">Initial Prompt</label>
-              <textarea
-                value={prompt()}
-                onInput={(e) => setPrompt(e.currentTarget.value)}
-                placeholder="What would you like Claude to help with?"
-                rows={3}
-                class="w-full bg-bg-base border border-bg-overlay rounded-lg px-3 py-2 text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent resize-none"
-                required
-              />
-            </div>
-
-            <div class="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="terminal-mode"
-                checked={terminalMode()}
-                onChange={(e) => setTerminalMode(e.currentTarget.checked)}
-                class="w-4 h-4 rounded border-bg-overlay bg-bg-base text-accent focus:ring-accent"
-              />
-              <label for="terminal-mode" class="text-sm">
-                Terminal mode (full PTY access)
+              {/* Terminal Mode Toggle */}
+              <label
+                class="bg-bg-base"
+                style={{
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "12px",
+                  padding: "16px",
+                  "border-radius": "12px",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={terminalMode()}
+                  onChange={(e) => setTerminalMode(e.currentTarget.checked)}
+                  style={{
+                    width: "20px",
+                    height: "20px",
+                    "accent-color": "var(--color-accent)",
+                    cursor: "pointer",
+                  }}
+                />
+                <div style={{ flex: "1", "min-width": "0" }}>
+                  <span
+                    class="text-text-primary"
+                    style={{ display: "block", "font-size": "14px", "font-weight": "500" }}
+                  >
+                    Terminal Mode
+                  </span>
+                  <span
+                    class="text-text-muted"
+                    style={{ display: "block", "font-size": "12px", "margin-top": "2px" }}
+                  >
+                    Full PTY access - uses Claude Max subscription
+                  </span>
+                </div>
               </label>
-            </div>
 
-            <div class="flex gap-3 pt-2">
-              <Button
-                type="button"
-                variant="secondary"
-                class="flex-1"
-                onClick={props.onClose}
+              {/* Actions */}
+              <div
+                class="safe-bottom"
+                style={{ display: "flex", gap: "12px", "padding-top": "8px" }}
               >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                class="flex-1"
-                disabled={loading()}
-              >
-                {loading() ? 'Creating...' : 'Create'}
-              </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  style={{ flex: "1" }}
+                  onClick={props.onClose}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  style={{ flex: "1" }}
+                  disabled={loading()}
+                >
+                  {loading() ? 'Creating...' : 'Create Session'}
+                </Button>
+              </div>
             </div>
           </form>
         </div>

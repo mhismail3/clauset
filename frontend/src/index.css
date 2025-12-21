@@ -88,18 +88,27 @@ body {
   /* Prevent overscroll bounce */
   overscroll-behavior: none;
   overscroll-behavior-y: none;
-  /* Fixed height - app-like */
+  /* Full height - app-like */
   height: 100%;
-  height: -webkit-fill-available;
-  min-height: 100vh;
-  min-height: -webkit-fill-available;
+  height: 100dvh;
+  min-height: 100%;
+  min-height: 100dvh;
   /* Prevent selection on UI elements */
   -webkit-user-select: none;
   user-select: none;
-  /* Prevent scroll when keyboard opens */
-  position: fixed;
-  width: 100%;
+  /* Prevent body scroll - overflow hidden works better cross-browser than fixed */
   overflow: hidden;
+}
+
+/* Mobile-specific: prevent scroll when keyboard opens */
+@supports (-webkit-touch-callout: none) {
+  body {
+    /* iOS-specific: fixed positioning to prevent keyboard scroll */
+    position: fixed;
+    width: 100%;
+    left: 0;
+    right: 0;
+  }
 }
 
 #root {

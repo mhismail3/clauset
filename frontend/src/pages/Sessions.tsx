@@ -180,17 +180,37 @@ export default function Sessions() {
       <Show when={actionMenuSession()}>
         {(session) => (
           <div
-            class="fixed inset-0 z-50 overlay-backdrop animate-fade-in"
+            class="overlay-backdrop animate-fade-in"
+            style={{
+              position: "fixed",
+              top: "0",
+              left: "0",
+              right: "0",
+              bottom: "0",
+              "z-index": "50",
+              display: "flex",
+              "align-items": "flex-end",
+              "justify-content": "center",
+              padding: "0 16px 16px 16px",
+            }}
             onClick={closeActionMenu}
           >
-            <div class="absolute inset-x-0 bottom-0 sheet-container safe-bottom animate-slide-up">
+            <div
+              class="bg-bg-surface animate-slide-up safe-bottom"
+              style={{
+                width: "min(400px, 100%)",
+                "border-radius": "20px",
+                overflow: "hidden",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
               {/* Sheet handle */}
               <div class="sheet-handle" />
 
               {/* Session info */}
-              <div class="px-5 pb-4 text-center">
+              <div style={{ padding: "0 20px 16px", "text-align": "center" }}>
                 <p class="text-headline">{session().preview || 'Session'}</p>
-                <p class="text-caption mt-1">
+                <p class="text-caption" style={{ "margin-top": "4px" }}>
                   {session().project_path.split('/').pop()}
                 </p>
               </div>
@@ -198,7 +218,7 @@ export default function Sessions() {
               <div class="divider" />
 
               <Show when={showRenameInput()}>
-                <div class="p-5" onClick={(e) => e.stopPropagation()}>
+                <div style={{ padding: "20px" }}>
                   <input
                     type="text"
                     value={renameValue()}
@@ -207,20 +227,30 @@ export default function Sessions() {
                       if (e.key === 'Enter') handleRename(session(), renameValue());
                       if (e.key === 'Escape') setShowRenameInput(false);
                     }}
-                    class="w-full px-4 py-3 bg-bg-base border border-bg-overlay rounded-xl text-text-primary text-body focus-ring"
+                    class="text-text-primary placeholder:text-text-muted"
                     placeholder="New name..."
                     autofocus
+                    style={{
+                      width: "100%",
+                      "box-sizing": "border-box",
+                      padding: "12px 16px",
+                      "font-size": "16px",
+                      "border-radius": "12px",
+                      border: "1px solid var(--color-bg-overlay)",
+                      background: "var(--color-bg-base)",
+                      outline: "none",
+                    }}
                   />
-                  <div class="flex gap-3 mt-4">
+                  <div style={{ display: "flex", gap: "12px", "margin-top": "16px" }}>
                     <Button
                       variant="secondary"
-                      class="flex-1"
+                      style={{ flex: "1" }}
                       onClick={() => setShowRenameInput(false)}
                     >
                       Cancel
                     </Button>
                     <Button
-                      class="flex-1"
+                      style={{ flex: "1" }}
                       onClick={() => handleRename(session(), renameValue())}
                     >
                       Save
@@ -230,33 +260,68 @@ export default function Sessions() {
               </Show>
 
               <Show when={!showRenameInput()}>
-                <div class="py-2" onClick={(e) => e.stopPropagation()}>
+                <div style={{ padding: "8px 0" }}>
                   <button
                     onClick={() => setShowRenameInput(true)}
-                    class="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-bg-elevated transition-colors touch-target"
+                    class="text-text-primary hover:bg-bg-elevated transition-colors"
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      "align-items": "center",
+                      gap: "16px",
+                      padding: "16px 20px",
+                      "text-align": "left",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      "font-size": "16px",
+                    }}
                   >
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-text-secondary">
                       <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
                     </svg>
-                    <span class="text-body">Rename</span>
+                    <span>Rename</span>
                   </button>
 
                   <button
                     onClick={() => handleDelete(session())}
-                    class="w-full flex items-center gap-4 px-5 py-4 text-left text-status-error hover:bg-status-error/10 transition-colors touch-target"
+                    class="text-status-error hover:bg-status-error/10 transition-colors"
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      "align-items": "center",
+                      gap: "16px",
+                      padding: "16px 20px",
+                      "text-align": "left",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      "font-size": "16px",
+                    }}
                   >
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="3 6 5 6 21 6" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>
-                    <span class="text-body">Delete</span>
+                    <span>Delete</span>
                   </button>
 
-                  <div class="divider my-2" />
+                  <div class="divider" style={{ margin: "8px 0" }} />
 
                   <button
                     onClick={closeActionMenu}
-                    class="w-full flex items-center justify-center py-4 text-text-muted text-body touch-target"
+                    class="text-text-muted hover:bg-bg-elevated transition-colors"
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      "align-items": "center",
+                      "justify-content": "center",
+                      padding: "16px 20px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      "font-size": "16px",
+                    }}
                   >
                     Cancel
                   </button>
