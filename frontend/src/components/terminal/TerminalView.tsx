@@ -73,10 +73,23 @@ export function TerminalView(props: TerminalViewProps) {
     if (!terminal || !fitAddon || !containerRef) return;
 
     try {
+      // Ensure container has dimensions before fitting
+      const rect = containerRef.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        // Container not yet sized, retry
+        setTimeout(doFitAndResize, 50);
+        return;
+      }
+
       fitAddon.fit();
       const newDims = { cols: terminal.cols, rows: terminal.rows };
-      setDimensions(newDims);
-      props.onResize(newDims.cols, newDims.rows);
+
+      // Only send resize if dimensions actually changed
+      const current = dimensions();
+      if (newDims.cols !== current.cols || newDims.rows !== current.rows) {
+        setDimensions(newDims);
+        props.onResize(newDims.cols, newDims.rows);
+      }
     } catch (e) {
       console.warn('Terminal fit failed:', e);
     }
@@ -172,8 +185,12 @@ export function TerminalView(props: TerminalViewProps) {
   // Re-fit when connection state changes to send initial size
   createEffect(() => {
     if (props.isConnected) {
-      // Small delay to ensure connection is ready
+      // Send resize multiple times to ensure backend receives it
+      // This handles race conditions where connection might not be fully ready
+      doFitAndResize();
       setTimeout(doFitAndResize, 100);
+      setTimeout(doFitAndResize, 300);
+      setTimeout(doFitAndResize, 500);
     }
   });
 
@@ -191,13 +208,13 @@ export function TerminalView(props: TerminalViewProps) {
 
   return (
     <div class="flex-1 flex flex-col" style={{ background: '#0d0d0d' }}>
-      {/* Terminal Container */}
+      {/* Terminal Container - NO padding here, xterm needs full width for accurate fit */}
       <div
         ref={containerRef}
         class="flex-1 overflow-hidden"
         style={{
           "min-height": "0",
-          padding: "8px 8px 0 8px",
+          // No padding - let xterm use full container width for accurate column calculation
         }}
       />
 

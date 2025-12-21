@@ -524,15 +524,23 @@ select:focus {
   border-radius: 1px;
 }
 
-/* Terminal container override */
+/* Terminal container override - ensure xterm uses full width */
 .xterm {
-  padding: 0;
+  padding: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .xterm-viewport {
   overflow-y: auto !important;
+  width: 100% !important;
 }
 
 .xterm-screen {
   width: 100% !important;
+}
+
+.xterm-rows {
+  /* Ensure rows don't overflow */
+  overflow: hidden !important;
 }
