@@ -25,7 +25,6 @@ export default function Sessions() {
 
   onMount(() => {
     fetchSessions();
-    // Refresh every 30 seconds
     const interval = setInterval(fetchSessions, 30000);
     return () => clearInterval(interval);
   });
@@ -71,43 +70,83 @@ export default function Sessions() {
   return (
     <div class="flex flex-col h-full">
       {/* Header */}
-      <header class="flex-none glass border-b border-bg-overlay/50 safe-top">
-        <div class="flex items-center justify-between px-5 py-4">
+      <header class="flex-none glass safe-top">
+        <div
+          style={{
+            display: 'flex',
+            "align-items": 'center',
+            "justify-content": 'space-between',
+            padding: '16px 20px',
+          }}
+        >
           <div>
-            <h1 class="text-title">Sessions</h1>
-            <p class="text-caption mt-0.5">
-              <Show when={activeCount() > 0} fallback="No active sessions">
+            <h1 class="text-brand" style={{ color: 'var(--color-accent)', "font-size": '22px' }}>
+              Clauset
+            </h1>
+            <p
+              class="text-mono"
+              style={{
+                "font-size": '12px',
+                color: 'var(--color-text-muted)',
+                "margin-top": '2px',
+              }}
+            >
+              <Show when={activeCount() > 0} fallback="no active sessions">
                 {activeCount()} active
               </Show>
             </p>
           </div>
           <Button onClick={() => setShowNewSession(true)} size="sm">
-            New
+            + new
           </Button>
         </div>
       </header>
 
       {/* Content */}
       <main class="flex-1 scrollable">
-        <div class="p-4 pb-8">
+        <div style={{ padding: '16px', "padding-bottom": '32px' }}>
           <Show when={loading() && sessions().length === 0}>
-            <div class="flex justify-center py-16">
+            <div style={{ display: 'flex', "justify-content": 'center', padding: '64px 0' }}>
               <Spinner size="lg" />
             </div>
           </Show>
 
           <Show when={error()}>
-            <div class="bg-status-error/10 border border-status-error/20 rounded-xl p-4 text-status-error mb-4">
+            <div
+              style={{
+                padding: '14px 16px',
+                background: 'var(--color-accent-muted)',
+                border: '1px solid var(--color-accent)',
+                "border-radius": '12px',
+                color: 'var(--color-accent)',
+                "font-size": '14px',
+                "margin-bottom": '16px',
+              }}
+            >
               {error()}
             </div>
           </Show>
 
           <Show when={!loading() && sessions().length === 0 && !error()}>
-            <div class="text-center py-16">
-              <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-bg-surface flex items-center justify-center">
-                <span class="text-3xl">💬</span>
+            <div style={{ "text-align": 'center', padding: '64px 0' }}>
+              <div
+                style={{
+                  width: '64px',
+                  height: '64px',
+                  margin: '0 auto 16px',
+                  "border-radius": '50%',
+                  background: 'var(--color-bg-surface)',
+                  border: '1px solid var(--color-bg-overlay)',
+                  display: 'flex',
+                  "align-items": 'center',
+                  "justify-content": 'center',
+                }}
+              >
+                <span class="text-mono" style={{ color: 'var(--color-accent)', "font-size": '24px' }}>&gt;_</span>
               </div>
-              <p class="text-text-secondary mb-4">No sessions yet</p>
+              <p style={{ color: 'var(--color-text-secondary)', "margin-bottom": '16px' }}>
+                No sessions yet
+              </p>
               <Button onClick={() => setShowNewSession(true)}>
                 Start your first session
               </Button>
@@ -115,20 +154,36 @@ export default function Sessions() {
           </Show>
 
           {/* Session Cards */}
-          <div class="space-y-3">
+          <div style={{ display: 'flex', "flex-direction": 'column', gap: '12px' }}>
             <For each={sessions()}>
               {(session) => (
                 <div
-                  class="bg-bg-surface rounded-2xl overflow-hidden card-pressable animate-fade-in"
+                  class="card-retro card-pressable animate-fade-in"
+                  style={{ overflow: 'hidden' }}
                 >
                   <A
                     href={`/session/${session.id}`}
-                    class="block p-4"
+                    style={{
+                      display: 'block',
+                      padding: '16px',
+                      "text-decoration": 'none',
+                      color: 'inherit',
+                    }}
                   >
                     {/* Top row: Project name + Badge + Menu */}
-                    <div class="flex items-center gap-3 mb-2">
-                      <div class="flex-1 min-w-0 flex items-center gap-2">
-                        <span class="text-headline truncate">
+                    <div style={{ display: 'flex', "align-items": 'center', gap: '12px', "margin-bottom": '8px' }}>
+                      <div style={{ flex: '1', "min-width": '0', display: 'flex', "align-items": 'center', gap: '8px' }}>
+                        <span
+                          class="text-mono"
+                          style={{
+                            "font-size": '14px',
+                            "font-weight": '600',
+                            color: 'var(--color-text-primary)',
+                            overflow: 'hidden',
+                            "text-overflow": 'ellipsis',
+                            "white-space": 'nowrap',
+                          }}
+                        >
                           {session.project_path.split('/').pop() || 'Unknown'}
                         </span>
                         <Badge variant={getStatusVariant(session.status)}>
@@ -137,9 +192,20 @@ export default function Sessions() {
                       </div>
                       <button
                         onClick={(e) => openActionMenu(e, session)}
-                        class="w-8 h-8 flex items-center justify-center text-text-muted rounded-full hover:bg-bg-overlay transition-colors"
+                        style={{
+                          width: '32px',
+                          height: '32px',
+                          display: 'flex',
+                          "align-items": 'center',
+                          "justify-content": 'center',
+                          color: 'var(--color-text-muted)',
+                          background: 'none',
+                          border: 'none',
+                          "border-radius": '50%',
+                          cursor: 'pointer',
+                        }}
                       >
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                        <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
                           <circle cx="4" cy="10" r="1.5" />
                           <circle cx="10" cy="10" r="1.5" />
                           <circle cx="16" cy="10" r="1.5" />
@@ -148,23 +214,43 @@ export default function Sessions() {
                     </div>
 
                     {/* Preview text */}
-                    <p class="text-body text-text-secondary line-clamp-2 mb-3">
+                    <p
+                      style={{
+                        "font-size": '14px',
+                        color: 'var(--color-text-secondary)',
+                        "margin-bottom": '12px',
+                        display: '-webkit-box',
+                        "-webkit-line-clamp": '2',
+                        "-webkit-box-orient": 'vertical',
+                        overflow: 'hidden',
+                        "line-height": '1.4',
+                      }}
+                    >
                       {session.preview || 'No preview available'}
                     </p>
 
                     {/* Bottom row: Meta info */}
-                    <div class="flex items-center gap-3 text-caption text-text-muted">
-                      <span class="flex items-center gap-1">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <div
+                      class="text-mono"
+                      style={{
+                        display: 'flex',
+                        "align-items": 'center',
+                        gap: '12px',
+                        "font-size": '11px',
+                        color: 'var(--color-text-muted)',
+                      }}
+                    >
+                      <span style={{ display: 'flex', "align-items": 'center', gap: '4px' }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                           <circle cx="12" cy="12" r="10" />
                           <polyline points="12 6 12 12 16 14" />
                         </svg>
                         {formatRelativeTime(session.last_activity_at)}
                       </span>
-                      <span class="text-text-muted/50">•</span>
+                      <span style={{ color: 'var(--color-bg-overlay)' }}>·</span>
                       <span>{session.model}</span>
                       <Show when={session.total_cost_usd > 0}>
-                        <span class="text-text-muted/50">•</span>
+                        <span style={{ color: 'var(--color-bg-overlay)' }}>·</span>
                         <span>${session.total_cost_usd.toFixed(4)}</span>
                       </Show>
                     </div>
@@ -196,21 +282,22 @@ export default function Sessions() {
             onClick={closeActionMenu}
           >
             <div
-              class="bg-bg-surface animate-slide-up safe-bottom"
+              class="animate-slide-up safe-bottom"
               style={{
                 width: "min(400px, 100%)",
-                "border-radius": "20px",
+                background: 'var(--color-bg-surface)',
+                "border-radius": "18px",
+                border: '1px solid var(--color-bg-overlay)',
                 overflow: "hidden",
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Sheet handle */}
               <div class="sheet-handle" />
 
               {/* Session info */}
               <div style={{ padding: "0 20px 16px", "text-align": "center" }}>
                 <p class="text-headline">{session().preview || 'Session'}</p>
-                <p class="text-caption" style={{ "margin-top": "4px" }}>
+                <p class="text-mono text-caption" style={{ "margin-top": "4px" }}>
                   {session().project_path.split('/').pop()}
                 </p>
               </div>
@@ -227,19 +314,10 @@ export default function Sessions() {
                       if (e.key === 'Enter') handleRename(session(), renameValue());
                       if (e.key === 'Escape') setShowRenameInput(false);
                     }}
-                    class="text-text-primary placeholder:text-text-muted"
+                    class="input-retro"
                     placeholder="New name..."
                     autofocus
-                    style={{
-                      width: "100%",
-                      "box-sizing": "border-box",
-                      padding: "12px 16px",
-                      "font-size": "16px",
-                      "border-radius": "12px",
-                      border: "1px solid var(--color-bg-overlay)",
-                      background: "var(--color-bg-base)",
-                      outline: "none",
-                    }}
+                    style={{ width: '100%', "box-sizing": 'border-box' }}
                   />
                   <div style={{ display: "flex", gap: "12px", "margin-top": "16px" }}>
                     <Button
@@ -263,21 +341,22 @@ export default function Sessions() {
                 <div style={{ padding: "8px 0" }}>
                   <button
                     onClick={() => setShowRenameInput(true)}
-                    class="text-text-primary hover:bg-bg-elevated transition-colors"
+                    class="hover:bg-bg-elevated transition-colors"
                     style={{
                       width: "100%",
                       display: "flex",
                       "align-items": "center",
                       gap: "16px",
-                      padding: "16px 20px",
+                      padding: "14px 20px",
                       "text-align": "left",
                       background: "none",
                       border: "none",
                       cursor: "pointer",
-                      "font-size": "16px",
+                      "font-size": "15px",
+                      color: 'var(--color-text-primary)',
                     }}
                   >
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-text-secondary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style={{ color: 'var(--color-text-tertiary)' }}>
                       <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
                     </svg>
                     <span>Rename</span>
@@ -285,21 +364,22 @@ export default function Sessions() {
 
                   <button
                     onClick={() => handleDelete(session())}
-                    class="text-status-error hover:bg-status-error/10 transition-colors"
+                    class="hover:bg-accent-muted transition-colors"
                     style={{
                       width: "100%",
                       display: "flex",
                       "align-items": "center",
                       gap: "16px",
-                      padding: "16px 20px",
+                      padding: "14px 20px",
                       "text-align": "left",
                       background: "none",
                       border: "none",
                       cursor: "pointer",
-                      "font-size": "16px",
+                      "font-size": "15px",
+                      color: 'var(--color-accent)',
                     }}
                   >
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="3 6 5 6 21 6" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>
@@ -310,17 +390,18 @@ export default function Sessions() {
 
                   <button
                     onClick={closeActionMenu}
-                    class="text-text-muted hover:bg-bg-elevated transition-colors"
+                    class="hover:bg-bg-elevated transition-colors"
                     style={{
                       width: "100%",
                       display: "flex",
                       "align-items": "center",
                       "justify-content": "center",
-                      padding: "16px 20px",
+                      padding: "14px 20px",
                       background: "none",
                       border: "none",
                       cursor: "pointer",
-                      "font-size": "16px",
+                      "font-size": "15px",
+                      color: 'var(--color-text-muted)',
                     }}
                   >
                     Cancel

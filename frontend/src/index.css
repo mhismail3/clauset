@@ -1,41 +1,56 @@
+/* Fonts - JetBrains Mono for that modern minimal look */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
 @import "tailwindcss";
 
 @theme {
-  /* Background layers - refined dark palette */
-  --color-bg-base: #000000;
-  --color-bg-surface: #1c1c1e;
-  --color-bg-elevated: #2c2c2e;
-  --color-bg-overlay: #3a3a3c;
+  /* Background layers - warm dark palette inspired by retro guide */
+  --color-bg-base: #0d0d0d;
+  --color-bg-surface: #171615;
+  --color-bg-elevated: #1f1d1b;
+  --color-bg-overlay: #2a2725;
 
-  /* Text - iOS-like hierarchy */
-  --color-text-primary: #ffffff;
-  --color-text-secondary: #ebebf5;
-  --color-text-tertiary: #ababab;
-  --color-text-muted: #636366;
+  /* Text - warm tones */
+  --color-text-primary: #f0ebe3;
+  --color-text-secondary: #d4cfc7;
+  --color-text-tertiary: #9a9590;
+  --color-text-muted: #5c5855;
 
-  /* Accent (Claude orange) */
-  --color-accent: #da7756;
-  --color-accent-hover: #e69577;
-  --color-accent-active: #c46a4c;
-  --color-accent-muted: oklch(from #da7756 l c h / 15%);
+  /* Accent - clay orange (from retro guide, similar to Claude) */
+  --color-accent: #c45b37;
+  --color-accent-hover: #d4704c;
+  --color-accent-active: #a84d2e;
+  --color-accent-muted: rgba(196, 91, 55, 0.15);
+
+  /* Secondary accent - teal/aero (from retro guide) */
+  --color-secondary: #2c8f7a;
+  --color-secondary-hover: #3aa58d;
 
   /* Status colors */
-  --color-status-active: #30d158;
-  --color-status-idle: #ffd60a;
-  --color-status-error: #ff453a;
-  --color-status-completed: #636366;
+  --color-status-active: #2c8f7a;
+  --color-status-idle: #d4a644;
+  --color-status-error: #c45b37;
+  --color-status-completed: #5c5855;
 
   /* Semantic colors */
-  --color-destructive: #ff453a;
-  --color-success: #30d158;
+  --color-destructive: #c45b37;
+  --color-success: #2c8f7a;
 
   /* Code */
-  --color-code-bg: #1c1c1e;
-  --color-code-border: #3a3a3c;
+  --color-code-bg: #171615;
+  --color-code-border: #2a2725;
 
   /* Fonts */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
-  --font-mono: "SF Mono", ui-monospace, Menlo, Monaco, "Cascadia Mono", monospace;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Retro shadows */
+  --shadow-retro: 3px 3px 0px rgba(0, 0, 0, 0.4);
+  --shadow-retro-sm: 2px 2px 0px rgba(0, 0, 0, 0.3);
+  --shadow-glow: 0 0 20px rgba(196, 91, 55, 0.15);
+
+  /* Border */
+  --border-retro: 1.5px solid var(--color-bg-overlay);
 
   /* Spacing scale */
   --spacing-xs: 4px;
@@ -45,11 +60,11 @@
   --spacing-xl: 20px;
   --spacing-2xl: 24px;
 
-  /* Border radius */
+  /* Border radius - slightly softer */
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --radius-xl: 20px;
+  --radius-xl: 18px;
   --radius-full: 9999px;
 }
 
@@ -59,19 +74,14 @@
 
 :root {
   color-scheme: dark;
-  /* Prevent iOS text size adjustment */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
 
 html {
-  /* Prevent tap highlight */
   -webkit-tap-highlight-color: transparent;
-  /* Prevent callout on long press */
   -webkit-touch-callout: none;
-  /* Smooth scrolling */
   scroll-behavior: smooth;
-  /* Fixed height for app-like behavior */
   height: 100%;
   height: -webkit-fill-available;
 }
@@ -85,25 +95,19 @@ body {
   letter-spacing: -0.01em;
   margin: 0;
   padding: 0;
-  /* Prevent overscroll bounce */
   overscroll-behavior: none;
   overscroll-behavior-y: none;
-  /* Full height - app-like */
   height: 100%;
   height: 100dvh;
   min-height: 100%;
   min-height: 100dvh;
-  /* Prevent selection on UI elements */
   -webkit-user-select: none;
   user-select: none;
-  /* Prevent body scroll - overflow hidden works better cross-browser than fixed */
   overflow: hidden;
 }
 
-/* Mobile-specific: prevent scroll when keyboard opens */
 @supports (-webkit-touch-callout: none) {
   body {
-    /* iOS-specific: fixed positioning to prevent keyboard scroll */
     position: fixed;
     width: 100%;
     left: 0;
@@ -118,7 +122,6 @@ body {
   overflow: hidden;
 }
 
-/* Allow text selection in specific areas */
 .selectable,
 input,
 textarea,
@@ -128,7 +131,7 @@ textarea,
 }
 
 /* ============================================
-   SAFE AREA UTILITIES
+   SAFE AREA UTILITIES - Enhanced for rounded screens
    ============================================ */
 
 .safe-top {
@@ -136,32 +139,36 @@ textarea,
 }
 
 .safe-bottom {
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 20px);
+}
+
+.safe-bottom-extra {
+  padding-bottom: calc(max(env(safe-area-inset-bottom, 0px), 8px) + 12px);
 }
 
 .safe-left {
-  padding-left: env(safe-area-inset-left, 0px);
+  padding-left: max(env(safe-area-inset-left, 0px), 8px);
 }
 
 .safe-right {
-  padding-right: env(safe-area-inset-right, 0px);
+  padding-right: max(env(safe-area-inset-right, 0px), 8px);
 }
 
 .safe-x {
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
+  padding-left: max(env(safe-area-inset-left, 0px), 8px);
+  padding-right: max(env(safe-area-inset-right, 0px), 8px);
 }
 
 .safe-y {
   padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 20px);
 }
 
 .safe-all {
   padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 20px);
+  padding-left: max(env(safe-area-inset-left, 0px), 8px);
+  padding-right: max(env(safe-area-inset-right, 0px), 8px);
 }
 
 /* ============================================
@@ -182,7 +189,6 @@ textarea,
   overscroll-behavior-x: contain;
 }
 
-/* Hide scrollbars but keep functionality */
 .scrollable::-webkit-scrollbar,
 .scrollable-x::-webkit-scrollbar {
   display: none;
@@ -195,25 +201,33 @@ textarea,
 }
 
 /* ============================================
-   TYPOGRAPHY
+   TYPOGRAPHY - Modern minimal style
    ============================================ */
 
+.text-brand {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .text-title {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.2;
 }
 
 .text-headline {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.3;
 }
 
 .text-body {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 400;
   line-height: 1.5;
 }
@@ -226,41 +240,84 @@ textarea,
 }
 
 .text-label {
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
   font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.08em;
   color: var(--color-text-muted);
+}
+
+.text-mono {
+  font-family: var(--font-mono);
 }
 
 /* ============================================
    TOUCH INTERACTIONS
    ============================================ */
 
-/* Minimum touch target size (44pt iOS guideline) */
 .touch-target {
   min-height: 44px;
   min-width: 44px;
 }
 
-/* Active state feedback */
 .pressable {
   transition: transform 0.1s ease, opacity 0.1s ease;
 }
 
 .pressable:active {
   transform: scale(0.97);
-  opacity: 0.7;
+  opacity: 0.8;
 }
 
-/* Subtle press effect for cards */
 .card-pressable {
-  transition: background-color 0.15s ease, transform 0.1s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .card-pressable:active {
-  background-color: var(--color-bg-overlay);
-  transform: scale(0.98);
+  transform: translate(2px, 2px);
+  box-shadow: none !important;
+}
+
+/* ============================================
+   RETRO-MODERN COMPONENTS
+   ============================================ */
+
+/* Card with retro shadow */
+.card-retro {
+  background-color: var(--color-bg-surface);
+  border: var(--border-retro);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-retro);
+}
+
+/* Subtle bordered card */
+.card-bordered {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-bg-overlay);
+  border-radius: var(--radius-lg);
+}
+
+/* Accent glow effect */
+.glow-accent {
+  box-shadow: var(--shadow-glow);
+}
+
+/* Keyboard key style */
+.key-button {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-bg-overlay);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-retro-sm);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.key-button:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
 }
 
 /* ============================================
@@ -268,18 +325,14 @@ textarea,
    ============================================ */
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes slideUp {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(16px);
   }
   to {
     opacity: 1;
@@ -290,7 +343,7 @@ textarea,
 @keyframes slideDown {
   from {
     opacity: 0;
-    transform: translateY(-10px);
+    transform: translateY(-8px);
   }
   to {
     opacity: 1;
@@ -301,7 +354,7 @@ textarea,
 @keyframes scaleIn {
   from {
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.96);
   }
   to {
     opacity: 1;
@@ -310,12 +363,13 @@ textarea,
 }
 
 @keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
 }
 
 .animate-fade-in {
@@ -323,7 +377,7 @@ textarea,
 }
 
 .animate-slide-up {
-  animation: slideUp 0.3s ease-out;
+  animation: slideUp 0.25s ease-out;
 }
 
 .animate-slide-down {
@@ -338,11 +392,14 @@ textarea,
   animation: pulse 2s ease-in-out infinite;
 }
 
+.animate-blink {
+  animation: blink 1s step-end infinite;
+}
+
 /* ============================================
    FORM ELEMENTS
    ============================================ */
 
-/* Prevent zoom on input focus (iOS) */
 input,
 textarea,
 select {
@@ -355,9 +412,29 @@ select:focus {
   outline: none;
 }
 
-/* Custom focus ring */
 .focus-ring:focus {
-  box-shadow: 0 0 0 3px var(--color-accent-muted);
+  box-shadow: 0 0 0 2px var(--color-accent-muted);
+}
+
+/* Input with retro style */
+.input-retro {
+  background-color: var(--color-bg-base);
+  border: var(--border-retro);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input-retro:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-muted);
+}
+
+.input-retro::placeholder {
+  color: var(--color-text-muted);
 }
 
 /* ============================================
@@ -365,24 +442,24 @@ select:focus {
    ============================================ */
 
 .overlay-backdrop {
-  background-color: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background-color: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .sheet-container {
   background-color: var(--color-bg-surface);
   border-top-left-radius: var(--radius-xl);
   border-top-right-radius: var(--radius-xl);
+  border-top: var(--border-retro);
 }
 
-/* Sheet handle indicator */
 .sheet-handle {
   width: 36px;
-  height: 5px;
+  height: 4px;
   background-color: var(--color-bg-overlay);
   border-radius: var(--radius-full);
-  margin: 8px auto 12px;
+  margin: 10px auto 14px;
 }
 
 /* ============================================
@@ -390,9 +467,10 @@ select:focus {
    ============================================ */
 
 .glass {
-  background-color: rgba(28, 28, 30, 0.8);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  background-color: rgba(23, 22, 21, 0.85);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border-bottom: 1px solid var(--color-bg-overlay);
 }
 
 .divider {
@@ -428,4 +506,33 @@ select:focus {
 
 .status-dot-inactive {
   background-color: var(--color-text-muted);
+}
+
+/* Accent underline */
+.accent-underline {
+  position: relative;
+}
+
+.accent-underline::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--color-accent);
+  border-radius: 1px;
+}
+
+/* Terminal container override */
+.xterm {
+  padding: 0;
+}
+
+.xterm-viewport {
+  overflow-y: auto !important;
+}
+
+.xterm-screen {
+  width: 100% !important;
 }

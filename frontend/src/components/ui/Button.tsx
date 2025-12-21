@@ -6,37 +6,82 @@ interface ButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export function Button(props: ButtonProps) {
-  const [local, rest] = splitProps(props, ['variant', 'size', 'class', 'children']);
+  const [local, rest] = splitProps(props, ['variant', 'size', 'class', 'children', 'style']);
 
   const variant = local.variant ?? 'primary';
   const size = local.size ?? 'md';
 
-  const baseClasses = `
-    inline-flex items-center justify-center
-    font-semibold
-    transition-all duration-150 ease-out
-    focus:outline-none
-    disabled:opacity-40 disabled:pointer-events-none
-    active:scale-95 active:opacity-80
-    touch-manipulation
-  `.replace(/\s+/g, ' ').trim();
-
-  const variantClasses = {
-    primary: 'bg-accent text-white rounded-xl shadow-sm shadow-accent/20',
-    secondary: 'bg-bg-elevated text-text-primary rounded-xl',
-    ghost: 'text-accent bg-transparent rounded-lg',
-    destructive: 'bg-destructive/10 text-destructive rounded-xl',
+  const baseStyles: JSX.CSSProperties = {
+    display: 'inline-flex',
+    "align-items": 'center',
+    "justify-content": 'center',
+    "font-family": 'var(--font-mono)',
+    "font-weight": '600',
+    "border-radius": '10px',
+    border: '1px solid var(--color-bg-overlay)',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    "white-space": 'nowrap',
   };
 
-  const sizeClasses = {
-    sm: 'h-9 px-4 text-sm min-w-[44px]',
-    md: 'h-11 px-5 text-base min-w-[44px]',
-    lg: 'h-13 px-6 text-lg min-w-[44px]',
+  const variantStyles: Record<string, JSX.CSSProperties> = {
+    primary: {
+      background: 'var(--color-accent)',
+      color: '#ffffff',
+      "box-shadow": 'var(--shadow-retro-sm)',
+      border: '1px solid var(--color-accent)',
+    },
+    secondary: {
+      background: 'var(--color-bg-elevated)',
+      color: 'var(--color-text-primary)',
+      "box-shadow": 'var(--shadow-retro-sm)',
+    },
+    ghost: {
+      background: 'transparent',
+      color: 'var(--color-accent)',
+      border: 'none',
+      "box-shadow": 'none',
+    },
+    destructive: {
+      background: 'var(--color-accent-muted)',
+      color: 'var(--color-accent)',
+      border: '1px solid var(--color-accent)',
+      "box-shadow": 'none',
+    },
+  };
+
+  const sizeStyles: Record<string, JSX.CSSProperties> = {
+    sm: {
+      height: '36px',
+      padding: '0 14px',
+      "font-size": '12px',
+      "min-width": '44px',
+    },
+    md: {
+      height: '42px',
+      padding: '0 18px',
+      "font-size": '13px',
+      "min-width": '44px',
+    },
+    lg: {
+      height: '48px',
+      padding: '0 24px',
+      "font-size": '14px',
+      "min-width": '44px',
+    },
+  };
+
+  const mergedStyle = {
+    ...baseStyles,
+    ...variantStyles[variant],
+    ...sizeStyles[size],
+    ...(typeof local.style === 'object' ? local.style : {}),
   };
 
   return (
     <button
-      class={`${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${local.class ?? ''}`}
+      class={`pressable ${local.class ?? ''}`}
+      style={mergedStyle}
       {...rest}
     >
       {local.children}

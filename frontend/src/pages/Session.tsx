@@ -209,44 +209,78 @@ export default function SessionPage() {
 
   const connectionStatus = () => {
     switch (wsState()) {
-      case 'connected': return { text: 'Connected', class: 'status-dot-active' };
-      case 'connecting': return { text: 'Connecting', class: 'status-dot-idle' };
-      case 'reconnecting': return { text: 'Reconnecting', class: 'status-dot-idle' };
-      default: return { text: 'Disconnected', class: 'status-dot-inactive' };
+      case 'connected': return { text: 'connected', class: 'status-dot-active' };
+      case 'connecting': return { text: 'connecting', class: 'status-dot-idle' };
+      case 'reconnecting': return { text: 'reconnecting', class: 'status-dot-idle' };
+      default: return { text: 'offline', class: 'status-dot-inactive' };
     }
   };
 
   return (
     <div class="flex flex-col h-full">
       {/* Header */}
-      <header class="flex-none glass border-b border-bg-overlay/50 safe-top">
-        <div class="flex items-center gap-3 px-4 py-3">
+      <header class="flex-none glass safe-top">
+        <div
+          style={{
+            display: 'flex',
+            "align-items": 'center',
+            gap: '12px',
+            padding: '12px 16px',
+          }}
+        >
           {/* Back button */}
           <button
             onClick={() => navigate('/')}
-            class="w-10 h-10 flex items-center justify-center -ml-2 text-accent rounded-full hover:bg-bg-elevated transition-colors touch-target"
+            class="pressable"
+            style={{
+              width: '40px',
+              height: '40px',
+              display: 'flex',
+              "align-items": 'center',
+              "justify-content": 'center',
+              "margin-left": '-8px',
+              color: 'var(--color-accent)',
+              background: 'none',
+              border: 'none',
+              "border-radius": '50%',
+              cursor: 'pointer',
+            }}
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <path d="M15 18l-6-6 6-6" />
             </svg>
           </button>
 
-          {/* Session info */}
-          <div class="flex-1 min-w-0">
+          {/* Brand + Session info */}
+          <div style={{ flex: '1', "min-width": '0' }}>
             <Show when={session()} fallback={<Spinner size="sm" />}>
               {(s) => (
                 <>
-                  <div class="flex items-center gap-2">
-                    <span class="font-semibold truncate">
-                      {s().project_path.split('/').pop()}
+                  <div style={{ display: 'flex', "align-items": 'center', gap: '8px' }}>
+                    <span class="text-brand" style={{ color: 'var(--color-accent)' }}>
+                      Clauset
                     </span>
                     <Badge variant={getStatusVariant(s().status)}>
                       {getStatusLabel(s().status)}
                     </Badge>
                   </div>
-                  <div class="flex items-center gap-2 mt-0.5">
-                    <span class="text-caption">{s().model}</span>
+                  <div
+                    class="text-mono"
+                    style={{
+                      display: 'flex',
+                      "align-items": 'center',
+                      gap: '8px',
+                      "margin-top": '2px',
+                      "font-size": '12px',
+                      color: 'var(--color-text-muted)',
+                    }}
+                  >
+                    <span style={{ color: 'var(--color-text-tertiary)' }}>
+                      {s().project_path.split('/').pop()}
+                    </span>
+                    <span>·</span>
                     <span class={`status-dot ${connectionStatus().class}`} />
+                    <span>{connectionStatus().text}</span>
                   </div>
                 </>
               )}
@@ -254,22 +288,50 @@ export default function SessionPage() {
           </div>
 
           {/* View toggle */}
-          <div class="flex bg-bg-surface rounded-xl p-1">
+          <div
+            style={{
+              display: 'flex',
+              background: 'var(--color-bg-surface)',
+              "border-radius": '10px',
+              padding: '3px',
+              border: '1px solid var(--color-bg-overlay)',
+            }}
+          >
             <button
               onClick={() => setShowTerminal(false)}
-              class={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                !showTerminal() ? 'bg-bg-elevated text-text-primary' : 'text-text-muted'
-              }`}
+              class="text-mono"
+              style={{
+                padding: '6px 14px',
+                "font-size": '12px',
+                "font-weight": '500',
+                "border-radius": '8px',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                background: !showTerminal() ? 'var(--color-bg-elevated)' : 'transparent',
+                color: !showTerminal() ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                "box-shadow": !showTerminal() ? 'var(--shadow-retro-sm)' : 'none',
+              }}
             >
-              Chat
+              chat
             </button>
             <button
               onClick={() => setShowTerminal(true)}
-              class={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                showTerminal() ? 'bg-bg-elevated text-text-primary' : 'text-text-muted'
-              }`}
+              class="text-mono"
+              style={{
+                padding: '6px 14px',
+                "font-size": '12px',
+                "font-weight": '500',
+                "border-radius": '8px',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                background: showTerminal() ? 'var(--color-bg-elevated)' : 'transparent',
+                color: showTerminal() ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                "box-shadow": showTerminal() ? 'var(--shadow-retro-sm)' : 'none',
+              }}
             >
-              Term
+              term
             </button>
           </div>
         </div>
@@ -283,27 +345,55 @@ export default function SessionPage() {
       }>
         {/* Error banner */}
         <Show when={error()}>
-          <div class="mx-4 mt-4 bg-status-error/10 border border-status-error/20 rounded-xl p-4 text-status-error text-sm">
+          <div
+            style={{
+              margin: '16px',
+              padding: '14px 16px',
+              background: 'var(--color-accent-muted)',
+              border: '1px solid var(--color-accent)',
+              "border-radius": '12px',
+              color: 'var(--color-accent)',
+              "font-size": '14px',
+            }}
+          >
             {error()}
           </div>
         </Show>
 
         {/* Resume prompt for stopped sessions */}
         <Show when={isSessionStopped()}>
-          <div class="mx-4 mt-4 bg-bg-surface rounded-xl p-5 text-center">
-            <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-bg-elevated flex items-center justify-center">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-text-muted">
+          <div
+            class="card-bordered"
+            style={{
+              margin: '16px',
+              padding: '24px',
+              "text-align": 'center',
+            }}
+          >
+            <div
+              style={{
+                width: '48px',
+                height: '48px',
+                margin: '0 auto 12px',
+                "border-radius": '50%',
+                background: 'var(--color-bg-elevated)',
+                display: 'flex',
+                "align-items": 'center',
+                "justify-content": 'center',
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-text-muted">
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
             </div>
-            <p class="text-text-secondary mb-4">
-              This session has ended. Resume to continue.
+            <p style={{ color: 'var(--color-text-secondary)', "margin-bottom": '16px' }}>
+              Session ended. Resume to continue.
             </p>
             <Button
               onClick={handleResume}
               disabled={resuming()}
             >
-              {resuming() ? 'Resuming...' : 'Resume Session'}
+              {resuming() ? 'Resuming...' : 'Resume'}
             </Button>
           </div>
         </Show>
@@ -313,15 +403,26 @@ export default function SessionPage() {
           <main class="flex-1 scrollable p-4 space-y-4">
             {/* Terminal mode notice */}
             <Show when={session()?.mode === 'terminal' && messages().length === 0}>
-              <div class="bg-bg-surface rounded-xl p-5 text-center">
-                <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-accent/10 flex items-center justify-center">
-                  <span class="text-accent text-xl font-mono">&gt;_</span>
+              <div class="card-bordered" style={{ padding: '24px', "text-align": 'center' }}>
+                <div
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    margin: '0 auto 12px',
+                    "border-radius": '50%',
+                    background: 'var(--color-accent-muted)',
+                    display: 'flex',
+                    "align-items": 'center',
+                    "justify-content": 'center',
+                  }}
+                >
+                  <span class="text-mono" style={{ color: 'var(--color-accent)', "font-size": '18px' }}>&gt;_</span>
                 </div>
-                <p class="text-text-secondary mb-2">
-                  Terminal mode is active
+                <p style={{ color: 'var(--color-text-secondary)', "margin-bottom": '8px' }}>
+                  Terminal mode active
                 </p>
-                <p class="text-caption mb-4">
-                  Claude's responses appear in the terminal view for full interaction.
+                <p class="text-caption" style={{ "margin-bottom": '16px' }}>
+                  Output appears in the terminal view.
                 </p>
                 <Button
                   variant="ghost"
@@ -366,6 +467,7 @@ export default function SessionPage() {
             onResize={handleTerminalResize}
             onClose={() => setShowTerminal(false)}
             onReady={registerTerminalWrite}
+            isConnected={wsState() === 'connected'}
           />
         </div>
       </Show>
