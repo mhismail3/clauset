@@ -21,11 +21,12 @@ export async function fetchSessions() {
   }
 }
 
-export function getStatusVariant(status: Session['status']): 'active' | 'idle' | 'completed' | 'error' {
+export function getStatusVariant(status: Session['status']): 'active' | 'starting' | 'idle' | 'completed' | 'error' {
   switch (status) {
     case 'active':
-    case 'starting':
       return 'active';
+    case 'starting':
+      return 'starting';
     case 'waiting_input':
       return 'idle';
     case 'stopped':

@@ -2,7 +2,6 @@ import { onMount, onCleanup, createSignal, For } from 'solid-js';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { Button } from '../ui/Button';
 
 interface TerminalViewProps {
   onInput: (data: Uint8Array) => void;
@@ -13,15 +12,20 @@ interface TerminalViewProps {
 
 // Special keys for mobile keyboard toolbar
 const SPECIAL_KEYS = [
-  { label: 'Esc', code: '\x1b' },
-  { label: 'Tab', code: '\t' },
-  { label: 'Ctrl', code: null, isModifier: true },
-  { label: '↑', code: '\x1b[A' },
-  { label: '↓', code: '\x1b[B' },
-  { label: '←', code: '\x1b[D' },
-  { label: '→', code: '\x1b[C' },
-  { label: 'Home', code: '\x1b[H' },
-  { label: 'End', code: '\x1b[F' },
+  { label: 'Esc', code: '\x1b', icon: null },
+  { label: 'Tab', code: '\t', icon: null },
+  { label: 'Ctrl', code: null, isModifier: true, icon: null },
+  { label: '↑', code: '\x1b[A', icon: null },
+  { label: '↓', code: '\x1b[B', icon: null },
+  { label: '←', code: '\x1b[D', icon: null },
+  { label: '→', code: '\x1b[C', icon: null },
+] as const;
+
+const CTRL_SHORTCUTS = [
+  { label: 'C', desc: 'Cancel' },
+  { label: 'D', desc: 'EOF' },
+  { label: 'Z', desc: 'Suspend' },
+  { label: 'L', desc: 'Clear' },
 ] as const;
 
 export function TerminalView(props: TerminalViewProps) {
@@ -41,50 +45,59 @@ export function TerminalView(props: TerminalViewProps) {
     const encoder = new TextEncoder();
     let code = key.code!;
 
-    // If Ctrl is active and it's a single character, convert to control character
     if (ctrlActive() && code.length === 1) {
       const charCode = code.toUpperCase().charCodeAt(0);
-      if (charCode >= 65 && charCode <= 90) { // A-Z
+      if (charCode >= 65 && charCode <= 90) {
         code = String.fromCharCode(charCode - 64);
       }
     }
 
     props.onInput(encoder.encode(code));
-    setCtrlActive(false); // Reset Ctrl after sending
+    setCtrlActive(false);
+    terminal?.focus();
+  }
+
+  function sendCtrlKey(char: string) {
+    const encoder = new TextEncoder();
+    const charCode = char.toUpperCase().charCodeAt(0);
+    const code = String.fromCharCode(charCode - 64);
+    props.onInput(encoder.encode(code));
+    setCtrlActive(false);
     terminal?.focus();
   }
 
   onMount(() => {
     terminal = new Terminal({
       theme: {
-        background: '#0f0f0f',
-        foreground: '#f5f5f5',
+        background: '#000000',
+        foreground: '#ffffff',
         cursor: '#da7756',
-        cursorAccent: '#0f0f0f',
+        cursorAccent: '#000000',
         selectionBackground: 'rgba(218, 119, 86, 0.3)',
-        black: '#1a1a1a',
-        red: '#ff6b6b',
-        green: '#4ade80',
-        yellow: '#fbbf24',
-        blue: '#60a5fa',
-        magenta: '#c084fc',
-        cyan: '#22d3ee',
-        white: '#f5f5f5',
-        brightBlack: '#666666',
-        brightRed: '#ff8a8a',
-        brightGreen: '#6ee7a0',
-        brightYellow: '#fcd34d',
-        brightBlue: '#93c5fd',
-        brightMagenta: '#d8b4fe',
-        brightCyan: '#67e8f9',
+        black: '#1c1c1e',
+        red: '#ff453a',
+        green: '#30d158',
+        yellow: '#ffd60a',
+        blue: '#0a84ff',
+        magenta: '#bf5af2',
+        cyan: '#64d2ff',
+        white: '#ffffff',
+        brightBlack: '#636366',
+        brightRed: '#ff6961',
+        brightGreen: '#4cd964',
+        brightYellow: '#ffcc00',
+        brightBlue: '#5ac8fa',
+        brightMagenta: '#ff2d55',
+        brightCyan: '#5ac8fa',
         brightWhite: '#ffffff',
       },
-      fontFamily: 'ui-monospace, "SF Mono", Menlo, Monaco, monospace',
+      fontFamily: '"SF Mono", ui-monospace, Menlo, Monaco, monospace',
       fontSize: fontSize(),
       lineHeight: 1.2,
       cursorBlink: true,
       cursorStyle: 'block',
       scrollback: 5000,
+      allowProposedApi: true,
     });
 
     fitAddon = new FitAddon();
@@ -93,13 +106,11 @@ export function TerminalView(props: TerminalViewProps) {
     terminal.open(containerRef!);
     fitAddon.fit();
 
-    // Handle input
     terminal.onData((data) => {
       const encoder = new TextEncoder();
       props.onInput(encoder.encode(data));
     });
 
-    // Handle resize
     const resizeObserver = new ResizeObserver(() => {
       fitAddon?.fit();
       if (terminal) {
@@ -108,7 +119,6 @@ export function TerminalView(props: TerminalViewProps) {
     });
     resizeObserver.observe(containerRef!);
 
-    // Notify parent that terminal is ready with write function
     if (props.onReady) {
       props.onReady((data: Uint8Array) => {
         terminal?.write(data);
@@ -130,62 +140,76 @@ export function TerminalView(props: TerminalViewProps) {
     }
   }
 
-  // Expose write method for incoming data
-  function write(data: string | Uint8Array) {
-    terminal?.write(data);
-  }
-
   return (
-    <div class="flex-1 flex flex-col bg-bg-base">
-      {/* Terminal Controls */}
-      <div class="flex items-center gap-2 px-4 py-2 border-b border-bg-elevated">
-        <span class="text-sm font-medium">Terminal</span>
-        <div class="flex-1" />
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => adjustFontSize(-2)}
-        >
-          A-
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => adjustFontSize(2)}
-        >
-          A+
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={props.onClose}
-        >
-          Chat
-        </Button>
-      </div>
-
+    <div class="flex-1 flex flex-col bg-black">
       {/* Terminal Container */}
       <div
         ref={containerRef}
-        class="flex-1 p-2 overflow-hidden"
+        class="flex-1 px-2 pt-2 overflow-hidden"
+        style={{ "min-height": "0" }}
       />
 
-      {/* Special Keys Toolbar for Mobile */}
-      <div class="flex items-center gap-1 px-2 py-2 border-t border-bg-elevated overflow-x-auto safe-bottom">
-        <For each={SPECIAL_KEYS}>
-          {(key) => (
-            <button
-              onClick={() => sendSpecialKey(key)}
-              class={`px-3 py-1.5 text-sm font-mono rounded transition-colors flex-shrink-0 ${
-                key.isModifier && ctrlActive()
-                  ? 'bg-accent text-white'
-                  : 'bg-bg-surface hover:bg-bg-elevated text-text-primary'
-              }`}
-            >
-              {key.label}
-            </button>
-          )}
-        </For>
+      {/* Special Keys Toolbar */}
+      <div class="flex-none bg-bg-surface border-t border-bg-overlay">
+        {/* Ctrl shortcuts (shown when Ctrl is active) */}
+        <div
+          class={`flex items-center gap-1 px-2 py-2 border-b border-bg-overlay overflow-x-auto scrollable-x transition-all ${
+            ctrlActive() ? 'max-h-12 opacity-100' : 'max-h-0 opacity-0 py-0 border-0'
+          }`}
+        >
+          <span class="text-caption text-text-muted px-2">Ctrl+</span>
+          <For each={CTRL_SHORTCUTS}>
+            {(shortcut) => (
+              <button
+                onClick={() => sendCtrlKey(shortcut.label)}
+                class="flex items-center gap-2 px-3 py-1.5 text-sm font-mono bg-bg-elevated rounded-lg text-text-primary active:bg-bg-overlay transition-colors"
+              >
+                <span class="font-semibold">{shortcut.label}</span>
+                <span class="text-text-muted text-xs">{shortcut.desc}</span>
+              </button>
+            )}
+          </For>
+        </div>
+
+        {/* Main toolbar */}
+        <div class="flex items-center gap-1.5 px-3 py-2.5 safe-bottom">
+          <For each={SPECIAL_KEYS}>
+            {(key) => (
+              <button
+                onClick={() => sendSpecialKey(key)}
+                class={`
+                  min-w-[44px] h-10 px-3
+                  text-sm font-semibold
+                  rounded-lg
+                  transition-all duration-100
+                  active:scale-95
+                  ${key.isModifier && ctrlActive()
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'bg-bg-elevated text-text-primary'
+                  }
+                `}
+              >
+                {key.label}
+              </button>
+            )}
+          </For>
+
+          <div class="flex-1" />
+
+          {/* Font size controls */}
+          <button
+            onClick={() => adjustFontSize(-2)}
+            class="w-10 h-10 flex items-center justify-center text-text-muted bg-bg-elevated rounded-lg active:bg-bg-overlay transition-colors"
+          >
+            <span class="text-xs font-bold">A-</span>
+          </button>
+          <button
+            onClick={() => adjustFontSize(2)}
+            class="w-10 h-10 flex items-center justify-center text-text-muted bg-bg-elevated rounded-lg active:bg-bg-overlay transition-colors"
+          >
+            <span class="text-sm font-bold">A+</span>
+          </button>
+        </div>
       </div>
     </div>
   );

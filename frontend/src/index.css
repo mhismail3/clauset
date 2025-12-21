@@ -1,64 +1,422 @@
 @import "tailwindcss";
 
 @theme {
-  /* Background layers */
-  --color-bg-base: #0f0f0f;
-  --color-bg-surface: #1a1a1a;
-  --color-bg-elevated: #252525;
-  --color-bg-overlay: #303030;
+  /* Background layers - refined dark palette */
+  --color-bg-base: #000000;
+  --color-bg-surface: #1c1c1e;
+  --color-bg-elevated: #2c2c2e;
+  --color-bg-overlay: #3a3a3c;
 
-  /* Text */
-  --color-text-primary: #f5f5f5;
-  --color-text-secondary: #a0a0a0;
-  --color-text-muted: #666666;
+  /* Text - iOS-like hierarchy */
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #ebebf5;
+  --color-text-tertiary: #ababab;
+  --color-text-muted: #636366;
 
   /* Accent (Claude orange) */
   --color-accent: #da7756;
-  --color-accent-hover: #e08a6a;
-  --color-accent-muted: oklch(from #da7756 l c h / 20%);
+  --color-accent-hover: #e69577;
+  --color-accent-active: #c46a4c;
+  --color-accent-muted: oklch(from #da7756 l c h / 15%);
 
-  /* Status */
-  --color-status-active: #4ade80;
-  --color-status-idle: #fbbf24;
-  --color-status-completed: #a0a0a0;
+  /* Status colors */
+  --color-status-active: #30d158;
+  --color-status-idle: #ffd60a;
+  --color-status-error: #ff453a;
+  --color-status-completed: #636366;
+
+  /* Semantic colors */
+  --color-destructive: #ff453a;
+  --color-success: #30d158;
 
   /* Code */
-  --color-code-bg: #1e1e1e;
-  --color-code-border: #333333;
+  --color-code-bg: #1c1c1e;
+  --color-code-border: #3a3a3c;
 
   /* Fonts */
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, Monaco, "Cascadia Mono", monospace;
+
+  /* Spacing scale */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 20px;
+  --spacing-2xl: 24px;
+
+  /* Border radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
 }
+
+/* ============================================
+   ROOT & VIEWPORT FIXES
+   ============================================ */
 
 :root {
   color-scheme: dark;
+  /* Prevent iOS text size adjustment */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 html {
+  /* Prevent tap highlight */
   -webkit-tap-highlight-color: transparent;
+  /* Prevent callout on long press */
   -webkit-touch-callout: none;
+  /* Smooth scrolling */
+  scroll-behavior: smooth;
+  /* Fixed height for app-like behavior */
+  height: 100%;
+  height: -webkit-fill-available;
 }
 
 body {
   background-color: var(--color-bg-base);
   color: var(--color-text-primary);
   font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
   margin: 0;
+  padding: 0;
+  /* Prevent overscroll bounce */
   overscroll-behavior: none;
+  overscroll-behavior-y: none;
+  /* Fixed height - app-like */
+  height: 100%;
+  height: -webkit-fill-available;
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+  /* Prevent selection on UI elements */
+  -webkit-user-select: none;
+  user-select: none;
+  /* Prevent scroll when keyboard opens */
+  position: fixed;
+  width: 100%;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Allow text selection in specific areas */
+.selectable,
+input,
+textarea,
+[contenteditable] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ============================================
+   SAFE AREA UTILITIES
+   ============================================ */
+
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+}
+
+.safe-left {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.safe-right {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+.safe-x {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+.safe-y {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+}
+
+.safe-all {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* ============================================
+   SCROLLABLE AREAS
+   ============================================ */
+
+.scrollable {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
 }
 
-/* Safe area utilities */
-.safe-top { padding-top: env(safe-area-inset-top); }
-.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
-.safe-left { padding-left: env(safe-area-inset-left); }
-.safe-right { padding-right: env(safe-area-inset-right); }
-.safe-x { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
-.safe-y { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
-.safe-all {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
+.scrollable-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* Hide scrollbars but keep functionality */
+.scrollable::-webkit-scrollbar,
+.scrollable-x::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollable,
+.scrollable-x {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ============================================
+   TYPOGRAPHY
+   ============================================ */
+
+.text-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.text-headline {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.text-body {
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.text-caption {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--color-text-tertiary);
+}
+
+.text-label {
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+}
+
+/* ============================================
+   TOUCH INTERACTIONS
+   ============================================ */
+
+/* Minimum touch target size (44pt iOS guideline) */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Active state feedback */
+.pressable {
+  transition: transform 0.1s ease, opacity 0.1s ease;
+}
+
+.pressable:active {
+  transform: scale(0.97);
+  opacity: 0.7;
+}
+
+/* Subtle press effect for cards */
+.card-pressable {
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.card-pressable:active {
+  background-color: var(--color-bg-overlay);
+  transform: scale(0.98);
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.2s ease-out;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out;
+}
+
+.animate-pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* ============================================
+   FORM ELEMENTS
+   ============================================ */
+
+/* Prevent zoom on input focus (iOS) */
+input,
+textarea,
+select {
+  font-size: 16px !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+}
+
+/* Custom focus ring */
+.focus-ring:focus {
+  box-shadow: 0 0 0 3px var(--color-accent-muted);
+}
+
+/* ============================================
+   MODAL / SHEET OVERLAYS
+   ============================================ */
+
+.overlay-backdrop {
+  background-color: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.sheet-container {
+  background-color: var(--color-bg-surface);
+  border-top-left-radius: var(--radius-xl);
+  border-top-right-radius: var(--radius-xl);
+}
+
+/* Sheet handle indicator */
+.sheet-handle {
+  width: 36px;
+  height: 5px;
+  background-color: var(--color-bg-overlay);
+  border-radius: var(--radius-full);
+  margin: 8px auto 12px;
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+.glass {
+  background-color: rgba(28, 28, 30, 0.8);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.divider {
+  height: 1px;
+  background-color: var(--color-bg-overlay);
+}
+
+.divider-inset {
+  height: 1px;
+  background-color: var(--color-bg-overlay);
+  margin-left: 16px;
+}
+
+/* Status indicator dot */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-dot-active {
+  background-color: var(--color-status-active);
+  box-shadow: 0 0 8px var(--color-status-active);
+}
+
+.status-dot-idle {
+  background-color: var(--color-status-idle);
+}
+
+.status-dot-error {
+  background-color: var(--color-status-error);
+}
+
+.status-dot-inactive {
+  background-color: var(--color-text-muted);
 }
