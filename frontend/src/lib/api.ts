@@ -10,6 +10,9 @@ export interface Session {
   created_at: string;
   last_activity_at: string;
   total_cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  context_percent: number;
   preview: string;
 }
 
@@ -20,9 +23,19 @@ export interface SessionListResponse {
 
 export interface CreateSessionRequest {
   project_path: string;
-  prompt: string;
+  prompt?: string;
   model?: string;
   terminal_mode?: boolean;
+}
+
+export interface Project {
+  name: string;
+  path: string;
+}
+
+export interface ProjectsResponse {
+  projects: Project[];
+  projects_root: string;
 }
 
 export interface CreateSessionResponse {
@@ -98,5 +111,9 @@ export const api = {
       fetchJSON<{ entries: Array<{ display: string; timestamp: number; project: string }> }>(
         `/history${limit ? `?limit=${limit}` : ''}`
       ),
+  },
+
+  projects: {
+    list: () => fetchJSON<ProjectsResponse>('/projects'),
   },
 };

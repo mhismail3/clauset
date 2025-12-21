@@ -20,6 +20,45 @@ import {
 import { getStatusVariant, getStatusLabel } from '../stores/sessions';
 import { appendTerminalOutput, getTerminalHistory } from '../stores/terminal';
 
+// Parse Claude's status line: "Model | $Cost | InputK/OutputK | ctx:X%"
+interface StatusInfo {
+  model: string;
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  contextPercent: number;
+}
+
+function parseStatusLine(text: string): StatusInfo | null {
+  // Look for pattern like: "Opus 4.5 | $0.68 | 29.2K/22.5K | ctx:11%"
+  // The status line may have ANSI escape codes, so we need to strip them
+  const cleanText = text.replace(/\x1b\[[0-9;]*m/g, '');
+
+  // Match the status line pattern
+  const match = cleanText.match(
+    /([A-Za-z0-9. ]+)\s*\|\s*\$([0-9.]+)\s*\|\s*([0-9.]+)K?\/([0-9.]+)K?\s*\|\s*ctx:(\d+)%/
+  );
+
+  if (!match) return null;
+
+  const [, model, costStr, inputStr, outputStr, ctxStr] = match;
+
+  // Parse token counts - they may be in K format (e.g., "29.2K") or raw numbers
+  const parseTokens = (s: string): number => {
+    const num = parseFloat(s);
+    // If the original text had "K", multiply by 1000
+    return Math.round(num * 1000);
+  };
+
+  return {
+    model: model.trim(),
+    cost: parseFloat(costStr),
+    inputTokens: parseTokens(inputStr),
+    outputTokens: parseTokens(outputStr),
+    contextPercent: parseInt(ctxStr, 10),
+  };
+}
+
 export default function SessionPage() {
   const params = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -36,6 +75,9 @@ export default function SessionPage() {
   let wsManager: ReturnType<typeof createWebSocketManager> | null = null;
   let messagesEndRef: HTMLDivElement | undefined;
   let terminalWriteFn: ((data: Uint8Array) => void) | null = null;
+  let outputBuffer = '';
+  let lastStatus: StatusInfo | null = null;
+  let statusUpdateTimer: number | null = null;
 
   function scrollToBottom() {
     messagesEndRef?.scrollIntoView({ behavior: 'smooth' });
@@ -114,6 +156,60 @@ export default function SessionPage() {
           terminalWriteFn(bytes);
         } else {
           setTerminalData((prev) => [...prev, bytes]);
+        }
+
+        // Try to parse status line from output
+        const text = new TextDecoder().decode(bytes);
+        outputBuffer += text;
+        // Keep buffer size manageable (last 2KB)
+        if (outputBuffer.length > 2000) {
+          outputBuffer = outputBuffer.slice(-1500);
+        }
+
+        const status = parseStatusLine(outputBuffer);
+        if (status) {
+          // Check if status changed significantly
+          const changed = !lastStatus ||
+            lastStatus.model !== status.model ||
+            Math.abs(lastStatus.cost - status.cost) > 0.001 ||
+            lastStatus.inputTokens !== status.inputTokens ||
+            lastStatus.outputTokens !== status.outputTokens ||
+            lastStatus.contextPercent !== status.contextPercent;
+
+          if (changed) {
+            lastStatus = status;
+
+            // Immediately update local session state for responsive UI
+            const currentSession = session();
+            if (currentSession) {
+              setSession({
+                ...currentSession,
+                model: status.model,
+                total_cost_usd: status.cost,
+                input_tokens: status.inputTokens,
+                output_tokens: status.outputTokens,
+                context_percent: status.contextPercent,
+              });
+            }
+
+            // Debounce backend updates (send at most every 2 seconds)
+            if (statusUpdateTimer) {
+              clearTimeout(statusUpdateTimer);
+            }
+            statusUpdateTimer = window.setTimeout(() => {
+              if (wsManager && wsState() === 'connected') {
+                wsManager.send({
+                  type: 'status_update',
+                  model: status.model,
+                  cost: status.cost,
+                  input_tokens: status.inputTokens,
+                  output_tokens: status.outputTokens,
+                  context_percent: status.contextPercent,
+                });
+              }
+              statusUpdateTimer = null;
+            }, 2000);
+          }
         }
         break;
       }
@@ -233,12 +329,12 @@ export default function SessionPage() {
             onClick={() => navigate('/')}
             class="pressable"
             style={{
-              width: '40px',
-              height: '40px',
+              width: '36px',
+              height: '36px',
+              "flex-shrink": '0',
               display: 'flex',
               "align-items": 'center',
               "justify-content": 'center',
-              "margin-left": '-8px',
               color: 'var(--color-accent)',
               background: 'none',
               border: 'none',
@@ -246,41 +342,51 @@ export default function SessionPage() {
               cursor: 'pointer',
             }}
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <path d="M15 18l-6-6 6-6" />
             </svg>
           </button>
 
-          {/* Brand + Session info */}
-          <div style={{ flex: '1', "min-width": '0' }}>
+          {/* Session info - center section */}
+          <div style={{ flex: '1', "min-width": '0', overflow: 'hidden' }}>
             <Show when={session()} fallback={<Spinner size="sm" />}>
               {(s) => (
                 <>
+                  {/* Project name + badge row */}
                   <div style={{ display: 'flex', "align-items": 'center', gap: '8px' }}>
-                    <span class="text-brand" style={{ color: 'var(--color-accent)' }}>
-                      Clauset
+                    <span
+                      class="text-mono"
+                      style={{
+                        "font-size": '14px',
+                        "font-weight": '600',
+                        color: 'var(--color-text-primary)',
+                        overflow: 'hidden',
+                        "text-overflow": 'ellipsis',
+                        "white-space": 'nowrap',
+                      }}
+                    >
+                      {s().project_path.split('/').pop()}
                     </span>
                     <Badge variant={getStatusVariant(s().status)}>
                       {getStatusLabel(s().status)}
                     </Badge>
                   </div>
+                  {/* Connection status row */}
                   <div
                     class="text-mono"
                     style={{
                       display: 'flex',
                       "align-items": 'center',
-                      gap: '8px',
+                      gap: '6px',
                       "margin-top": '2px',
-                      "font-size": '12px',
+                      "font-size": '11px',
                       color: 'var(--color-text-muted)',
                     }}
                   >
-                    <span style={{ color: 'var(--color-text-tertiary)' }}>
-                      {s().project_path.split('/').pop()}
-                    </span>
-                    <span>·</span>
                     <span class={`status-dot ${connectionStatus().class}`} />
                     <span>{connectionStatus().text}</span>
+                    <span style={{ color: 'var(--color-bg-overlay)' }}>·</span>
+                    <span>{s().model}</span>
                   </div>
                 </>
               )}
@@ -291,6 +397,7 @@ export default function SessionPage() {
           <div
             style={{
               display: 'flex',
+              "flex-shrink": '0',
               background: 'var(--color-bg-surface)',
               "border-radius": '10px',
               padding: '3px',
@@ -301,8 +408,8 @@ export default function SessionPage() {
               onClick={() => setShowTerminal(false)}
               class="text-mono"
               style={{
-                padding: '6px 14px',
-                "font-size": '12px',
+                padding: '6px 12px',
+                "font-size": '11px',
                 "font-weight": '500',
                 "border-radius": '8px',
                 border: 'none',
@@ -319,8 +426,8 @@ export default function SessionPage() {
               onClick={() => setShowTerminal(true)}
               class="text-mono"
               style={{
-                padding: '6px 14px',
-                "font-size": '12px',
+                padding: '6px 12px',
+                "font-size": '11px',
                 "font-weight": '500',
                 "border-radius": '8px',
                 border: 'none',

@@ -5,7 +5,7 @@ use clauset_types::{Session, SessionMode, SessionStatus, SessionSummary};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 /// Configuration for the session manager.
@@ -120,6 +120,9 @@ impl SessionManager {
             created_at: now,
             last_activity_at: now,
             total_cost_usd: 0.0,
+            input_tokens: 0,
+            output_tokens: 0,
+            context_percent: 0,
             preview: truncate_preview(&opts.prompt),
         };
 
@@ -290,6 +293,31 @@ impl SessionManager {
     pub fn rename_session(&self, session_id: Uuid, name: &str) -> Result<()> {
         self.db.update_preview(session_id, name)?;
         info!("Session {} renamed to: {}", session_id, name);
+        Ok(())
+    }
+
+    /// Update session stats from Claude's status line.
+    pub fn update_session_stats(
+        &self,
+        session_id: Uuid,
+        model: &str,
+        cost: f64,
+        input_tokens: u64,
+        output_tokens: u64,
+        context_percent: u8,
+    ) -> Result<()> {
+        self.db.update_stats(
+            session_id,
+            model,
+            cost,
+            input_tokens,
+            output_tokens,
+            context_percent,
+        )?;
+        debug!(
+            "Session {} stats updated: {} ${:.2} {}K/{}K ctx:{}%",
+            session_id, model, cost, input_tokens / 1000, output_tokens / 1000, context_percent
+        );
         Ok(())
     }
 }

@@ -25,6 +25,7 @@ impl SessionStore {
             conn: Mutex::new(conn),
         };
         store.init_schema()?;
+        store.migrate()?;
         Ok(store)
     }
 
@@ -53,6 +54,32 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Run migrations for schema updates.
+    fn migrate(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        // Check if input_tokens column exists
+        let has_input_tokens: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('sessions') WHERE name = 'input_tokens'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !has_input_tokens {
+            conn.execute_batch(
+                r#"
+                ALTER TABLE sessions ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE sessions ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE sessions ADD COLUMN context_percent INTEGER NOT NULL DEFAULT 0;
+                "#,
+            )?;
+        }
+
+        Ok(())
+    }
+
     /// Insert a new session.
     pub fn insert(&self, session: &Session) -> Result<()> {
         let conn = self.conn.lock().unwrap();
@@ -60,8 +87,9 @@ impl SessionStore {
             r#"
             INSERT INTO sessions (
                 id, claude_session_id, project_path, model, status, mode,
-                created_at, last_activity_at, total_cost_usd, preview
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                created_at, last_activity_at, total_cost_usd, input_tokens,
+                output_tokens, context_percent, preview
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             "#,
             params![
                 session.id.to_string(),
@@ -73,6 +101,9 @@ impl SessionStore {
                 session.created_at.to_rfc3339(),
                 session.last_activity_at.to_rfc3339(),
                 session.total_cost_usd,
+                session.input_tokens as i64,
+                session.output_tokens as i64,
+                session.context_percent as i32,
                 session.preview,
             ],
         )?;
@@ -155,6 +186,41 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Update session stats from Claude status line.
+    pub fn update_stats(
+        &self,
+        id: Uuid,
+        model: &str,
+        cost: f64,
+        input_tokens: u64,
+        output_tokens: u64,
+        context_percent: u8,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            UPDATE sessions SET
+                model = ?1,
+                total_cost_usd = ?2,
+                input_tokens = ?3,
+                output_tokens = ?4,
+                context_percent = ?5,
+                last_activity_at = ?6
+            WHERE id = ?7
+            "#,
+            params![
+                model,
+                cost,
+                input_tokens as i64,
+                output_tokens as i64,
+                context_percent as i32,
+                chrono::Utc::now().to_rfc3339(),
+                id.to_string()
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Delete a session.
     pub fn delete(&self, id: Uuid) -> Result<()> {
         let conn = self.conn.lock().unwrap();
@@ -172,6 +238,9 @@ impl SessionStore {
         let created_at: String = row.get("created_at")?;
         let last_activity_at: String = row.get("last_activity_at")?;
         let total_cost_usd: f64 = row.get("total_cost_usd")?;
+        let input_tokens: i64 = row.get("input_tokens").unwrap_or(0);
+        let output_tokens: i64 = row.get("output_tokens").unwrap_or(0);
+        let context_percent: i32 = row.get("context_percent").unwrap_or(0);
         let preview: String = row.get("preview")?;
 
         Ok(Session {
@@ -188,6 +257,9 @@ impl SessionStore {
                 .map(|dt| dt.with_timezone(&chrono::Utc))
                 .unwrap_or_default(),
             total_cost_usd,
+            input_tokens: input_tokens as u64,
+            output_tokens: output_tokens as u64,
+            context_percent: context_percent as u8,
             preview,
         })
     }

@@ -1,7 +1,8 @@
-import { Show, createSignal } from 'solid-js';
+import { Show, For, createSignal, onMount, createEffect } from 'solid-js';
 import { useNavigate } from '@solidjs/router';
 import { Button } from '../ui/Button';
-import { api } from '../../lib/api';
+import { Spinner } from '../ui/Spinner';
+import { api, Project } from '../../lib/api';
 
 interface NewSessionModalProps {
   isOpen: boolean;
@@ -10,22 +11,52 @@ interface NewSessionModalProps {
 
 export function NewSessionModal(props: NewSessionModalProps) {
   const navigate = useNavigate();
-  const [projectPath, setProjectPath] = createSignal('');
+  const [projects, setProjects] = createSignal<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = createSignal(false);
+  const [selectedProject, setSelectedProject] = createSignal('');
   const [prompt, setPrompt] = createSignal('');
-  const [terminalMode, setTerminalMode] = createSignal(true);
+  const [chatMode, setChatMode] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
+  async function fetchProjects() {
+    setProjectsLoading(true);
+    try {
+      const response = await api.projects.list();
+      setProjects(response.projects);
+      // Auto-select first project if none selected
+      if (response.projects.length > 0 && !selectedProject()) {
+        setSelectedProject(response.projects[0].path);
+      }
+    } catch (e) {
+      console.error('Failed to fetch projects:', e);
+    } finally {
+      setProjectsLoading(false);
+    }
+  }
+
+  // Fetch projects when modal opens
+  createEffect(() => {
+    if (props.isOpen) {
+      fetchProjects();
+    }
+  });
+
   async function handleSubmit(e: Event) {
     e.preventDefault();
+    if (!selectedProject()) {
+      setError('Please select a project');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
       const response = await api.sessions.create({
-        project_path: projectPath(),
-        prompt: prompt(),
-        terminal_mode: terminalMode(),
+        project_path: selectedProject(),
+        prompt: prompt() || undefined,
+        terminal_mode: !chatMode(), // Invert: chatMode=false means terminal_mode=true
       });
 
       await api.sessions.start(response.session_id, prompt());
@@ -131,7 +162,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
                 </div>
               </Show>
 
-              {/* Project Path */}
+              {/* Project Selection */}
               <div>
                 <label
                   style={{
@@ -142,29 +173,79 @@ export function NewSessionModal(props: NewSessionModalProps) {
                     color: "var(--color-text-secondary)",
                   }}
                 >
-                  Project Path
+                  Project
                 </label>
-                <input
-                  type="text"
-                  value={projectPath()}
-                  onInput={(e) => setProjectPath(e.currentTarget.value)}
-                  placeholder="/path/to/your/project"
-                  required
-                  class="text-text-primary placeholder:text-text-muted"
-                  style={{
-                    width: "100%",
-                    "box-sizing": "border-box",
-                    padding: "12px 16px",
-                    "font-size": "16px",
-                    "border-radius": "12px",
-                    border: "1px solid var(--color-bg-overlay)",
-                    background: "var(--color-bg-base)",
-                    outline: "none",
-                  }}
-                />
+                <Show
+                  when={!projectsLoading()}
+                  fallback={
+                    <div
+                      style={{
+                        display: "flex",
+                        "align-items": "center",
+                        gap: "8px",
+                        padding: "12px 16px",
+                        "border-radius": "12px",
+                        border: "1px solid var(--color-bg-overlay)",
+                        background: "var(--color-bg-base)",
+                        color: "var(--color-text-muted)",
+                      }}
+                    >
+                      <Spinner size="sm" />
+                      <span>Loading projects...</span>
+                    </div>
+                  }
+                >
+                  <Show
+                    when={projects().length > 0}
+                    fallback={
+                      <div
+                        style={{
+                          padding: "12px 16px",
+                          "border-radius": "12px",
+                          border: "1px solid var(--color-bg-overlay)",
+                          background: "var(--color-bg-base)",
+                          color: "var(--color-text-muted)",
+                          "font-size": "14px",
+                        }}
+                      >
+                        No projects found in ~/Downloads/projects
+                      </div>
+                    }
+                  >
+                    <select
+                      value={selectedProject()}
+                      onChange={(e) => setSelectedProject(e.currentTarget.value)}
+                      required
+                      class="text-text-primary"
+                      style={{
+                        width: "100%",
+                        "box-sizing": "border-box",
+                        padding: "12px 16px",
+                        "font-size": "16px",
+                        "border-radius": "12px",
+                        border: "1px solid var(--color-bg-overlay)",
+                        background: "var(--color-bg-base)",
+                        outline: "none",
+                        cursor: "pointer",
+                        appearance: "none",
+                        "-webkit-appearance": "none",
+                        "background-image": `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239a9590' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+                        "background-repeat": "no-repeat",
+                        "background-position": "right 12px center",
+                        "padding-right": "40px",
+                      }}
+                    >
+                      <For each={projects()}>
+                        {(project) => (
+                          <option value={project.path}>{project.name}</option>
+                        )}
+                      </For>
+                    </select>
+                  </Show>
+                </Show>
               </div>
 
-              {/* Initial Prompt */}
+              {/* Initial Prompt (Optional) */}
               <div>
                 <label
                   style={{
@@ -175,14 +256,16 @@ export function NewSessionModal(props: NewSessionModalProps) {
                     color: "var(--color-text-secondary)",
                   }}
                 >
-                  Initial Prompt
+                  Initial Prompt{' '}
+                  <span style={{ color: "var(--color-text-muted)", "font-weight": "400" }}>
+                    (optional)
+                  </span>
                 </label>
                 <textarea
                   value={prompt()}
                   onInput={(e) => setPrompt(e.currentTarget.value)}
                   placeholder="What would you like Claude to help with?"
-                  rows={4}
-                  required
+                  rows={3}
                   class="text-text-primary placeholder:text-text-muted"
                   style={{
                     width: "100%",
@@ -199,12 +282,12 @@ export function NewSessionModal(props: NewSessionModalProps) {
                 />
               </div>
 
-              {/* Terminal Mode Toggle */}
+              {/* Chat Mode Toggle */}
               <label
                 class="bg-bg-base"
                 style={{
                   display: "flex",
-                  "align-items": "center",
+                  "align-items": "flex-start",
                   gap: "12px",
                   padding: "16px",
                   "border-radius": "12px",
@@ -213,13 +296,15 @@ export function NewSessionModal(props: NewSessionModalProps) {
               >
                 <input
                   type="checkbox"
-                  checked={terminalMode()}
-                  onChange={(e) => setTerminalMode(e.currentTarget.checked)}
+                  checked={chatMode()}
+                  onChange={(e) => setChatMode(e.currentTarget.checked)}
                   style={{
                     width: "20px",
                     height: "20px",
+                    "margin-top": "2px",
                     "accent-color": "var(--color-accent)",
                     cursor: "pointer",
+                    "flex-shrink": "0",
                   }}
                 />
                 <div style={{ flex: "1", "min-width": "0" }}>
@@ -227,13 +312,13 @@ export function NewSessionModal(props: NewSessionModalProps) {
                     class="text-text-primary"
                     style={{ display: "block", "font-size": "14px", "font-weight": "500" }}
                   >
-                    Terminal Mode
+                    Chat Mode
                   </span>
                   <span
                     class="text-text-muted"
-                    style={{ display: "block", "font-size": "12px", "margin-top": "2px" }}
+                    style={{ display: "block", "font-size": "12px", "margin-top": "4px", "line-height": "1.4" }}
                   >
-                    Full PTY access - uses Claude Max subscription
+                    Uses Claude API (billed per token). Uncheck for Terminal Mode which uses your Claude Max subscription.
                   </span>
                 </div>
               </label>
@@ -254,7 +339,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
                 <Button
                   type="submit"
                   style={{ flex: "1" }}
-                  disabled={loading()}
+                  disabled={loading() || !selectedProject()}
                 >
                   {loading() ? 'Creating...' : 'Create Session'}
                 </Button>

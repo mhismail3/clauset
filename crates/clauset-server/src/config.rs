@@ -20,6 +20,14 @@ pub struct Config {
     pub max_concurrent_sessions: usize,
     #[serde(default = "default_model")]
     pub default_model: String,
+    #[serde(default = "default_projects_root")]
+    pub projects_root: PathBuf,
+}
+
+fn default_projects_root() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Downloads/projects")
 }
 
 fn default_host() -> String {
@@ -63,6 +71,7 @@ impl Default for Config {
             db_path: default_db_path(),
             max_concurrent_sessions: default_max_sessions(),
             default_model: default_model(),
+            projects_root: default_projects_root(),
         }
     }
 }

@@ -339,9 +339,9 @@ export function TerminalView(props: TerminalViewProps) {
           </For>
         </div>
 
-        {/* Main toolbar */}
+        {/* Main toolbar - scrollable for narrow screens */}
         <div
-          class="safe-all"
+          class="safe-all scrollable-x"
           style={{
             display: 'flex',
             "align-items": 'center',
@@ -357,6 +357,7 @@ export function TerminalView(props: TerminalViewProps) {
                 class="key-button"
                 style={{
                   "min-width": '44px',
+                  "flex-shrink": '0',
                   height: '38px',
                   padding: '0 12px',
                   display: 'flex',
@@ -381,7 +382,8 @@ export function TerminalView(props: TerminalViewProps) {
             )}
           </For>
 
-          <div style={{ flex: '1' }} />
+          {/* Spacer - but with min-width so it shrinks on narrow screens */}
+          <div style={{ "flex-grow": '1', "min-width": '8px' }} />
 
           {/* Font size controls */}
           <button
@@ -389,6 +391,7 @@ export function TerminalView(props: TerminalViewProps) {
             class="key-button"
             style={{
               width: '38px',
+              "flex-shrink": '0',
               height: '38px',
               display: 'flex',
               "align-items": 'center',
@@ -403,6 +406,7 @@ export function TerminalView(props: TerminalViewProps) {
             class="key-button"
             style={{
               width: '38px',
+              "flex-shrink": '0',
               height: '38px',
               display: 'flex',
               "align-items": 'center',

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
 /// Events emitted by managed processes.
@@ -282,6 +282,7 @@ impl ProcessManager {
             // Track if we've sent the initial prompt
             let mut prompt_sent = initial_prompt.is_empty();
             let mut total_bytes = 0usize;
+            let mut accumulated_output = String::new();
 
             loop {
                 match reader.read(&mut buf) {
@@ -292,7 +293,7 @@ impl ProcessManager {
                     Ok(n) => {
                         total_bytes += n;
                         let output_str = String::from_utf8_lossy(&buf[..n]);
-                        info!("PTY output ({} bytes, total {}): {}", n, total_bytes,
+                        trace!("PTY output ({} bytes, total {}): {}", n, total_bytes,
                               output_str.chars().take(200).collect::<String>());
 
                         let _ = tx.send(ProcessEvent::TerminalOutput {
@@ -300,17 +301,34 @@ impl ProcessManager {
                             data: buf[..n].to_vec(),
                         });
 
-                        // Send initial prompt once after receiving some output
-                        // (Claude shows its prompt after startup)
-                        if !prompt_sent && total_bytes > 100 {
-                            std::thread::sleep(std::time::Duration::from_millis(500));
-                            if let Ok(mut w) = writer_clone.lock() {
-                                let prompt_with_newline = format!("{}\n", initial_prompt);
-                                let _ = w.write_all(prompt_with_newline.as_bytes());
-                                let _ = w.flush();
-                                info!("Sent initial prompt to Claude: {}", initial_prompt);
+                        // Accumulate output to detect Claude's ready prompt
+                        if !prompt_sent {
+                            accumulated_output.push_str(&output_str);
+
+                            // Claude Code shows a prompt indicator when ready for input
+                            // Look for common prompt patterns: "> ", "❯ ", or after seeing
+                            // enough output indicating Claude has started
+                            let ready = accumulated_output.contains("> ")
+                                || accumulated_output.contains("❯ ")
+                                || accumulated_output.contains("claude")
+                                || total_bytes > 500;
+
+                            if ready {
+                                // Wait a bit longer to ensure Claude is fully ready
+                                std::thread::sleep(std::time::Duration::from_millis(800));
+                                if let Ok(mut w) = writer_clone.lock() {
+                                    // Send the prompt text followed by Enter
+                                    let _ = w.write_all(initial_prompt.as_bytes());
+                                    let _ = w.flush();
+                                    // Small delay between text and Enter
+                                    std::thread::sleep(std::time::Duration::from_millis(50));
+                                    // Send Enter key to execute
+                                    let _ = w.write_all(b"\r");
+                                    let _ = w.flush();
+                                    info!("Sent initial prompt to Claude: {}", initial_prompt);
+                                }
+                                prompt_sent = true;
                             }
-                            prompt_sent = true;
                         }
                     }
                     Err(e) => {

@@ -49,7 +49,8 @@ pub async fn list(
 #[derive(Deserialize)]
 pub struct CreateSessionRequest {
     pub project_path: PathBuf,
-    pub prompt: String,
+    #[serde(default)]
+    pub prompt: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -77,7 +78,7 @@ pub async fn create(
         .session_manager
         .create_session(CreateSessionOptions {
             project_path: req.project_path,
-            prompt: req.prompt,
+            prompt: req.prompt.unwrap_or_default(),
             model: req.model,
             mode,
             resume_session_id: req.resume_session_id,
@@ -120,7 +121,8 @@ pub async fn terminate(
 
 #[derive(Deserialize)]
 pub struct StartSessionRequest {
-    pub prompt: String,
+    #[serde(default)]
+    pub prompt: Option<String>,
 }
 
 pub async fn start(
@@ -128,11 +130,12 @@ pub async fn start(
     Path(id): Path<Uuid>,
     Json(req): Json<StartSessionRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    info!("Starting session {} with prompt: {}", id, req.prompt);
+    let prompt = req.prompt.unwrap_or_default();
+    info!("Starting session {} with prompt: {}", id, prompt);
 
     state
         .session_manager
-        .start_session(id, &req.prompt)
+        .start_session(id, &prompt)
         .await
         .map_err(|e| {
             error!("Failed to start session {}: {}", id, e);

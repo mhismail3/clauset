@@ -21,6 +21,14 @@ pub enum WsClientMessage {
     Ping { timestamp: u64 },
     /// Request current session state.
     GetState,
+    /// Update session stats from parsed status line.
+    StatusUpdate {
+        model: String,
+        cost: f64,
+        input_tokens: u64,
+        output_tokens: u64,
+        context_percent: u8,
+    },
 }
 
 /// Messages sent from server to client.

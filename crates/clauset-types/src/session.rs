@@ -54,6 +54,12 @@ pub struct Session {
     pub last_activity_at: DateTime<Utc>,
     /// Total cost in USD (if available).
     pub total_cost_usd: f64,
+    /// Input tokens used.
+    pub input_tokens: u64,
+    /// Output tokens generated.
+    pub output_tokens: u64,
+    /// Context window usage percentage (0-100).
+    pub context_percent: u8,
     /// Preview text (first prompt or last message).
     pub preview: String,
 }
@@ -70,6 +76,9 @@ pub struct SessionSummary {
     pub created_at: DateTime<Utc>,
     pub last_activity_at: DateTime<Utc>,
     pub total_cost_usd: f64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub context_percent: u8,
     pub preview: String,
 }
 
@@ -85,6 +94,9 @@ impl From<Session> for SessionSummary {
             created_at: s.created_at,
             last_activity_at: s.last_activity_at,
             total_cost_usd: s.total_cost_usd,
+            input_tokens: s.input_tokens,
+            output_tokens: s.output_tokens,
+            context_percent: s.context_percent,
             preview: s.preview,
         }
     }

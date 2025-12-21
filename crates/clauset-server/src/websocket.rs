@@ -170,6 +170,22 @@ pub async fn handle_websocket(
                         WsClientMessage::GetState => {
                             // TODO: Send current state
                         }
+                        WsClientMessage::StatusUpdate {
+                            model,
+                            cost,
+                            input_tokens,
+                            output_tokens,
+                            context_percent,
+                        } => {
+                            let _ = state_clone.session_manager.update_session_stats(
+                                session_id,
+                                &model,
+                                cost,
+                                input_tokens,
+                                output_tokens,
+                                context_percent,
+                            );
+                        }
                     }
                 }
             }
