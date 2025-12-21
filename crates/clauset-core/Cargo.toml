@@ -1,0 +1,23 @@
+[package]
+name = "clauset-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clauset-types.workspace = true
+
+tokio.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+dashmap.workspace = true
+notify.workspace = true
+dirs.workspace = true
+portable-pty.workspace = true
+rusqlite.workspace = true

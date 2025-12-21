@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@theme {
+  /* Background layers */
+  --color-bg-base: #0f0f0f;
+  --color-bg-surface: #1a1a1a;
+  --color-bg-elevated: #252525;
+  --color-bg-overlay: #303030;
+
+  /* Text */
+  --color-text-primary: #f5f5f5;
+  --color-text-secondary: #a0a0a0;
+  --color-text-muted: #666666;
+
+  /* Accent (Claude orange) */
+  --color-accent: #da7756;
+  --color-accent-hover: #e08a6a;
+  --color-accent-muted: oklch(from #da7756 l c h / 20%);
+
+  /* Status */
+  --color-status-active: #4ade80;
+  --color-status-idle: #fbbf24;
+  --color-status-completed: #a0a0a0;
+
+  /* Code */
+  --color-code-bg: #1e1e1e;
+  --color-code-border: #333333;
+
+  /* Fonts */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  margin: 0;
+  overscroll-behavior: none;
+  overscroll-behavior-y: contain;
+}
+
+/* Safe area utilities */
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.safe-left { padding-left: env(safe-area-inset-left); }
+.safe-right { padding-right: env(safe-area-inset-right); }
+.safe-x { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+.safe-y { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+.safe-all {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}

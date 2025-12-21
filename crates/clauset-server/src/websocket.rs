@@ -1,0 +1,190 @@
+//! WebSocket connection handling.
+
+use crate::state::AppState;
+use anyhow::Result;
+use axum::extract::ws::{Message, WebSocket};
+use clauset_core::ProcessEvent;
+use clauset_types::{WsClientMessage, WsServerMessage};
+use futures::{SinkExt, StreamExt};
+use std::sync::Arc;
+use uuid::Uuid;
+
+pub async fn handle_websocket(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    session_id: Uuid,
+) -> Result<()> {
+    let (mut ws_tx, mut ws_rx) = socket.split();
+
+    // Subscribe to session events
+    let mut event_rx = state.session_manager.subscribe();
+
+    // Get initial session state
+    if let Ok(Some(session)) = state.session_manager.get_session(session_id) {
+        let init_msg = WsServerMessage::SessionInit {
+            session_id: session.id,
+            claude_session_id: session.claude_session_id,
+            model: session.model,
+            tools: vec![],
+            cwd: session.project_path,
+        };
+        let json = serde_json::to_string(&init_msg)?;
+        ws_tx.send(Message::Text(json.into())).await?;
+    }
+
+    // Spawn task to forward events to WebSocket
+    let state_clone = state.clone();
+    let mut send_task = tokio::spawn(async move {
+        while let Ok(event) = event_rx.recv().await {
+            // Only forward events for this session
+            let msg = match &event {
+                ProcessEvent::Claude(claude_event) => {
+                    // Convert Claude events to WsServerMessage
+                    match claude_event {
+                        clauset_types::ClaudeEvent::System(system) => {
+                            if system.subtype == "init" {
+                                Some(WsServerMessage::SessionInit {
+                                    session_id,
+                                    claude_session_id: system.session_id,
+                                    model: system.model.clone(),
+                                    tools: system.tools.clone(),
+                                    cwd: system.cwd.clone().unwrap_or_default(),
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        clauset_types::ClaudeEvent::Assistant(assistant) => {
+                            // Extract text content from the message
+                            let mut messages = Vec::new();
+                            for block in assistant.message.content.iter() {
+                                match block {
+                                    clauset_types::ContentBlock::Text { text } => {
+                                        messages.push(WsServerMessage::Text {
+                                            message_id: assistant.message.id.clone(),
+                                            content: text.clone(),
+                                            is_complete: true,
+                                        });
+                                    }
+                                    clauset_types::ContentBlock::ToolUse { id, name, input } => {
+                                        messages.push(WsServerMessage::ToolUse {
+                                            message_id: assistant.message.id.clone(),
+                                            tool_use_id: id.clone(),
+                                            tool_name: name.clone(),
+                                            input: input.clone(),
+                                        });
+                                    }
+                                    clauset_types::ContentBlock::ToolResult { tool_use_id, content, is_error } => {
+                                        messages.push(WsServerMessage::ToolResult {
+                                            tool_use_id: tool_use_id.clone(),
+                                            output: content.to_string(),
+                                            is_error: *is_error,
+                                        });
+                                    }
+                                }
+                            }
+                            // Check if there's an error
+                            if let Some(error) = &assistant.error {
+                                messages.push(WsServerMessage::Error {
+                                    code: "claude_error".to_string(),
+                                    message: error.clone(),
+                                });
+                            }
+                            // Return first message, queue the rest
+                            messages.into_iter().next()
+                        }
+                        clauset_types::ClaudeEvent::Result(result) => {
+                            Some(WsServerMessage::Result {
+                                success: !result.is_error,
+                                duration_ms: result.duration_ms,
+                                total_cost_usd: result.total_cost_usd,
+                                usage: result.usage.clone(),
+                            })
+                        }
+                        clauset_types::ClaudeEvent::User(_) => None,
+                    }
+                }
+                ProcessEvent::TerminalOutput { session_id: sid, data } if *sid == session_id => {
+                    Some(WsServerMessage::TerminalOutput { data: data.clone() })
+                }
+                ProcessEvent::Exited { session_id: sid, .. } if *sid == session_id => {
+                    // Update session status
+                    let _ = state_clone
+                        .session_manager
+                        .update_status(session_id, clauset_types::SessionStatus::Stopped);
+                    Some(WsServerMessage::StatusChange {
+                        old_status: clauset_types::SessionStatus::Active,
+                        new_status: clauset_types::SessionStatus::Stopped,
+                    })
+                }
+                ProcessEvent::Error { session_id: sid, message } if *sid == session_id => {
+                    Some(WsServerMessage::Error {
+                        code: "process_error".to_string(),
+                        message: message.clone(),
+                    })
+                }
+                _ => None,
+            };
+
+            if let Some(msg) = msg {
+                let json = match serde_json::to_string(&msg) {
+                    Ok(j) => j,
+                    Err(_) => continue,
+                };
+                if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                    break;
+                }
+            }
+        }
+    });
+
+    // Handle incoming messages
+    let state_clone = state.clone();
+    let mut recv_task = tokio::spawn(async move {
+        while let Some(Ok(msg)) = ws_rx.next().await {
+            if let Message::Text(text) = msg {
+                if let Ok(client_msg) = serde_json::from_str::<WsClientMessage>(&text) {
+                    match client_msg {
+                        WsClientMessage::Input { content } => {
+                            let _ = state_clone
+                                .session_manager
+                                .send_input(session_id, &content)
+                                .await;
+                        }
+                        WsClientMessage::TerminalInput { data } => {
+                            let _ = state_clone
+                                .session_manager
+                                .send_terminal_input(session_id, &data)
+                                .await;
+                        }
+                        WsClientMessage::Resize { rows, cols } => {
+                            let _ = state_clone
+                                .session_manager
+                                .resize_terminal(session_id, rows, cols)
+                                .await;
+                        }
+                        WsClientMessage::Ping { timestamp } => {
+                            // Pong is handled by the send task
+                            tracing::debug!("Received ping: {}", timestamp);
+                        }
+                        WsClientMessage::GetState => {
+                            // TODO: Send current state
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Wait for either task to finish
+    tokio::select! {
+        _ = &mut send_task => {
+            recv_task.abort();
+        }
+        _ = &mut recv_task => {
+            send_task.abort();
+        }
+    }
+
+    Ok(())
+}

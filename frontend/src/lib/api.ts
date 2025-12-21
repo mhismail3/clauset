@@ -1,0 +1,92 @@
+// API client for Clauset server
+
+export interface Session {
+  id: string;
+  claude_session_id: string;
+  project_path: string;
+  model: string;
+  status: 'created' | 'starting' | 'active' | 'waiting_input' | 'stopped' | 'error';
+  mode: 'stream_json' | 'terminal';
+  created_at: string;
+  last_activity_at: string;
+  total_cost_usd: number;
+  preview: string;
+}
+
+export interface SessionListResponse {
+  sessions: Session[];
+  active_count: number;
+}
+
+export interface CreateSessionRequest {
+  project_path: string;
+  prompt: string;
+  model?: string;
+  terminal_mode?: boolean;
+}
+
+export interface CreateSessionResponse {
+  session_id: string;
+  claude_session_id: string;
+  ws_url: string;
+}
+
+const BASE_URL = '/api';
+
+async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${BASE_URL}${url}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(error || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export const api = {
+  sessions: {
+    list: () => fetchJSON<SessionListResponse>('/sessions'),
+
+    get: (id: string) => fetchJSON<Session>(`/sessions/${id}`),
+
+    create: (req: CreateSessionRequest) =>
+      fetchJSON<CreateSessionResponse>('/sessions', {
+        method: 'POST',
+        body: JSON.stringify(req),
+      }),
+
+    start: (id: string, prompt: string) =>
+      fetch(`${BASE_URL}/sessions/${id}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      }),
+
+    resume: (id: string) =>
+      fetch(`${BASE_URL}/sessions/${id}/resume`, { method: 'POST' }),
+
+    terminate: (id: string) =>
+      fetch(`${BASE_URL}/sessions/${id}`, { method: 'DELETE' }),
+
+    sendInput: (id: string, content: string) =>
+      fetch(`${BASE_URL}/sessions/${id}/input`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      }),
+  },
+
+  history: {
+    list: (limit?: number) =>
+      fetchJSON<{ entries: Array<{ display: string; timestamp: number; project: string }> }>(
+        `/history${limit ? `?limit=${limit}` : ''}`
+      ),
+  },
+};
