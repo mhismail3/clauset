@@ -75,6 +75,16 @@ export const api = {
     terminate: (id: string) =>
       fetch(`${BASE_URL}/sessions/${id}`, { method: 'DELETE' }),
 
+    delete: (id: string) =>
+      fetch(`${BASE_URL}/sessions/${id}/delete`, { method: 'DELETE' }),
+
+    rename: (id: string, name: string) =>
+      fetch(`${BASE_URL}/sessions/${id}/name`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      }),
+
     sendInput: (id: string, content: string) =>
       fetch(`${BASE_URL}/sessions/${id}/input`, {
         method: 'POST',

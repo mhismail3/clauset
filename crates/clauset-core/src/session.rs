@@ -57,13 +57,38 @@ impl SessionManager {
         let process_manager = Arc::new(ProcessManager::new(config.claude_path.clone()));
         let (event_tx, _) = broadcast::channel(256);
 
-        Ok(Self {
+        let manager = Self {
             config,
             db,
             process_manager,
             event_tx,
             active_sessions: Arc::new(RwLock::new(Vec::new())),
-        })
+        };
+
+        // Clean up orphaned sessions from previous runs
+        if let Err(e) = manager.cleanup_orphaned_sessions() {
+            error!("Failed to cleanup orphaned sessions: {}", e);
+        }
+
+        Ok(manager)
+    }
+
+    /// Cleanup sessions that were marked as active but the server has restarted.
+    /// These sessions are no longer running, so mark them as stopped.
+    fn cleanup_orphaned_sessions(&self) -> Result<()> {
+        let orphaned = self.db.list_active()?;
+        let count = orphaned.len();
+
+        for session in orphaned {
+            info!("Marking orphaned session {} as stopped", session.id);
+            self.db.update_status(session.id, SessionStatus::Stopped)?;
+        }
+
+        if count > 0 {
+            info!("Cleaned up {} orphaned sessions", count);
+        }
+
+        Ok(())
     }
 
     /// Subscribe to process events.
@@ -242,6 +267,30 @@ impl SessionManager {
     /// Get the event sender for external use.
     pub fn event_sender(&self) -> broadcast::Sender<ProcessEvent> {
         self.event_tx.clone()
+    }
+
+    /// Delete a session permanently.
+    pub async fn delete_session(&self, session_id: Uuid) -> Result<()> {
+        // Terminate the process if it's running
+        if self.process_manager.is_active(session_id).await {
+            self.process_manager.terminate(session_id).await?;
+        }
+
+        // Remove from active list
+        self.active_sessions.write().await.retain(|&id| id != session_id);
+
+        // Delete from database
+        self.db.delete(session_id)?;
+
+        info!("Session {} deleted", session_id);
+        Ok(())
+    }
+
+    /// Rename a session (update its preview/name).
+    pub fn rename_session(&self, session_id: Uuid, name: &str) -> Result<()> {
+        self.db.update_preview(session_id, name)?;
+        info!("Session {} renamed to: {}", session_id, name);
+        Ok(())
     }
 }
 

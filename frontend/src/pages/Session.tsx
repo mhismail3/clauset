@@ -31,6 +31,7 @@ export default function SessionPage() {
   const [showTerminal, setShowTerminal] = createSignal(true); // Default to terminal view
   const [currentStreamingId, setCurrentStreamingId] = createSignal<string | null>(null);
   const [terminalData, setTerminalData] = createSignal<Uint8Array[]>([]);
+  const [resuming, setResuming] = createSignal(false);
 
   let wsManager: ReturnType<typeof createWebSocketManager> | null = null;
   let messagesEndRef: HTMLDivElement | undefined;
@@ -164,6 +165,24 @@ export default function SessionPage() {
     }
   }
 
+  async function handleResume() {
+    setResuming(true);
+    setError(null);
+    try {
+      await api.sessions.resume(params.id);
+      await loadSession(); // Refresh session status
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to resume session');
+    } finally {
+      setResuming(false);
+    }
+  }
+
+  const isSessionStopped = () => {
+    const s = session();
+    return s && (s.status === 'stopped' || s.status === 'error');
+  };
+
   onMount(() => {
     loadSession();
 
@@ -241,44 +260,79 @@ export default function SessionPage() {
           </div>
         </Show>
 
-        <Show when={showTerminal()} fallback={
-          /* Chat View */
-          <>
-            <main class="flex-1 overflow-y-auto p-4 space-y-4">
-              <For each={messages()}>
-                {(message) => <MessageBubble message={message} />}
-              </For>
+        {/* Resume button for stopped sessions */}
+        <Show when={isSessionStopped()}>
+          <div class="m-4 bg-bg-surface rounded-lg p-4 text-center">
+            <p class="text-text-secondary mb-3">
+              This session has stopped. Resume to continue where you left off.
+            </p>
+            <Button
+              onClick={handleResume}
+              disabled={resuming()}
+            >
+              {resuming() ? 'Resuming...' : 'Resume Session'}
+            </Button>
+          </div>
+        </Show>
 
-              {/* Streaming message */}
-              <Show when={streamingContent()}>
-                <MessageBubble
-                  message={{
-                    id: 'streaming',
-                    role: 'assistant',
-                    content: streamingContent(),
-                    timestamp: Date.now(),
-                    isStreaming: true,
-                  }}
-                />
-              </Show>
+        {/* Chat View - hidden when terminal is shown */}
+        <div class={`flex-1 flex flex-col ${showTerminal() ? 'hidden' : ''}`}>
+          <main class="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Terminal mode notice */}
+            <Show when={session()?.mode === 'terminal' && messages().length === 0}>
+              <div class="bg-bg-surface rounded-lg p-4 text-center">
+                <p class="text-text-secondary mb-2">
+                  This session uses terminal mode for full Claude Max subscription access.
+                </p>
+                <p class="text-text-muted text-sm mb-3">
+                  Claude's responses appear in the terminal view. Switch to terminal for the full experience.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowTerminal(true)}
+                >
+                  Switch to Terminal
+                </Button>
+              </div>
+            </Show>
 
-              <div ref={messagesEndRef} />
-            </main>
+            <For each={messages()}>
+              {(message) => <MessageBubble message={message} />}
+            </For>
 
-            <InputBar
-              onSend={handleSendMessage}
-              disabled={wsState() !== 'connected'}
-            />
-          </>
-        }>
-          {/* Terminal View */}
+            {/* Streaming message */}
+            <Show when={streamingContent()}>
+              <MessageBubble
+                message={{
+                  id: 'streaming',
+                  role: 'assistant',
+                  content: streamingContent(),
+                  timestamp: Date.now(),
+                  isStreaming: true,
+                }}
+              />
+            </Show>
+
+            <div ref={messagesEndRef} />
+          </main>
+
+          <InputBar
+            onSend={handleSendMessage}
+            disabled={wsState() !== 'connected'}
+            placeholder={session()?.mode === 'terminal' ? 'Type here (output in terminal)...' : 'Message Claude...'}
+          />
+        </div>
+
+        {/* Terminal View - hidden when chat is shown, but always mounted */}
+        <div class={`flex-1 flex flex-col ${showTerminal() ? '' : 'hidden'}`}>
           <TerminalView
             onInput={handleTerminalInput}
             onResize={handleTerminalResize}
             onClose={() => setShowTerminal(false)}
             onReady={registerTerminalWrite}
           />
-        </Show>
+        </div>
       </Show>
     </div>
   );

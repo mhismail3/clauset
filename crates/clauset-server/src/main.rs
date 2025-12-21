@@ -7,7 +7,7 @@ mod websocket;
 
 use anyhow::Result;
 use axum::{
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use std::net::SocketAddr;
@@ -47,6 +47,8 @@ async fn main() -> Result<()> {
         .route("/sessions", post(routes::sessions::create))
         .route("/sessions/{id}", get(routes::sessions::get))
         .route("/sessions/{id}", delete(routes::sessions::terminate))
+        .route("/sessions/{id}/delete", delete(routes::sessions::delete))
+        .route("/sessions/{id}/name", put(routes::sessions::rename))
         .route("/sessions/{id}/start", post(routes::sessions::start))
         .route("/sessions/{id}/resume", post(routes::sessions::resume))
         .route("/sessions/{id}/input", post(routes::sessions::send_input))

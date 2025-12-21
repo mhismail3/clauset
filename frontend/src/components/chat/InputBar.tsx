@@ -4,6 +4,7 @@ import { Button } from '../ui/Button';
 interface InputBarProps {
   onSend: (message: string) => void;
   disabled?: boolean;
+  placeholder?: string;
 }
 
 export function InputBar(props: InputBarProps) {
@@ -35,7 +36,7 @@ export function InputBar(props: InputBarProps) {
           value={message()}
           onInput={(e) => setMessage(e.currentTarget.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Message Claude..."
+          placeholder={props.placeholder || "Message Claude..."}
           rows={1}
           disabled={props.disabled}
           class="flex-1 bg-bg-surface border border-bg-overlay rounded-xl px-4 py-3 text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"

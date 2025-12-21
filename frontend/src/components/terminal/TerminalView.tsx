@@ -1,4 +1,4 @@
-import { onMount, onCleanup, createSignal } from 'solid-js';
+import { onMount, onCleanup, createSignal, For } from 'solid-js';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -11,12 +11,48 @@ interface TerminalViewProps {
   onReady?: (write: (data: Uint8Array) => void) => void;
 }
 
+// Special keys for mobile keyboard toolbar
+const SPECIAL_KEYS = [
+  { label: 'Esc', code: '\x1b' },
+  { label: 'Tab', code: '\t' },
+  { label: 'Ctrl', code: null, isModifier: true },
+  { label: '↑', code: '\x1b[A' },
+  { label: '↓', code: '\x1b[B' },
+  { label: '←', code: '\x1b[D' },
+  { label: '→', code: '\x1b[C' },
+  { label: 'Home', code: '\x1b[H' },
+  { label: 'End', code: '\x1b[F' },
+] as const;
+
 export function TerminalView(props: TerminalViewProps) {
   let containerRef: HTMLDivElement | undefined;
   let terminal: Terminal | undefined;
   let fitAddon: FitAddon | undefined;
 
   const [fontSize, setFontSize] = createSignal(14);
+  const [ctrlActive, setCtrlActive] = createSignal(false);
+
+  function sendSpecialKey(key: typeof SPECIAL_KEYS[number]) {
+    if (key.isModifier) {
+      setCtrlActive(!ctrlActive());
+      return;
+    }
+
+    const encoder = new TextEncoder();
+    let code = key.code!;
+
+    // If Ctrl is active and it's a single character, convert to control character
+    if (ctrlActive() && code.length === 1) {
+      const charCode = code.toUpperCase().charCodeAt(0);
+      if (charCode >= 65 && charCode <= 90) { // A-Z
+        code = String.fromCharCode(charCode - 64);
+      }
+    }
+
+    props.onInput(encoder.encode(code));
+    setCtrlActive(false); // Reset Ctrl after sending
+    terminal?.focus();
+  }
 
   onMount(() => {
     terminal = new Terminal({
@@ -133,6 +169,24 @@ export function TerminalView(props: TerminalViewProps) {
         ref={containerRef}
         class="flex-1 p-2 overflow-hidden"
       />
+
+      {/* Special Keys Toolbar for Mobile */}
+      <div class="flex items-center gap-1 px-2 py-2 border-t border-bg-elevated overflow-x-auto safe-bottom">
+        <For each={SPECIAL_KEYS}>
+          {(key) => (
+            <button
+              onClick={() => sendSpecialKey(key)}
+              class={`px-3 py-1.5 text-sm font-mono rounded transition-colors flex-shrink-0 ${
+                key.isModifier && ctrlActive()
+                  ? 'bg-accent text-white'
+                  : 'bg-bg-surface hover:bg-bg-elevated text-text-primary'
+              }`}
+            >
+              {key.label}
+            </button>
+          )}
+        </For>
+      </div>
     </div>
   );
 }

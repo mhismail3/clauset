@@ -174,3 +174,36 @@ pub async fn send_input(
 
     Ok(StatusCode::OK)
 }
+
+/// Delete a session permanently.
+pub async fn delete(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state
+        .session_manager
+        .delete_session(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct RenameSessionRequest {
+    pub name: String,
+}
+
+/// Rename a session.
+pub async fn rename(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<RenameSessionRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state
+        .session_manager
+        .rename_session(id, &req.name)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(StatusCode::OK)
+}
