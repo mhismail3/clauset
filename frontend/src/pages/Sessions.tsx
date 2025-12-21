@@ -21,6 +21,8 @@ export default function Sessions() {
   const [actionMenuSession, setActionMenuSession] = createSignal<Session | null>(null);
   const [renameValue, setRenameValue] = createSignal('');
   const [showRenameInput, setShowRenameInput] = createSignal(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = createSignal(false);
+  const [deleting, setDeleting] = createSignal(false);
   const navigate = useNavigate();
 
   onMount(() => {
@@ -30,15 +32,16 @@ export default function Sessions() {
   });
 
   async function handleDelete(session: Session) {
-    if (!confirm(`Delete session "${session.preview}"? This cannot be undone.`)) {
-      return;
-    }
+    setDeleting(true);
     try {
       await api.sessions.delete(session.id);
       fetchSessions();
     } catch (e) {
       console.error('Failed to delete session:', e);
+    } finally {
+      setDeleting(false);
     }
+    setShowDeleteConfirm(false);
     setActionMenuSession(null);
   }
 
@@ -60,11 +63,13 @@ export default function Sessions() {
     setActionMenuSession(session);
     setRenameValue(session.preview);
     setShowRenameInput(false);
+    setShowDeleteConfirm(false);
   }
 
   function closeActionMenu() {
     setActionMenuSession(null);
     setShowRenameInput(false);
+    setShowDeleteConfirm(false);
   }
 
   return (
@@ -337,7 +342,38 @@ export default function Sessions() {
                 </div>
               </Show>
 
-              <Show when={!showRenameInput()}>
+              {/* Delete confirmation */}
+              <Show when={showDeleteConfirm()}>
+                <div style={{ padding: "20px" }}>
+                  <p style={{
+                    color: 'var(--color-text-secondary)',
+                    "text-align": "center",
+                    "margin-bottom": "16px",
+                    "font-size": "14px",
+                  }}>
+                    Delete this session? This cannot be undone.
+                  </p>
+                  <div style={{ display: "flex", gap: "12px" }}>
+                    <Button
+                      variant="secondary"
+                      style={{ flex: "1" }}
+                      onClick={() => setShowDeleteConfirm(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      style={{ flex: "1" }}
+                      onClick={() => handleDelete(session())}
+                      disabled={deleting()}
+                    >
+                      {deleting() ? 'Deleting...' : 'Delete'}
+                    </Button>
+                  </div>
+                </div>
+              </Show>
+
+              <Show when={!showRenameInput() && !showDeleteConfirm()}>
                 <div style={{ padding: "8px 0" }}>
                   <button
                     onClick={() => setShowRenameInput(true)}
@@ -363,7 +399,7 @@ export default function Sessions() {
                   </button>
 
                   <button
-                    onClick={() => handleDelete(session())}
+                    onClick={() => setShowDeleteConfirm(true)}
                     class="hover:bg-accent-muted transition-colors"
                     style={{
                       width: "100%",

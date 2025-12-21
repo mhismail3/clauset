@@ -70,23 +70,53 @@ export function TerminalView(props: TerminalViewProps) {
   }
 
   function doFitAndResize() {
-    if (!terminal || !fitAddon || !containerRef) return;
+    console.log('[Terminal] doFitAndResize called');
+    if (!terminal || !fitAddon || !containerRef) {
+      console.log('[Terminal] Missing refs:', { terminal: !!terminal, fitAddon: !!fitAddon, containerRef: !!containerRef });
+      return;
+    }
 
     try {
       // Ensure container has dimensions before fitting
       const rect = containerRef.getBoundingClientRect();
+      console.log('[Terminal] Container rect:', rect.width, 'x', rect.height);
       if (rect.width === 0 || rect.height === 0) {
-        // Container not yet sized, retry
+        console.log('[Terminal] Container not sized, retrying...');
         setTimeout(doFitAndResize, 50);
         return;
       }
 
+      // Let FitAddon calculate based on actual container size (no padding now)
       fitAddon.fit();
-      const newDims = { cols: terminal.cols, rows: terminal.rows };
+
+      const fitCols = terminal.cols;
+      const fitRows = terminal.rows;
+      console.log('[Terminal] FitAddon calculated:', fitCols, 'x', fitRows);
+
+      // Additional safety: ensure we don't exceed what viewport can show
+      // Container width should already be correct, but double-check
+      const currentFontSize = fontSize();
+      const estimatedCellWidth = currentFontSize * 0.6;
+      const maxColsForContainer = Math.floor(rect.width / estimatedCellWidth);
+
+      // Use the smaller of FitAddon's calculation and our estimate
+      const cols = Math.min(fitCols, maxColsForContainer);
+      const rows = fitRows;
+
+      console.log('[Terminal] Max cols for container:', maxColsForContainer, '-> using:', cols);
+
+      // If we need to constrain, resize the terminal
+      if (cols !== fitCols) {
+        console.log('[Terminal] Constraining from', fitCols, 'to', cols);
+        terminal.resize(cols, rows);
+      }
+
+      const newDims = { cols, rows };
 
       // Only send resize if dimensions actually changed
       const current = dimensions();
       if (newDims.cols !== current.cols || newDims.rows !== current.rows) {
+        console.log(`[Terminal] Sending resize: ${newDims.cols}x${newDims.rows}`);
         setDimensions(newDims);
         props.onResize(newDims.cols, newDims.rows);
       }
@@ -147,12 +177,22 @@ export function TerminalView(props: TerminalViewProps) {
 
     terminal.open(containerRef!);
 
-    // Initial fit after a short delay to ensure container is sized
-    requestAnimationFrame(() => {
+    // Wait for fonts to load before fitting to ensure accurate column calculation
+    const fitAfterFonts = () => {
       requestAnimationFrame(() => {
-        doFitAndResize();
+        requestAnimationFrame(() => {
+          doFitAndResize();
+        });
       });
-    });
+    };
+
+    // Check if fonts are ready, otherwise wait
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(fitAfterFonts);
+    } else {
+      // Fallback for browsers without font loading API
+      setTimeout(fitAfterFonts, 100);
+    }
 
     terminal.onData((data) => {
       const encoder = new TextEncoder();
@@ -185,12 +225,15 @@ export function TerminalView(props: TerminalViewProps) {
   // Re-fit when connection state changes to send initial size
   createEffect(() => {
     if (props.isConnected) {
-      // Send resize multiple times to ensure backend receives it
+      // Send resize immediately and multiple times to ensure backend receives it
       // This handles race conditions where connection might not be fully ready
+      // and ensures PTY is resized before Claude outputs
       doFitAndResize();
-      setTimeout(doFitAndResize, 100);
+      setTimeout(doFitAndResize, 50);
+      setTimeout(doFitAndResize, 150);
       setTimeout(doFitAndResize, 300);
-      setTimeout(doFitAndResize, 500);
+      setTimeout(doFitAndResize, 600);
+      setTimeout(doFitAndResize, 1000);
     }
   });
 
@@ -207,16 +250,38 @@ export function TerminalView(props: TerminalViewProps) {
   }
 
   return (
-    <div class="flex-1 flex flex-col" style={{ background: '#0d0d0d' }}>
-      {/* Terminal Container - NO padding here, xterm needs full width for accurate fit */}
+    <div
+      class="flex-1 flex flex-col"
+      style={{
+        background: '#0d0d0d',
+        width: '100%',
+        "max-width": '100%',
+        "min-width": '0',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Padding wrapper - keeps padding separate from terminal measurement */}
       <div
-        ref={containerRef}
-        class="flex-1 overflow-hidden"
+        class="flex-1 flex flex-col"
         style={{
           "min-height": "0",
-          // No padding - let xterm use full container width for accurate column calculation
+          "min-width": "0",
+          padding: "8px 12px 0 12px",
+          overflow: "hidden",
         }}
-      />
+      >
+        {/* Terminal Container - NO padding, so FitAddon measures accurately */}
+        <div
+          ref={containerRef}
+          class="flex-1"
+          style={{
+            "min-height": "0",
+            "min-width": "0",
+            width: "100%",
+            overflow: "hidden",
+          }}
+        />
+      </div>
 
       {/* Special Keys Toolbar */}
       <div

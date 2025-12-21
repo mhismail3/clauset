@@ -224,10 +224,17 @@ impl ProcessManager {
 
         let pty_system = native_pty_system();
 
+        // Start with VERY conservative default that fits even small phone screens
+        // iPhone in portrait needs ~45 cols max, so use 40 for safety
+        // Frontend will send actual resize immediately after connecting
+        let initial_cols = 40;
+        let initial_rows = 24;
+        info!("Creating PTY with initial size: {}x{}", initial_cols, initial_rows);
+
         let pair = pty_system
             .openpty(PtySize {
-                rows: 24,
-                cols: 80,
+                rows: initial_rows,
+                cols: initial_cols,
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -374,6 +381,7 @@ impl ProcessManager {
 
     /// Resize a PTY terminal.
     pub async fn resize_terminal(&self, session_id: Uuid, rows: u16, cols: u16) -> Result<()> {
+        info!("Resizing PTY for session {} to {}x{}", session_id, cols, rows);
         let processes = self.processes.read().await;
         if let Some(ManagedProcess::Terminal { master, .. }) = processes.get(&session_id) {
             let master = master.lock().unwrap();
@@ -385,6 +393,9 @@ impl ProcessManager {
                     pixel_height: 0,
                 })
                 .map_err(|e| ClausetError::PtyError(e.to_string()))?;
+            info!("PTY resize successful for session {}", session_id);
+        } else {
+            warn!("No terminal process found for session {} during resize", session_id);
         }
         Ok(())
     }

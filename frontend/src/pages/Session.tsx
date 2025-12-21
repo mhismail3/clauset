@@ -217,7 +217,7 @@ export default function SessionPage() {
   };
 
   return (
-    <div class="flex flex-col h-full">
+    <div class="flex flex-col h-full" style={{ width: "100%", "max-width": "100%", "min-width": "0", overflow: "hidden" }}>
       {/* Header */}
       <header class="flex-none glass safe-top">
         <div
@@ -461,7 +461,15 @@ export default function SessionPage() {
         </div>
 
         {/* Terminal View */}
-        <div class={`flex-1 flex flex-col ${showTerminal() ? '' : 'hidden'}`}>
+        <div
+          class={`flex-1 flex flex-col ${showTerminal() ? '' : 'hidden'}`}
+          style={{
+            "min-width": "0",
+            width: "100%",
+            "max-width": "100%",
+            overflow: "hidden",
+          }}
+        >
           <TerminalView
             onInput={handleTerminalInput}
             onResize={handleTerminalResize}
