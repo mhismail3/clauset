@@ -81,6 +81,7 @@ export default function SessionPage() {
   let outputBuffer = '';
   let lastStatus: StatusInfo | null = null;
   let statusUpdateTimer: number | null = null;
+  let bufferRequested = false; // Track if we've requested terminal buffer after resize
 
   function scrollToBottom() {
     messagesEndRef?.scrollIntoView({ behavior: 'smooth' });
@@ -156,7 +157,6 @@ export default function SessionPage() {
         // This is the source of truth - replaces any localStorage data
         const { data } = msg as { data: number[] };
         const bytes = new Uint8Array(data);
-        console.log(`Received terminal buffer: ${bytes.length} bytes`);
 
         // Clear localStorage for this session since server is source of truth
         clearTerminalHistory(params.id);
@@ -338,6 +338,18 @@ export default function SessionPage() {
   function handleTerminalResize(cols: number, rows: number) {
     if (wsManager && wsState() === 'connected') {
       wsManager.send({ type: 'resize', cols, rows });
+
+      // After the first resize, request the terminal buffer
+      // The server will send the buffer formatted for the correct terminal size
+      if (!bufferRequested) {
+        bufferRequested = true;
+        // Small delay to let server process resize first
+        setTimeout(() => {
+          if (wsManager && wsState() === 'connected') {
+            wsManager.send({ type: 'request_buffer' });
+          }
+        }, 50);
+      }
     }
   }
 
@@ -622,7 +634,9 @@ export default function SessionPage() {
             "flex-direction": 'column',
             flex: '1 1 0%',
             "min-height": '0',
+            "min-width": '0',
             width: "100%",
+            "max-width": '100%',
             overflow: 'hidden',
           }}
         >

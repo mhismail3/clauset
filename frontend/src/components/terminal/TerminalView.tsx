@@ -368,41 +368,31 @@ export function TerminalView(props: TerminalViewProps) {
   }
 
   function doFitAndResize() {
-    if (!terminal || !fitAddon || !containerRef) {
-      return;
-    }
+    if (!terminal || !containerRef || !fitAddon) return;
 
     try {
-      const rect = containerRef.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) {
+      const containerWidth = containerRef.clientWidth;
+      const containerHeight = containerRef.clientHeight;
+
+      if (containerWidth === 0 || containerHeight === 0) {
         setTimeout(doFitAndResize, 50);
         return;
       }
 
-      // First let FitAddon do its calculation
-      fitAddon.fit();
+      // Use FitAddon to calculate dimensions
+      const proposed = fitAddon.proposeDimensions();
+      if (!proposed || !proposed.cols || !proposed.rows) return;
 
-      // Then get xterm's actual cell dimensions from the renderer
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const core = (terminal as any)._core;
-      const actualCellWidth = core?._renderService?.dimensions?.css?.cell?.width;
-      const actualCellHeight = core?._renderService?.dimensions?.css?.cell?.height;
+      const cols = Math.max(20, proposed.cols);
+      const rows = Math.max(5, proposed.rows);
 
-      if (actualCellWidth && actualCellHeight) {
-        // Use actual measured cell dimensions with safety buffer
-        const availableWidth = rect.width - 1;
-        const cols = Math.floor(availableWidth / actualCellWidth);
-        const rows = Math.floor(rect.height / actualCellHeight);
-
-        if (cols > 0 && rows > 0 && cols !== terminal.cols) {
-          terminal.resize(cols, rows);
-        }
+      if (cols !== terminal.cols || rows !== terminal.rows) {
+        terminal.resize(cols, rows);
       }
 
       const newDims = { cols: terminal.cols, rows: terminal.rows };
-
-      // Only send resize if dimensions actually changed
       const current = dimensions();
+
       if (newDims.cols !== current.cols || newDims.rows !== current.rows) {
         setDimensions(newDims);
         props.onResize(newDims.cols, newDims.rows);
@@ -479,23 +469,6 @@ export function TerminalView(props: TerminalViewProps) {
       touchScroller.cleanup();
     };
 
-    // Wait for fonts to load before fitting to ensure accurate column calculation
-    const fitAfterFonts = () => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          doFitAndResize();
-        });
-      });
-    };
-
-    // Check if fonts are ready, otherwise wait
-    if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(fitAfterFonts);
-    } else {
-      // Fallback for browsers without font loading API
-      setTimeout(fitAfterFonts, 100);
-    }
-
     terminal.onData((data) => {
       const encoder = new TextEncoder();
       props.onInput(encoder.encode(data));
@@ -508,10 +481,30 @@ export function TerminalView(props: TerminalViewProps) {
     // Also listen to window resize for orientation changes
     window.addEventListener('resize', handleResize);
 
-    if (props.onReady) {
-      props.onReady((data: Uint8Array) => {
-        terminal?.write(data);
+    // CRITICAL: Wait for fonts to load and resize BEFORE signaling ready
+    // This ensures the terminal is properly sized before any data is written
+    const initializeTerminal = () => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          // Do initial resize
+          doFitAndResize();
+
+          // NOW signal that we're ready to receive data
+          if (props.onReady) {
+            props.onReady((data: Uint8Array) => {
+              terminal?.write(data);
+            });
+          }
+        });
       });
+    };
+
+    // Wait for fonts to load before initializing
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(initializeTerminal);
+    } else {
+      // Fallback for browsers without font loading API
+      setTimeout(initializeTerminal, 100);
     }
 
     onCleanup(() => {
@@ -551,36 +544,32 @@ export function TerminalView(props: TerminalViewProps) {
       style={{
         display: 'flex',
         "flex-direction": 'column',
-        flex: '1 1 0%',
-        "min-height": '0',
+        height: '100%',
         width: '100%',
         background: '#0d0d0d',
         overflow: 'hidden',
       }}
     >
-      {/* Terminal area - fills space above toolbar */}
+      {/* Terminal area with padding for visual spacing */}
       <div
         style={{
-          flex: '1 1 0%',
+          flex: '1 1 0',
           "min-height": '0',
-          padding: "8px 12px 0 12px",
-          overflow: "hidden",
-          display: 'flex',
-          "flex-direction": 'column',
+          padding: '8px 12px',
+          overflow: 'hidden',
         }}
       >
+        {/* Inner container - xterm attaches here, FitAddon measures this */}
         <div
           ref={containerRef}
           style={{
-            flex: '1 1 0%',
-            "min-height": '0',
-            width: "100%",
-            overflow: "hidden",
+            height: '100%',
+            width: '100%',
           }}
         />
       </div>
 
-      {/* Special Keys Toolbar - fixed at bottom */}
+      {/* Special Keys Toolbar */}
       <div
         style={{
           "flex-shrink": '0',

@@ -15,12 +15,15 @@ pub enum WsClientMessage {
     Input { content: String },
     /// Send raw terminal input (PTY mode).
     TerminalInput { data: Vec<u8> },
-    /// Resize terminal.
+    /// Resize terminal and request buffer.
+    /// Server will resize tmux first, then send the terminal buffer.
     Resize { rows: u16, cols: u16 },
     /// Ping for keepalive.
     Ping { timestamp: u64 },
     /// Request current session state.
     GetState,
+    /// Request terminal buffer (after resize).
+    RequestBuffer,
     /// Update session stats from parsed status line.
     StatusUpdate {
         model: String,

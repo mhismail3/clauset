@@ -76,6 +76,12 @@
   color-scheme: dark;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+
+  /* Safe area insets as CSS custom properties for JavaScript access */
+  --sair: env(safe-area-inset-right, 0px);
+  --sail: env(safe-area-inset-left, 0px);
+  --sait: env(safe-area-inset-top, 0px);
+  --saib: env(safe-area-inset-bottom, 0px);
 }
 
 html {
@@ -166,8 +172,8 @@ textarea,
 }
 
 .safe-x {
-  padding-left: max(env(safe-area-inset-left, 0px), 8px);
-  padding-right: max(env(safe-area-inset-right, 0px), 8px);
+  padding-left: max(env(safe-area-inset-left, 0px), 12px);
+  padding-right: max(env(safe-area-inset-right, 0px), 12px);
 }
 
 .safe-y {
@@ -535,32 +541,26 @@ select:focus {
   border-radius: 1px;
 }
 
-/* Terminal container override - strictly constrain xterm to parent */
+/* Terminal xterm overrides */
 .xterm {
-  padding: 0 !important;
-  height: 100% !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0 !important;
-  overflow: hidden !important;
-  /* Allow our custom touch handler to control scrolling */
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  /* Custom touch scroll handler controls scrolling */
   touch-action: none;
 }
 
+/* Fix xterm row clipping - xterm.js sets overflow:hidden on each row div */
+.xterm .xterm-rows > div {
+  overflow: visible !important;
+}
+
 .xterm-viewport {
-  width: 100% !important;
-  max-width: 100% !important;
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-  /* iOS Safari touch scrolling optimizations */
+  overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  /* Prevent scroll chaining to parent */
   overscroll-behavior: contain;
-  /* Our custom touch handler manages scrolling */
   touch-action: none;
-  /* Smooth scroll performance */
-  will-change: scroll-position;
-  /* Hide scrollbar on touch devices for cleaner look */
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -569,36 +569,6 @@ select:focus {
   display: none;
 }
 
-.xterm-screen {
-  width: 100% !important;
-  max-width: 100% !important;
-  overflow: hidden !important;
-}
-
-.xterm-rows {
-  overflow: hidden !important;
-}
-
-/* Constrain the canvas element that xterm creates */
-.xterm canvas {
-  max-width: 100% !important;
-}
-
-/* Ensure the terminal helper span (used for measuring) is hidden */
 .xterm-helper-textarea {
   opacity: 0 !important;
-}
-
-/* iOS Safari specific: prevent text selection during scroll */
-@supports (-webkit-touch-callout: none) {
-  .xterm {
-    -webkit-user-select: none;
-    user-select: none;
-  }
-
-  /* Re-enable selection when needed */
-  .xterm.xterm-selection-active {
-    -webkit-user-select: text;
-    user-select: text;
-  }
 }
