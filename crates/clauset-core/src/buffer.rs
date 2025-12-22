@@ -356,9 +356,9 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
         clean.len() >= 3
     };
 
-    // Find position of `>` prompt in the last 10 lines
+    // Find position of `>` prompt in the last 15 lines
     let mut prompt_pos: Option<usize> = None;
-    for (i, line) in lines.iter().rev().take(10).enumerate() {
+    for (i, line) in lines.iter().rev().take(15).enumerate() {
         let clean_line = strip_ansi_codes(line.trim());
         if is_prompt_line(&clean_line) {
             prompt_pos = Some(i);
@@ -366,11 +366,13 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
         }
     }
 
-    // Find position and type of most recent activity indicator in last 30 lines
+    // Find position and type of most recent activity indicator in last 100 lines
+    // This needs to be large enough to catch thinking status even when Claude
+    // outputs verbose responses (which push the thinking indicator up the buffer)
     let mut activity_pos: Option<usize> = None;
     let mut activity_type: Option<(String, String)> = None;
 
-    for (i, line) in lines.iter().rev().take(30).enumerate() {
+    for (i, line) in lines.iter().rev().take(100).enumerate() {
         let clean_line = strip_ansi_codes(line.trim());
         let clean_lower = clean_line.to_lowercase();
 
@@ -431,7 +433,7 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
                 } else {
                     // Empty prompt - check if there's meaningful content between them
                     let mut has_content_between = false;
-                    for (i, line) in lines.iter().rev().take(30).enumerate() {
+                    for (i, line) in lines.iter().rev().take(100).enumerate() {
                         if i <= p_pos {
                             continue; // Skip lines at or after prompt
                         }
