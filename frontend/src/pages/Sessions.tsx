@@ -254,34 +254,27 @@ export default function Sessions() {
       {/* Floating Action Button */}
       <button
         onClick={() => setShowNewSession(true)}
+        class="pressable"
         style={{
           position: 'fixed',
           bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 20px) + 16px)',
           right: 'calc(max(env(safe-area-inset-right, 0px), 8px) + 16px)',
-          width: '56px',
-          height: '56px',
+          width: '48px',
+          height: '48px',
           display: 'flex',
           "align-items": 'center',
           "justify-content": 'center',
           background: 'var(--color-accent)',
-          border: 'none',
-          "border-radius": '16px',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          "border-radius": '50%',
           color: '#ffffff',
           cursor: 'pointer',
-          "box-shadow": '0 4px 16px rgba(0, 0, 0, 0.3), 0 0 24px rgba(196, 91, 55, 0.3)',
-          transition: 'all 0.2s ease',
+          "box-shadow": '0 2px 8px rgba(0, 0, 0, 0.3)',
+          transition: 'all 0.15s ease',
           "z-index": '30',
         }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'scale(1.05)';
-          e.currentTarget.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.4), 0 0 32px rgba(196, 91, 55, 0.4)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'scale(1)';
-          e.currentTarget.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.3), 0 0 24px rgba(196, 91, 55, 0.3)';
-        }}
       >
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>

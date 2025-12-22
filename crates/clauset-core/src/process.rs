@@ -260,6 +260,12 @@ impl ProcessManager {
             cmd.args(["--resume", &opts.claude_session_id.to_string()]);
         }
 
+        // Pass the selected model to Claude CLI
+        if let Some(model) = &opts.model {
+            cmd.args(["--model", model]);
+            info!("Using model: {}", model);
+        }
+
         cmd.cwd(&opts.project_path);
 
         info!("Spawning Claude with session ID: {}", opts.claude_session_id);

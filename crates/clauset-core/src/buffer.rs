@@ -41,6 +41,19 @@ pub struct SessionActivity {
     /// Recent actions with details for rich preview
     pub recent_actions: Vec<RecentAction>,
     pub last_update: std::time::Instant,
+    /// Tracks if session is in a "busy" state (user sent input, waiting for response)
+    /// Once set to true, only transitions to false when we reliably detect completion.
+    pub is_busy: bool,
+    /// Timestamp when we were marked busy (user sent input)
+    pub busy_since: Option<std::time::Instant>,
+    /// Whether we've seen any activity (Thinking/tool use) since becoming busy.
+    /// We must see activity before we can transition to Ready.
+    pub saw_activity_since_busy: bool,
+    /// Timestamp when we last saw an activity indicator (thinking/tool use)
+    pub last_activity_indicator: std::time::Instant,
+    /// Count of bytes received since last activity indicator - used to detect if
+    /// Claude has output substantial response content
+    pub bytes_since_activity: usize,
 }
 
 impl Default for SessionActivity {
@@ -55,6 +68,11 @@ impl Default for SessionActivity {
             current_step: None,
             recent_actions: Vec::new(),
             last_update: std::time::Instant::now(),
+            is_busy: false,
+            busy_since: None,
+            saw_activity_since_busy: false,
+            last_activity_indicator: std::time::Instant::now(),
+            bytes_since_activity: 0,
         }
     }
 }
@@ -113,17 +131,22 @@ impl SessionBuffers {
         let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
         buffer.append(data);
 
-        // Parse from the FULL buffer (last N bytes) to catch tool calls that span chunks.
-        // This is crucial because terminal output arrives in small pieces and tool calls
-        // might be in earlier chunks that we need to still detect.
-        // We need to extract the text first, then parse it, to avoid borrow conflicts.
-        let text = {
+        // Track bytes received since last activity indicator
+        buffer.activity.bytes_since_activity += data.len();
+
+        // Convert the NEW chunk to text for activity detection
+        // We only want to detect activity indicators in fresh output, not old buffer content
+        let new_chunk_text = String::from_utf8_lossy(data).to_string();
+
+        // Parse from the FULL buffer (last N bytes) for status line and Ready detection.
+        // This is crucial because terminal output arrives in small pieces.
+        let full_buffer_text = {
             let buffer_data = buffer.get_data();
             let parse_start = buffer_data.len().saturating_sub(8192); // Last 8KB
             String::from_utf8_lossy(&buffer_data[parse_start..]).to_string()
         };
 
-        let activity_changed = self.parse_and_update_activity(buffer, &text);
+        let activity_changed = self.parse_and_update_activity(buffer, &new_chunk_text, &full_buffer_text);
 
         if activity_changed {
             Some(buffer.activity.clone())
@@ -133,14 +156,26 @@ impl SessionBuffers {
     }
 
     /// Parse terminal output for status line and current activity.
-    fn parse_and_update_activity(&self, buffer: &mut TerminalBuffer, text: &str) -> bool {
+    ///
+    /// KEY DESIGN: Uses STATEFUL tracking to prevent flickering.
+    /// - When we detect activity (thinking/tool), we set is_busy = true
+    /// - We only transition to Ready when we have POSITIVE evidence that Claude finished:
+    ///   1. Substantial output has been received since last activity indicator
+    ///   2. The prompt appears in a valid position (end of buffer)
+    ///   3. Some time has passed since last activity
+    ///
+    /// Parameters:
+    /// - new_chunk: The fresh data just received (used for activity indicator detection)
+    /// - full_buffer: The last 8KB of buffer (used for status line and Ready detection)
+    fn parse_and_update_activity(&self, buffer: &mut TerminalBuffer, new_chunk: &str, full_buffer: &str) -> bool {
         let mut changed = false;
 
         // Strip ANSI escape codes for parsing
-        let clean_text = strip_ansi_codes(text);
+        let clean_chunk = strip_ansi_codes(new_chunk);
+        let clean_buffer = strip_ansi_codes(full_buffer);
 
-        // Parse status line: "Model | $Cost | InputK/OutputK | ctx:X%"
-        if let Some(status) = parse_status_line(&clean_text) {
+        // Parse status line from FULL BUFFER: "Model | $Cost | InputK/OutputK | ctx:X%"
+        if let Some(status) = parse_status_line(&clean_buffer) {
             if buffer.activity.model != status.model
                 || (buffer.activity.cost - status.cost).abs() > 0.001
                 || buffer.activity.input_tokens != status.input_tokens
@@ -157,35 +192,171 @@ impl SessionBuffers {
             }
         }
 
-        // Parse current activity and extract structured actions
-        if let Some((activity, step, actions)) = parse_activity_and_action(&clean_text) {
-            if buffer.activity.current_activity != activity {
-                buffer.activity.current_activity = activity;
-                buffer.activity.last_update = std::time::Instant::now();
-                changed = true;
-            }
-            if buffer.activity.current_step != step {
-                buffer.activity.current_step = step;
-                changed = true;
-            }
+        // Parse activity from NEW CHUNK ONLY for detecting fresh activity indicators
+        // This prevents old "Thinking" lines from resetting timers
+        let chunk_parsed = parse_activity_and_action(&clean_chunk);
 
+        if let Some((ref _activity, ref step, ref _actions)) = chunk_parsed {
+            // Check if this NEW chunk contains an activity indicator (thinking/tool use)
+            let is_activity_indicator = step.as_deref().map(|s| {
+                let lower = s.to_lowercase();
+                lower == "thinking" || lower == "planning" ||
+                // Tool names indicate active work
+                ["read", "edit", "write", "bash", "grep", "glob", "task", "search", "webfetch", "websearch"]
+                    .iter().any(|t| lower == *t)
+            }).unwrap_or(false);
+
+            // If we detect an activity indicator IN THE NEW CHUNK, update tracking
+            // IMPORTANT: We do NOT set is_busy = true here. Only mark_busy() (called when
+            // user sends input) should transition to busy state. This prevents terminal
+            // redraws (which may contain "Thinking" text) from flipping us back to busy
+            // after we've already transitioned to Ready.
+            if is_activity_indicator {
+                if buffer.activity.is_busy {
+                    // Already busy - update tracking to confirm activity is happening
+                    tracing::debug!(
+                        "[STATUS] Activity indicator in NEW chunk: {:?} - updating activity tracking",
+                        step
+                    );
+                    buffer.activity.saw_activity_since_busy = true;
+                    buffer.activity.last_activity_indicator = std::time::Instant::now();
+                    buffer.activity.bytes_since_activity = 0;
+                } else {
+                    // Not busy (Ready state) - this is likely a terminal redraw, ignore
+                    tracing::debug!(
+                        "[STATUS] Activity indicator in NEW chunk: {:?} - but not busy, ignoring (likely terminal redraw)",
+                        step
+                    );
+                }
+            }
+        }
+
+        // Parse FULL BUFFER for actions list and Ready detection
+        let parsed = parse_activity_and_action(&clean_buffer);
+
+        if let Some((ref _activity, ref _step, ref actions)) = parsed {
             // Add all new actions (deduplicating against existing ones)
             for new_action in actions {
-                // Check if this action already exists (by type + summary)
                 let already_exists = buffer.activity.recent_actions.iter().any(|a| {
                     a.action_type == new_action.action_type && a.summary == new_action.summary
                 });
 
                 if !already_exists {
-                    buffer.activity.recent_actions.push(new_action);
+                    buffer.activity.recent_actions.push(new_action.clone());
                     changed = true;
 
-                    // Keep only the most recent actions
                     while buffer.activity.recent_actions.len() > MAX_RECENT_ACTIONS {
                         buffer.activity.recent_actions.remove(0);
                     }
                 }
             }
+        }
+
+        // STATEFUL STATUS DETERMINATION
+        // Instead of trusting the parsed activity directly, we use state tracking.
+        let now = std::time::Instant::now();
+        let time_since_activity = now.duration_since(buffer.activity.last_activity_indicator);
+
+        // Determine the new step based on state
+        let new_step: Option<String>;
+        let new_activity: String;
+
+        let parsed_step = parsed.as_ref().and_then(|(_, s, _)| s.clone());
+
+        // Calculate time since we were marked busy (for fallback timeout)
+        let time_since_busy = buffer.activity.busy_since
+            .map(|t| now.duration_since(t).as_millis())
+            .unwrap_or(0);
+
+        // DEBUG: Log state for troubleshooting
+        tracing::debug!(
+            "[STATUS] is_busy={}, saw_activity={}, time_since_busy={}ms, time_since_activity={}ms, bytes={}, parsed_step={:?}",
+            buffer.activity.is_busy,
+            buffer.activity.saw_activity_since_busy,
+            time_since_busy,
+            time_since_activity.as_millis(),
+            buffer.activity.bytes_since_activity,
+            parsed_step
+        );
+
+        if buffer.activity.is_busy {
+            // We're in busy state. Check if we should transition to Ready.
+            //
+            // KEY INSIGHT: We must see REAL activity (Thinking/tool use) after becoming busy
+            // before we can transition to Ready. This prevents premature transition when
+            // we see the old `>` prompt in the buffer before Claude starts processing.
+            //
+            // Requirements for transition:
+            // 1. saw_activity_since_busy = true (we've seen Claude actually do something)
+            // 2. At least 300ms since last activity indicator (activity has stopped)
+            // 3. At least 100 bytes received since last activity (Claude's response)
+            // 4. The parsed status shows "Ready" (prompt detected in valid position)
+            //
+            // OR (fallback for quick responses or if Claude never shows activity):
+            // - At least 5 seconds since marked busy AND parsed_ready
+
+            let saw_activity = buffer.activity.saw_activity_since_busy;
+            let time_ok = time_since_activity.as_millis() >= 300;
+            let bytes_ok = buffer.activity.bytes_since_activity >= 100;
+            let parsed_ready = parsed.as_ref()
+                .map(|(_, step, _)| step.as_deref() == Some("Ready"))
+                .unwrap_or(false);
+
+            // Fallback: if we've been busy for 5+ seconds without seeing activity,
+            // and parser says Ready, assume Claude responded quickly without showing status
+            let fallback_timeout = time_since_busy >= 5000 && parsed_ready;
+
+            tracing::debug!(
+                "[STATUS] BUSY CHECK: saw_activity={}, time_ok={}, bytes_ok={}, parsed_ready={}, fallback={}",
+                saw_activity, time_ok, bytes_ok, parsed_ready, fallback_timeout
+            );
+
+            let can_transition = (saw_activity && time_ok && bytes_ok && parsed_ready) || fallback_timeout;
+
+            if can_transition {
+                // Transition to Ready
+                tracing::info!("[STATUS] >>> TRANSITION TO READY <<<");
+                buffer.activity.is_busy = false;
+                buffer.activity.busy_since = None;
+                buffer.activity.saw_activity_since_busy = false;
+                new_step = Some("Ready".to_string());
+                new_activity = "Ready".to_string();
+            } else {
+                // Stay busy - use the parsed activity if available, or show "Thinking"
+                if let Some((ref activity, ref step, _)) = parsed {
+                    if step.as_deref() != Some("Ready") {
+                        new_step = step.clone();
+                        new_activity = activity.clone();
+                    } else {
+                        // Parser says Ready but we don't trust it yet
+                        new_step = Some("Thinking".to_string());
+                        new_activity = "Thinking...".to_string();
+                    }
+                } else {
+                    new_step = Some("Thinking".to_string());
+                    new_activity = "Thinking...".to_string();
+                }
+            }
+        } else {
+            // Not busy - use parsed activity directly
+            if let Some((activity, step, _)) = parsed {
+                new_step = step;
+                new_activity = activity;
+            } else {
+                new_step = Some("Ready".to_string());
+                new_activity = "Ready".to_string();
+            }
+        }
+
+        // Apply the determined status
+        if buffer.activity.current_activity != new_activity {
+            buffer.activity.current_activity = new_activity;
+            buffer.activity.last_update = now;
+            changed = true;
+        }
+        if buffer.activity.current_step != new_step {
+            buffer.activity.current_step = new_step;
+            changed = true;
         }
 
         changed
@@ -213,6 +384,22 @@ impl SessionBuffers {
         let mut buffers = self.buffers.write().await;
         if let Some(buffer) = buffers.get_mut(&session_id) {
             buffer.data.clear();
+        }
+    }
+
+    /// Mark a session as busy (user sent input, waiting for Claude's response).
+    /// This ensures the status stays "Thinking" until Claude reliably finishes.
+    pub async fn mark_busy(&self, session_id: Uuid) {
+        tracing::info!("[STATUS] mark_busy called for session {}", session_id);
+        let mut buffers = self.buffers.write().await;
+        if let Some(buffer) = buffers.get_mut(&session_id) {
+            buffer.activity.is_busy = true;
+            buffer.activity.busy_since = Some(std::time::Instant::now());
+            buffer.activity.saw_activity_since_busy = false; // Reset - must see activity before Ready
+            buffer.activity.last_activity_indicator = std::time::Instant::now();
+            buffer.activity.bytes_since_activity = 0;
+            buffer.activity.current_step = Some("Thinking".to_string());
+            buffer.activity.current_activity = "Thinking...".to_string();
         }
     }
 }

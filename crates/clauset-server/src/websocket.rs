@@ -186,12 +186,26 @@ pub async fn handle_websocket(
                 if let Ok(client_msg) = serde_json::from_str::<WsClientMessage>(&text) {
                     match client_msg {
                         WsClientMessage::Input { content } => {
+                            // Mark session as busy before sending input
+                            // This ensures status shows "Thinking" immediately
+                            state_clone
+                                .session_manager
+                                .mark_session_busy(session_id)
+                                .await;
                             let _ = state_clone
                                 .session_manager
                                 .send_input(session_id, &content)
                                 .await;
                         }
                         WsClientMessage::TerminalInput { data } => {
+                            // Check if input contains Enter key (carriage return)
+                            // If so, mark session as busy since user is submitting a command
+                            if data.contains(&b'\r') || data.contains(&b'\n') {
+                                state_clone
+                                    .session_manager
+                                    .mark_session_busy(session_id)
+                                    .await;
+                            }
                             let _ = state_clone
                                 .session_manager
                                 .send_terminal_input(session_id, &data)

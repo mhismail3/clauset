@@ -105,41 +105,43 @@ export function NewSessionModal(props: NewSessionModalProps) {
       >
         {/* Modal - explicit width that doesn't depend on flex */}
         <div
-          class="bg-bg-surface rounded-2xl animate-slide-up overflow-hidden"
+          class="bg-bg-surface animate-slide-up overflow-hidden"
           style={{
-            width: "min(448px, calc(100vw - 32px))",
+            width: "min(400px, calc(100vw - 32px))",
             "max-height": "calc(100vh - 32px)",
             "max-height": "calc(100dvh - 32px)",
+            "border-radius": "16px",
+            "box-shadow": "0 8px 32px rgba(0, 0, 0, 0.5)",
           }}
         >
           {/* Header */}
           <div
-            class="border-b border-bg-overlay"
             style={{
               display: "flex",
               "align-items": "center",
               "justify-content": "space-between",
-              padding: "16px 20px",
+              padding: "20px 20px 16px",
             }}
           >
-            <h2 style={{ "font-size": "20px", "font-weight": "600", margin: "0" }}>
+            <h2 class="text-text-primary" style={{ "font-size": "18px", "font-weight": "600", margin: "0" }}>
               New Session
             </h2>
             <button
               onClick={props.onClose}
-              class="bg-bg-elevated text-text-muted hover:text-text-primary transition-colors"
+              class="text-text-muted hover:text-text-primary transition-colors pressable"
               style={{
-                width: "32px",
-                height: "32px",
+                width: "28px",
+                height: "28px",
                 display: "flex",
                 "align-items": "center",
                 "justify-content": "center",
-                "border-radius": "50%",
+                "border-radius": "8px",
                 border: "none",
+                background: "transparent",
                 cursor: "pointer",
               }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 6L6 18M6 6l12 12" />
               </svg>
             </button>
@@ -150,20 +152,20 @@ export function NewSessionModal(props: NewSessionModalProps) {
             onSubmit={handleSubmit}
             class="scrollable"
             style={{
-              padding: "20px",
+              padding: "0 20px 20px",
               "max-height": "calc(100vh - 100px)",
               "max-height": "calc(100dvh - 100px)",
             }}
           >
-            <div style={{ display: "flex", "flex-direction": "column", gap: "20px" }}>
+            <div style={{ display: "flex", "flex-direction": "column", gap: "16px" }}>
               <Show when={error()}>
                 <div
-                  class="bg-status-error/10 text-status-error"
+                  class="text-status-error"
                   style={{
-                    padding: "12px 16px",
-                    "border-radius": "12px",
-                    border: "1px solid rgba(255, 69, 58, 0.2)",
-                    "font-size": "14px",
+                    padding: "10px 12px",
+                    "border-radius": "8px",
+                    background: "rgba(196, 91, 55, 0.1)",
+                    "font-size": "13px",
                   }}
                 >
                   {error()}
@@ -173,12 +175,10 @@ export function NewSessionModal(props: NewSessionModalProps) {
               {/* Project Selection */}
               <div>
                 <label
+                  class="text-label"
                   style={{
                     display: "block",
-                    "font-size": "14px",
-                    "font-weight": "500",
-                    "margin-bottom": "8px",
-                    color: "var(--color-text-secondary)",
+                    "margin-bottom": "6px",
                   }}
                 >
                   Project
@@ -187,15 +187,15 @@ export function NewSessionModal(props: NewSessionModalProps) {
                   when={!projectsLoading()}
                   fallback={
                     <div
+                      class="text-text-muted"
                       style={{
                         display: "flex",
                         "align-items": "center",
                         gap: "8px",
-                        padding: "12px 16px",
-                        "border-radius": "12px",
-                        border: "1px solid var(--color-bg-overlay)",
+                        padding: "10px 12px",
+                        "border-radius": "8px",
                         background: "var(--color-bg-base)",
-                        color: "var(--color-text-muted)",
+                        "font-size": "14px",
                       }}
                     >
                       <Spinner size="sm" />
@@ -207,16 +207,15 @@ export function NewSessionModal(props: NewSessionModalProps) {
                     when={projects().length > 0}
                     fallback={
                       <div
+                        class="text-text-muted"
                         style={{
-                          padding: "12px 16px",
-                          "border-radius": "12px",
-                          border: "1px solid var(--color-bg-overlay)",
+                          padding: "10px 12px",
+                          "border-radius": "8px",
                           background: "var(--color-bg-base)",
-                          color: "var(--color-text-muted)",
                           "font-size": "14px",
                         }}
                       >
-                        No projects found in ~/Downloads/projects
+                        No projects found
                       </div>
                     }
                   >
@@ -228,19 +227,19 @@ export function NewSessionModal(props: NewSessionModalProps) {
                       style={{
                         width: "100%",
                         "box-sizing": "border-box",
-                        padding: "12px 16px",
-                        "font-size": "16px",
-                        "border-radius": "12px",
-                        border: "1px solid var(--color-bg-overlay)",
+                        padding: "10px 12px",
+                        "font-size": "15px",
+                        "border-radius": "8px",
+                        border: "none",
                         background: "var(--color-bg-base)",
                         outline: "none",
                         cursor: "pointer",
                         appearance: "none",
                         "-webkit-appearance": "none",
-                        "background-image": `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239a9590' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+                        "background-image": `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235c5855' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
                         "background-repeat": "no-repeat",
-                        "background-position": "right 12px center",
-                        "padding-right": "40px",
+                        "background-position": "right 10px center",
+                        "padding-right": "32px",
                       }}
                     >
                       <For each={projects()}>
@@ -256,12 +255,10 @@ export function NewSessionModal(props: NewSessionModalProps) {
               {/* Model Selection */}
               <div>
                 <label
+                  class="text-label"
                   style={{
                     display: "block",
-                    "font-size": "14px",
-                    "font-weight": "500",
-                    "margin-bottom": "8px",
-                    color: "var(--color-text-secondary)",
+                    "margin-bottom": "6px",
                   }}
                 >
                   Model
@@ -273,19 +270,19 @@ export function NewSessionModal(props: NewSessionModalProps) {
                   style={{
                     width: "100%",
                     "box-sizing": "border-box",
-                    padding: "12px 16px",
-                    "font-size": "16px",
-                    "border-radius": "12px",
-                    border: "1px solid var(--color-bg-overlay)",
+                    padding: "10px 12px",
+                    "font-size": "15px",
+                    "border-radius": "8px",
+                    border: "none",
                     background: "var(--color-bg-base)",
                     outline: "none",
                     cursor: "pointer",
                     appearance: "none",
                     "-webkit-appearance": "none",
-                    "background-image": `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239a9590' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+                    "background-image": `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235c5855' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
                     "background-repeat": "no-repeat",
-                    "background-position": "right 12px center",
-                    "padding-right": "40px",
+                    "background-position": "right 10px center",
+                    "padding-right": "32px",
                   }}
                 >
                   <For each={models}>
@@ -301,18 +298,14 @@ export function NewSessionModal(props: NewSessionModalProps) {
               {/* Initial Prompt (Optional) */}
               <div>
                 <label
+                  class="text-label"
                   style={{
                     display: "block",
-                    "font-size": "14px",
-                    "font-weight": "500",
-                    "margin-bottom": "8px",
-                    color: "var(--color-text-secondary)",
+                    "margin-bottom": "6px",
                   }}
                 >
                   Initial Prompt{' '}
-                  <span style={{ color: "var(--color-text-muted)", "font-weight": "400" }}>
-                    (optional)
-                  </span>
+                  <span style={{ opacity: "0.6" }}>(optional)</span>
                 </label>
                 <textarea
                   value={prompt()}
@@ -323,10 +316,10 @@ export function NewSessionModal(props: NewSessionModalProps) {
                   style={{
                     width: "100%",
                     "box-sizing": "border-box",
-                    padding: "12px 16px",
-                    "font-size": "16px",
-                    "border-radius": "12px",
-                    border: "1px solid var(--color-bg-overlay)",
+                    padding: "10px 12px",
+                    "font-size": "15px",
+                    "border-radius": "8px",
+                    border: "none",
                     background: "var(--color-bg-base)",
                     outline: "none",
                     resize: "none",
@@ -337,13 +330,13 @@ export function NewSessionModal(props: NewSessionModalProps) {
 
               {/* Chat Mode Toggle */}
               <label
-                class="bg-bg-base"
                 style={{
                   display: "flex",
                   "align-items": "flex-start",
-                  gap: "12px",
-                  padding: "16px",
-                  "border-radius": "12px",
+                  gap: "10px",
+                  padding: "12px",
+                  "border-radius": "8px",
+                  background: "var(--color-bg-base)",
                   cursor: "pointer",
                 }}
               >
@@ -352,9 +345,9 @@ export function NewSessionModal(props: NewSessionModalProps) {
                   checked={chatMode()}
                   onChange={(e) => setChatMode(e.currentTarget.checked)}
                   style={{
-                    width: "20px",
-                    height: "20px",
-                    "margin-top": "2px",
+                    width: "18px",
+                    height: "18px",
+                    "margin-top": "1px",
                     "accent-color": "var(--color-accent)",
                     cursor: "pointer",
                     "flex-shrink": "0",
@@ -363,15 +356,15 @@ export function NewSessionModal(props: NewSessionModalProps) {
                 <div style={{ flex: "1", "min-width": "0" }}>
                   <span
                     class="text-text-primary"
-                    style={{ display: "block", "font-size": "14px", "font-weight": "500" }}
+                    style={{ display: "block", "font-size": "13px", "font-weight": "500" }}
                   >
                     Chat Mode
                   </span>
                   <span
-                    class="text-text-muted"
-                    style={{ display: "block", "font-size": "12px", "margin-top": "4px", "line-height": "1.4" }}
+                    class="text-text-tertiary"
+                    style={{ display: "block", "font-size": "11px", "margin-top": "2px", "line-height": "1.4" }}
                   >
-                    Uses Claude API (billed per token). Uncheck for Terminal Mode which uses your Claude Max subscription.
+                    Uses Claude API (per token). Uncheck for Terminal Mode (Max subscription).
                   </span>
                 </div>
               </label>
@@ -379,11 +372,11 @@ export function NewSessionModal(props: NewSessionModalProps) {
               {/* Actions */}
               <div
                 class="safe-bottom"
-                style={{ display: "flex", gap: "12px", "padding-top": "8px" }}
+                style={{ display: "flex", gap: "10px", "padding-top": "4px" }}
               >
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                   style={{ flex: "1" }}
                   onClick={props.onClose}
                 >
@@ -394,7 +387,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
                   style={{ flex: "1" }}
                   disabled={loading() || !selectedProject()}
                 >
-                  {loading() ? 'Creating...' : 'Create Session'}
+                  {loading() ? 'Creating...' : 'Create'}
                 </Button>
               </div>
             </div>

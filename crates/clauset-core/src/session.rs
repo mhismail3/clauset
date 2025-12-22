@@ -393,6 +393,28 @@ impl SessionManager {
     pub async fn clear_terminal_buffer(&self, session_id: Uuid) {
         self.buffers.clear(session_id).await;
     }
+
+    /// Mark a session as busy (user sent input, waiting for Claude's response).
+    /// This ensures the status stays "Thinking" until Claude reliably finishes.
+    /// Also broadcasts an ActivityUpdate event so the dashboard updates immediately.
+    pub async fn mark_session_busy(&self, session_id: Uuid) {
+        self.buffers.mark_busy(session_id).await;
+
+        // Broadcast activity update so dashboard shows "Thinking" immediately
+        if let Some(activity) = self.buffers.get_activity(session_id).await {
+            let _ = self.event_tx.send(ProcessEvent::ActivityUpdate {
+                session_id,
+                model: activity.model,
+                cost: activity.cost,
+                input_tokens: activity.input_tokens,
+                output_tokens: activity.output_tokens,
+                context_percent: activity.context_percent,
+                current_activity: activity.current_activity,
+                current_step: activity.current_step,
+                recent_actions: activity.recent_actions,
+            });
+        }
+    }
 }
 
 fn truncate_preview(s: &str) -> String {
