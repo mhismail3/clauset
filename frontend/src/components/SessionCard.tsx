@@ -99,6 +99,71 @@ function StepBadge(props: { step?: string }) {
   );
 }
 
+// Status indicator when there are no recent actions
+function StatusIndicator(props: { status: Session['status']; preview?: string }) {
+  // Determine what to show based on session status
+  const getStatusDisplay = () => {
+    switch (props.status) {
+      case 'active':
+        // If active but no actions yet, show the preview or "Processing..."
+        return props.preview && props.preview !== 'No preview available'
+          ? { icon: '●', text: props.preview, color: 'var(--color-accent)' }
+          : { icon: '◐', text: 'Processing...', color: 'var(--color-text-secondary)' };
+      case 'starting':
+        return { icon: '◐', text: 'Starting session...', color: 'var(--color-text-secondary)' };
+      case 'waiting_input':
+        return { icon: '▸', text: 'Waiting for your input', color: 'var(--color-accent)' };
+      case 'stopped':
+        return { icon: '✓', text: 'Completed', color: '#2c8f7a' };
+      case 'created':
+        return { icon: '○', text: 'Ready to start', color: 'var(--color-text-muted)' };
+      case 'error':
+        return { icon: '✕', text: 'Error occurred', color: 'var(--color-accent)' };
+      default:
+        return { icon: '○', text: 'No activity', color: 'var(--color-text-muted)' };
+    }
+  };
+
+  const status = getStatusDisplay();
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        'align-items': 'center',
+        gap: '8px',
+        'margin-bottom': '12px',
+        padding: '10px 12px',
+        background: 'var(--color-bg-base)',
+        'border-radius': '8px',
+        'border-left': `2px solid ${status.color}`,
+      }}
+    >
+      <span
+        class="text-mono"
+        style={{
+          color: status.color,
+          'font-size': '12px',
+        }}
+      >
+        {status.icon}
+      </span>
+      <span
+        class="text-mono"
+        style={{
+          'font-size': '12px',
+          color: status.color === 'var(--color-accent)' || status.color === '#2c8f7a'
+            ? status.color
+            : 'var(--color-text-secondary)',
+          'font-style': props.status === 'starting' ? 'italic' : 'normal',
+        }}
+      >
+        {status.text}
+      </span>
+    </div>
+  );
+}
+
 export function SessionCard(props: SessionCardProps) {
   // Memoize recent actions to limit to 3 most recent
   const displayActions = createMemo(() => {
@@ -106,8 +171,43 @@ export function SessionCard(props: SessionCardProps) {
     return actions.slice(-3).reverse(); // Most recent first, max 3
   });
 
-  const hasActivity = createMemo(() => {
-    return props.session.preview && props.session.preview !== 'No preview available';
+  // Determine if we should show status indicator (without actions)
+  // Only show StatusIndicator alone when there are no actions to display
+  const showStatusIndicatorOnly = createMemo(() => {
+    const status = props.session.status;
+    const hasActions = displayActions().length > 0;
+
+    // For terminal states without actions, show status indicator
+    if ((status === 'stopped' || status === 'waiting_input' || status === 'error' || status === 'created') && !hasActions) {
+      return true;
+    }
+    // For active/starting states without actions, show processing indicator
+    if ((status === 'active' || status === 'starting') && !hasActions) {
+      return true;
+    }
+    return false;
+  });
+
+  // Show actions whenever we have them, regardless of status
+  const showActions = createMemo(() => {
+    return displayActions().length > 0;
+  });
+
+  // Get the status color for the actions container border
+  const getActionsBorderColor = createMemo(() => {
+    switch (props.session.status) {
+      case 'active':
+      case 'starting':
+        return 'var(--color-accent)';
+      case 'stopped':
+        return '#2c8f7a'; // Green for completed
+      case 'waiting_input':
+        return 'var(--color-accent)';
+      case 'error':
+        return 'var(--color-accent)';
+      default:
+        return 'var(--color-text-muted)';
+    }
   });
 
   return (
@@ -170,23 +270,16 @@ export function SessionCard(props: SessionCardProps) {
           </button>
         </div>
 
-        {/* Current activity - main preview line */}
-        <div
-          style={{
-            'font-size': '14px',
-            color: hasActivity() ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-            'margin-bottom': '8px',
-            overflow: 'hidden',
-            'text-overflow': 'ellipsis',
-            'white-space': 'nowrap',
-            'font-style': hasActivity() ? 'normal' : 'italic',
-          }}
-        >
-          {props.session.preview || 'Waiting for activity...'}
-        </div>
+        {/* Status indicator only when no actions to display */}
+        <Show when={showStatusIndicatorOnly()}>
+          <StatusIndicator
+            status={props.session.status}
+            preview={props.session.preview}
+          />
+        </Show>
 
-        {/* Recent actions - detailed sub-lines */}
-        <Show when={displayActions().length > 0}>
+        {/* Recent actions - show for ALL states that have actions */}
+        <Show when={showActions()}>
           <div
             style={{
               display: 'flex',
@@ -196,9 +289,48 @@ export function SessionCard(props: SessionCardProps) {
               padding: '8px 10px',
               background: 'var(--color-bg-base)',
               'border-radius': '8px',
-              'border-left': '2px solid var(--color-accent)',
+              'border-left': `2px solid ${getActionsBorderColor()}`,
             }}
           >
+            {/* Status header - show for all states with appropriate message */}
+            <div
+              style={{
+                display: 'flex',
+                'align-items': 'center',
+                gap: '6px',
+                'margin-bottom': '4px',
+                'padding-bottom': '6px',
+                'border-bottom': '1px solid var(--color-bg-overlay)',
+              }}
+            >
+              <span
+                class="text-mono"
+                style={{
+                  'font-size': '11px',
+                  color: getActionsBorderColor(),
+                }}
+              >
+                {props.session.status === 'stopped' ? '✓' :
+                 props.session.status === 'waiting_input' ? '▸' :
+                 props.session.status === 'error' ? '✕' : '●'}
+              </span>
+              <span
+                class="text-mono"
+                style={{
+                  'font-size': '11px',
+                  color: getActionsBorderColor(),
+                  'font-weight': '500',
+                }}
+              >
+                {props.session.status === 'stopped' ? 'Completed' :
+                 props.session.status === 'waiting_input' ? 'Waiting for input' :
+                 props.session.status === 'error' ? 'Error' :
+                 props.session.current_step ? props.session.current_step :
+                 'Processing'}
+              </span>
+            </div>
+
+            {/* Recent actions list */}
             <For each={displayActions()}>
               {(action, index) => (
                 <div
@@ -211,7 +343,7 @@ export function SessionCard(props: SessionCardProps) {
                 >
                   <span
                     style={{
-                      color: 'var(--color-accent)',
+                      color: getActionsBorderColor(),
                       'flex-shrink': '0',
                       'margin-top': '2px',
                     }}

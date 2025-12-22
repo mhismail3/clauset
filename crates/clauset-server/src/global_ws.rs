@@ -52,6 +52,7 @@ pub async fn handle_global_websocket(socket: WebSocket, state: Arc<AppState>) ->
                 // Forward session exits as status changes
                 ProcessEvent::Exited { session_id, .. } => {
                     Some(WsServerMessage::StatusChange {
+                        session_id: *session_id,
                         old_status: clauset_types::SessionStatus::Active,
                         new_status: clauset_types::SessionStatus::Stopped,
                     })

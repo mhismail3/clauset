@@ -118,39 +118,110 @@ export default function Sessions() {
 
   return (
     <div class="flex flex-col h-full">
-      {/* Header */}
+      {/* Header - Clean centered design */}
       <header class="flex-none glass safe-top">
         <div
           style={{
             display: 'flex',
             "align-items": 'center',
             "justify-content": 'space-between',
-            padding: '16px 20px',
+            padding: '14px 20px',
           }}
         >
-          <div style={{ display: 'flex', "align-items": 'center', gap: '10px' }}>
-            <img src="/logo.svg" alt="Clauset logo" style={{ width: '36px', height: '36px' }} />
-            <div>
-              <h1 class="text-brand" style={{ color: 'var(--color-accent)', "font-size": '22px', margin: '0' }}>
-                Clauset
-              </h1>
-            <p
-              class="text-mono"
+          {/* Left: New Session Button with glow effect */}
+          <button
+            onClick={() => setShowNewSession(true)}
+            style={{
+              display: 'flex',
+              "align-items": 'center',
+              "justify-content": 'center',
+              gap: '6px',
+              padding: '8px 14px',
+              background: 'var(--color-accent)',
+              border: 'none',
+              "border-radius": '10px',
+              color: '#ffffff',
+              "font-size": '13px',
+              "font-weight": '600',
+              cursor: 'pointer',
+              "box-shadow": '0 0 16px rgba(196, 91, 55, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2)',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow = '0 0 24px rgba(196, 91, 55, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3)';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow = '0 0 16px rgba(196, 91, 55, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            <span>New</span>
+          </button>
+
+          {/* Center: Logo + Title */}
+          <div
+            style={{
+              display: 'flex',
+              "align-items": 'center',
+              gap: '10px',
+              position: 'absolute',
+              left: '50%',
+              transform: 'translateX(-50%)',
+            }}
+          >
+            <img
+              src="/logo.svg"
+              alt="Clauset logo"
+              style={{ width: '28px', height: '28px' }}
+            />
+            <h1
+              class="text-brand"
               style={{
-                "font-size": '12px',
-                color: 'var(--color-text-muted)',
-                "margin-top": '2px',
+                color: 'var(--color-accent)',
+                "font-size": '20px',
+                "font-weight": '600',
+                margin: '0',
+                "letter-spacing": '0.5px',
               }}
             >
-              <Show when={activeCount() > 0} fallback="no active sessions">
-                {activeCount()} active
-              </Show>
-            </p>
-            </div>
+              Clauset
+            </h1>
           </div>
-          <Button onClick={() => setShowNewSession(true)} size="sm">
-            + new
-          </Button>
+
+          {/* Right: Active session count */}
+          <div
+            class="text-mono"
+            style={{
+              display: 'flex',
+              "align-items": 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              background: activeCount() > 0 ? 'rgba(44, 143, 122, 0.15)' : 'var(--color-bg-surface)',
+              "border-radius": '8px',
+              "font-size": '12px',
+              color: activeCount() > 0 ? '#2c8f7a' : 'var(--color-text-muted)',
+            }}
+          >
+            <Show when={activeCount() > 0} fallback={
+              <span>idle</span>
+            }>
+              <span
+                style={{
+                  width: '6px',
+                  height: '6px',
+                  background: '#2c8f7a',
+                  "border-radius": '50%',
+                  animation: 'pulse 2s infinite',
+                }}
+              />
+              <span>{activeCount()} active</span>
+            </Show>
+          </div>
         </div>
       </header>
 

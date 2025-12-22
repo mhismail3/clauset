@@ -79,6 +79,7 @@ pub enum WsServerMessage {
     TerminalBuffer { data: Vec<u8> },
     /// Session status changed.
     StatusChange {
+        session_id: Uuid,
         old_status: SessionStatus,
         new_status: SessionStatus,
     },

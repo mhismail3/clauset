@@ -60,6 +60,26 @@ export function updateSessionFromActivity(update: ActivityUpdate) {
 }
 
 /**
+ * Update a session's status when it changes (e.g., when session stops/completes).
+ * Called from global WebSocket when status_change event is received.
+ */
+export function updateSessionStatus(sessionId: string, newStatus: Session['status']) {
+  setSessionsStore('list', (sessions) =>
+    sessions.map((session) => {
+      if (session.id === sessionId) {
+        return {
+          ...session,
+          status: newStatus,
+          // Clear current_step when session is done
+          current_step: newStatus === 'stopped' ? undefined : session.current_step,
+        };
+      }
+      return session;
+    })
+  );
+}
+
+/**
  * Get a specific session by ID with reactive access
  */
 export function getSession(id: string): Session | undefined {

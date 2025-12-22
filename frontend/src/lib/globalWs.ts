@@ -2,7 +2,8 @@
 // This WebSocket stays connected across navigation and updates the session store
 
 import { createSignal } from 'solid-js';
-import { updateSessionFromActivity } from '../stores/sessions';
+import { updateSessionFromActivity, updateSessionStatus } from '../stores/sessions';
+import type { Session } from './api';
 
 export type GlobalWsState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
 
@@ -56,8 +57,19 @@ function handleMessage(event: MessageEvent) {
         break;
       }
       case 'status_change': {
-        // Trigger a refetch of sessions when status changes
-        // This is handled by the sessions store
+        // Map backend status strings to frontend status type
+        const statusMap: Record<string, Session['status']> = {
+          'Created': 'created',
+          'Starting': 'starting',
+          'Active': 'active',
+          'WaitingInput': 'waiting_input',
+          'Stopped': 'stopped',
+          'Error': 'error',
+        };
+        const newStatus = statusMap[data.new_status] || 'stopped';
+        if (data.session_id) {
+          updateSessionStatus(data.session_id, newStatus);
+        }
         break;
       }
       case 'error': {

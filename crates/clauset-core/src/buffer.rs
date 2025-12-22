@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -111,8 +113,16 @@ impl SessionBuffers {
         let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
         buffer.append(data);
 
-        // Try to parse status line and activity from the new data
-        let text = String::from_utf8_lossy(data);
+        // Parse from the FULL buffer (last N bytes) to catch tool calls that span chunks.
+        // This is crucial because terminal output arrives in small pieces and tool calls
+        // might be in earlier chunks that we need to still detect.
+        // We need to extract the text first, then parse it, to avoid borrow conflicts.
+        let text = {
+            let buffer_data = buffer.get_data();
+            let parse_start = buffer_data.len().saturating_sub(8192); // Last 8KB
+            String::from_utf8_lossy(&buffer_data[parse_start..]).to_string()
+        };
+
         let activity_changed = self.parse_and_update_activity(buffer, &text);
 
         if activity_changed {
@@ -148,7 +158,7 @@ impl SessionBuffers {
         }
 
         // Parse current activity and extract structured actions
-        if let Some((activity, step, action)) = parse_activity_and_action(&clean_text) {
+        if let Some((activity, step, actions)) = parse_activity_and_action(&clean_text) {
             if buffer.activity.current_activity != activity {
                 buffer.activity.current_activity = activity;
                 buffer.activity.last_update = std::time::Instant::now();
@@ -158,19 +168,22 @@ impl SessionBuffers {
                 buffer.activity.current_step = step;
                 changed = true;
             }
-            // Add new action if present
-            if let Some(new_action) = action {
-                // Avoid duplicate actions
-                let dominated = buffer.activity.recent_actions.iter().any(|a| {
+
+            // Add all new actions (deduplicating against existing ones)
+            for new_action in actions {
+                // Check if this action already exists (by type + summary)
+                let already_exists = buffer.activity.recent_actions.iter().any(|a| {
                     a.action_type == new_action.action_type && a.summary == new_action.summary
                 });
-                if !dominated {
+
+                if !already_exists {
                     buffer.activity.recent_actions.push(new_action);
+                    changed = true;
+
                     // Keep only the most recent actions
-                    if buffer.activity.recent_actions.len() > MAX_RECENT_ACTIONS {
+                    while buffer.activity.recent_actions.len() > MAX_RECENT_ACTIONS {
                         buffer.activity.recent_actions.remove(0);
                     }
-                    changed = true;
                 }
             }
         }
@@ -204,30 +217,26 @@ impl SessionBuffers {
     }
 }
 
+/// Comprehensive regex for ANSI escape sequences.
+/// Matches:
+/// - CSI sequences: ESC [ ... letter (colors, cursor, etc.)
+/// - OSC sequences: ESC ] ... BEL or ESC \ (window title, etc.)
+/// - Character set: ESC ( or ESC ) followed by character
+/// - Other escapes: ESC = ESC > ESC M etc.
+static ANSI_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(concat!(
+        r"\x1b\[[0-9;?]*[A-Za-z]",    // CSI sequences (colors, cursor, etc.)
+        r"|\x1b\][^\x07]*\x07",        // OSC sequences ending with BEL
+        r"|\x1b\][^\x1b]*\x1b\\",      // OSC sequences ending with ST
+        r"|\x1b[()][A-Z0-9]",          // Character set selection
+        r"|\x1b[=>MNOP78]",            // Other single-char escapes
+        r"|\x1b",                       // Catch any remaining bare ESC
+    )).unwrap()
+});
+
 /// Strip ANSI escape codes from text.
 fn strip_ansi_codes(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Skip escape sequence
-            if chars.peek() == Some(&'[') {
-                chars.next(); // consume '['
-                // Skip until we hit a letter (end of sequence)
-                while let Some(&next) = chars.peek() {
-                    chars.next();
-                    if next.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            }
-        } else {
-            result.push(c);
-        }
-    }
-
-    result
+    ANSI_REGEX.replace_all(text, "").to_string()
 }
 
 /// Parsed status line info.
@@ -239,18 +248,22 @@ struct ParsedStatus {
     context_percent: u8,
 }
 
+/// Pre-compiled regex for status line parsing
+static STATUS_LINE_REGEX: Lazy<Regex> = Lazy::new(|| {
+    // Model must start with a letter, followed by alphanumeric, dots, and spaces
+    // Examples: "Opus 4.5", "Claude 3", "Sonnet 3.5"
+    Regex::new(
+        r"([A-Za-z][A-Za-z0-9. ]*?)\s*\|\s*\$([0-9.]+)\s*\|\s*([0-9.]+)K?/([0-9.]+)K?\s*\|\s*ctx:(\d+)%"
+    ).unwrap()
+});
+
 /// Parse Claude's status line format: "Model | $Cost | InputK/OutputK | ctx:X%"
 fn parse_status_line(text: &str) -> Option<ParsedStatus> {
     // Look for the pattern in each line
     for line in text.lines() {
         let line = line.trim();
 
-        // Match pattern: "Opus 4.5 | $0.68 | 29.2K/22.5K | ctx:11%"
-        let re_pattern = regex::Regex::new(
-            r"([A-Za-z0-9. ]+?)\s*\|\s*\$([0-9.]+)\s*\|\s*([0-9.]+)K?/([0-9.]+)K?\s*\|\s*ctx:(\d+)%"
-        ).ok()?;
-
-        if let Some(caps) = re_pattern.captures(line) {
+        if let Some(caps) = STATUS_LINE_REGEX.captures(line) {
             let model = caps.get(1)?.as_str().trim().to_string();
             let cost = caps.get(2)?.as_str().parse().ok()?;
             let input_k: f64 = caps.get(3)?.as_str().parse().ok()?;
@@ -279,48 +292,144 @@ fn now_ms() -> u64 {
 }
 
 /// Parse current activity from terminal output.
-/// Returns (current_activity, current_step, optional new action)
-fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Option<RecentAction>)> {
-    // Process lines in reverse order (most recent first)
+/// Returns (current_activity, current_step, list of new actions)
+///
+/// This function now properly handles the case where Claude is "Thinking" but we still
+/// want to capture tool actions from earlier in the output.
+fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<RecentAction>)> {
     let lines: Vec<&str> = text.lines().collect();
 
-    let mut best_activity: Option<(String, Option<String>, Option<RecentAction>)> = None;
+    // First pass: Find the current status (thinking, planning, etc.) from recent lines
+    let mut current_status: Option<(String, String)> = None; // (activity, step)
 
-    for line in lines.iter().rev().take(100) {
-        let line = line.trim();
-        let clean_line = strip_ansi_codes(line);
+    // Check the last 20 lines for thinking/planning status
+    for line in lines.iter().rev().take(20) {
+        let clean_line = strip_ansi_codes(line.trim());
         let clean_lower = clean_line.to_lowercase();
 
-        // Skip empty lines, very short lines, and status lines
+        // Skip empty, status lines, and UI chrome
         if clean_line.len() < 3 || clean_line.contains("ctx:") || clean_line.contains("| $") {
             continue;
         }
-
-        // Parse structured tool activity - now more flexible
-        if let Some(result) = parse_tool_activity_flexible(&clean_line, &clean_lower) {
-            return Some(result);
+        if is_ui_chrome(&clean_line) {
+            continue;
         }
 
-        // Check for thinking/planning states
+        // Check for thinking/planning/actualizing states (Claude's internal processing)
         if clean_lower.contains("thinking") && !clean_lower.contains("thinking about") {
-            best_activity = Some((
-                "Thinking...".to_string(),
-                Some("Thinking".to_string()),
-                None,
-            ));
-            // Don't return yet - keep looking for more specific activity
+            current_status = Some(("Thinking...".to_string(), "Thinking".to_string()));
+            break;
         }
-        if clean_lower.contains("planning") && best_activity.is_none() {
-            best_activity = Some((
-                "Planning...".to_string(),
-                Some("Planning".to_string()),
-                None,
-            ));
+        if clean_lower.contains("actualizing") || clean_lower.contains("mustering") {
+            current_status = Some(("Thinking...".to_string(), "Thinking".to_string()));
+            break;
+        }
+        if clean_lower.contains("planning") {
+            current_status = Some(("Planning...".to_string(), "Planning".to_string()));
+            break;
+        }
+
+        // If we hit a tool invocation line first, the status is that tool
+        if let Some((activity, step, _)) = parse_tool_activity_flexible(&clean_line, &clean_lower) {
+            current_status = Some((activity, step.unwrap_or_default()));
+            break;
         }
     }
 
-    best_activity
+    // Second pass: Find ALL tool actions in the buffer (scan more lines)
+    // We collect multiple actions and return them all for deduplication by the caller
+    let mut found_actions: Vec<RecentAction> = Vec::new();
+    let mut seen_summaries: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for line in lines.iter().rev().take(150) {
+        let clean_line = strip_ansi_codes(line.trim());
+        let clean_lower = clean_line.to_lowercase();
+
+        // Skip empty, status lines, and UI chrome
+        if clean_line.len() < 3 || clean_line.contains("ctx:") || clean_line.contains("| $") {
+            continue;
+        }
+        if is_ui_chrome(&clean_line) {
+            continue;
+        }
+
+        // Look for tool invocations to record as actions
+        if let Some((_, _, Some(action))) = parse_tool_activity_flexible(&clean_line, &clean_lower) {
+            // Deduplicate within this parse by summary
+            let key = format!("{}:{}", action.action_type, action.summary);
+            if !seen_summaries.contains(&key) {
+                seen_summaries.insert(key);
+                found_actions.push(action);
+
+                // Limit to 10 actions per parse to avoid excessive processing
+                if found_actions.len() >= 10 {
+                    break;
+                }
+            }
+        }
+    }
+
+    // Reverse so oldest is first (they'll be added in order)
+    found_actions.reverse();
+
+    // Combine results
+    if let Some((activity, step)) = current_status {
+        return Some((activity, Some(step), found_actions));
+    }
+
+    // Fallback: if we found actions but no explicit status, use the most recent action's info
+    if !found_actions.is_empty() {
+        let last_action = found_actions.last().unwrap();
+        return Some((
+            last_action.summary.clone(),
+            None,
+            found_actions,
+        ));
+    }
+
+    // Last resort: find any meaningful line
+    for line in lines.iter().rev().take(50) {
+        let clean = strip_ansi_codes(line.trim());
+        if clean.len() > 5 && clean.len() < 80
+            && !clean.contains("ctx:")
+            && !clean.contains("| $")
+            && !is_ui_chrome(&clean)
+        {
+            return Some((truncate_str(&clean, 50), None, Vec::new()));
+        }
+    }
+
+    None
 }
+
+/// Check if a line looks like UI chrome (borders, spinners, etc.) that we should skip
+fn is_ui_chrome(line: &str) -> bool {
+    // Skip lines that are just box-drawing characters
+    if line.chars().all(|c| "─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋═║╔╗╚╝╠╣╦╩╬▀▄█▌▐░▒▓ ".contains(c)) {
+        return true;
+    }
+
+    // Skip lines that look like progress spinners
+    if line.len() < 5 && (line.contains('⠋') || line.contains('⠙') || line.contains('⠹')
+        || line.contains('⠸') || line.contains('⠼') || line.contains('⠴')
+        || line.contains('⠦') || line.contains('⠧') || line.contains('⠇') || line.contains('⠏')) {
+        return true;
+    }
+
+    // Skip common UI separators
+    if line.chars().all(|c| c == '-' || c == '=' || c == '_' || c == ' ') {
+        return true;
+    }
+
+    false
+}
+
+/// Pre-compiled regex for tool invocation pattern: ToolName(args) or ● ToolName(args)
+static TOOL_INVOCATION_REGEX: Lazy<Regex> = Lazy::new(|| {
+    // Match tool invocations like "● Bash(git status)" or "Read(file.txt)"
+    // The pattern allows for any bullet/symbol prefix, then captures tool name and args
+    Regex::new(r"^[●•\-\*\s]*\s*(Read|Edit|Write|Bash|Grep|Glob|Task|Search|WebFetch|WebSearch|TodoWrite|NotebookEdit)\s*[\(:]?\s*(.*)$").unwrap()
+});
 
 /// More flexible tool activity parsing that matches Claude Code's actual output.
 fn parse_tool_activity_flexible(line: &str, line_lower: &str) -> Option<(String, Option<String>, Option<RecentAction>)> {
@@ -342,13 +451,75 @@ fn parse_tool_activity_flexible(line: &str, line_lower: &str) -> Option<(String,
         }
     }
 
+    // Skip user input prompts (lines starting with "> ") but not tool outputs (lines with "└")
+    if line.starts_with("> ") && !line.contains("└") {
+        return None;
+    }
+
     let ts = now_ms();
 
+    // === PRIMARY PATTERN: ToolName(args) format used by Claude Code ===
+    // This matches lines like:
+    //   ● Bash(git status)
+    //   ● Read(README.md)
+    //   ● Search(pattern: "*.md", path: "/foo")
+    //   Read /path/to/file
+    if let Some(caps) = TOOL_INVOCATION_REGEX.captures(line) {
+        let tool_name = caps.get(1)?.as_str();
+        let args_raw = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+
+        // Clean up the args - remove surrounding parens/colons and trailing paren
+        let args = args_raw
+            .trim()
+            .trim_start_matches(['(', ':'])
+            .trim_end_matches(')')
+            .trim();
+
+        let action_type = match tool_name {
+            "Read" => "read",
+            "Edit" => "edit",
+            "Write" => "write",
+            "Bash" => "bash",
+            "Grep" | "Glob" | "Search" => "search",
+            "Task" => "task",
+            "WebFetch" | "WebSearch" => "web",
+            "TodoWrite" => "task",
+            "NotebookEdit" => "edit",
+            _ => "task",
+        };
+
+        // Create a nice summary
+        let summary = if !args.is_empty() {
+            // For file operations, show the filename
+            let display_arg = if args.contains('/') {
+                args.split('/').last().unwrap_or(args)
+            } else {
+                args
+            };
+            // Truncate and clean up
+            let display_arg = display_arg.split_whitespace().next().unwrap_or(display_arg);
+            format!("{} {}", tool_name, truncate_str(display_arg, 25))
+        } else {
+            tool_name.to_string()
+        };
+
+        return Some((
+            summary.clone(),
+            Some(tool_name.to_string()),
+            Some(RecentAction {
+                action_type: action_type.to_string(),
+                summary,
+                detail: if args.is_empty() { None } else { Some(truncate_str(args, 70)) },
+                timestamp: ts,
+            }),
+        ));
+    }
+
     // === BASH / COMMAND DETECTION ===
-    // Look for command prompts: $, >, or lines starting with common commands
-    if line.starts_with("$ ") || line.starts_with("> ") {
-        let cmd = &line[2..].trim();
-        if !cmd.is_empty() && cmd.len() < 100 {
+    // Look for command prompts with `$ ` prefix (Claude running shell commands)
+    if line.starts_with("$ ") {
+        let cmd = line[2..].trim();
+        if !cmd.is_empty() && cmd.len() < 100 && looks_like_shell_command(cmd) {
             return Some((
                 format!("$ {}", truncate_str(cmd, 40)),
                 Some("Bash".to_string()),
@@ -381,82 +552,77 @@ fn parse_tool_activity_flexible(line: &str, line_lower: &str) -> Option<(String,
         }
     }
 
-    // === FILE PATH DETECTION ===
-    // Any line containing an absolute path or relative path with extension
-    if let Some(path) = extract_file_path_flexible(line) {
-        let filename = path.split('/').last().unwrap_or(&path);
+    // === FALLBACK: Strip leading symbols and check for tool verbs ===
+    // This handles cases where bullets/symbols don't match exactly
+    let stripped = line.trim_start_matches(|c: char| !c.is_alphanumeric());
+    let stripped_lower = stripped.to_lowercase();
 
-        // Determine action type from context
-        let (action_type, action_verb, step) = if line_lower.contains("read") || line_lower.contains("reading") {
-            ("read", "Read", "Read")
-        } else if line_lower.contains("writ") || line_lower.contains("creat") {
-            ("write", "Wrote", "Write")
-        } else if line_lower.contains("edit") || line_lower.contains("modif") || line_lower.contains("updat") {
-            ("edit", "Edited", "Edit")
-        } else if line_lower.contains("delet") || line_lower.contains("remov") {
-            ("delete", "Deleted", "Delete")
-        } else {
-            // Default to read for file mentions
-            ("read", "Read", "Read")
-        };
-
-        return Some((
-            format!("{} {}", action_verb, truncate_str(filename, 30)),
-            Some(step.to_string()),
-            Some(RecentAction {
-                action_type: action_type.to_string(),
-                summary: format!("{} {}", action_verb, truncate_str(filename, 25)),
-                detail: Some(truncate_str(&path, 70)),
-                timestamp: ts,
-            }),
-        ));
-    }
-
-    // === TOOL KEYWORD DETECTION ===
-    // Look for tool names at start of line or after bullets/markers
-    let tool_patterns = [
-        ("read", "Read", "read"),
-        ("write", "Write", "write"),
-        ("edit", "Edit", "edit"),
-        ("bash", "Bash", "bash"),
-        ("grep", "Grep", "search"),
-        ("glob", "Glob", "search"),
-        ("search", "Search", "search"),
-        ("task", "Task", "task"),
-        ("todowrite", "Todo", "task"),
-        ("webfetch", "Web", "web"),
-        ("websearch", "Web", "web"),
+    let tool_verbs = [
+        ("Read", "read"),
+        ("Edit", "edit"),
+        ("Write", "write"),
+        ("Bash", "bash"),
+        ("Grep", "search"),
+        ("Glob", "search"),
+        ("Task", "task"),
+        ("Search", "search"),
+        ("WebFetch", "web"),
+        ("WebSearch", "web"),
     ];
 
-    for (keyword, step, action_type) in tool_patterns {
-        // Check if line contains the tool name in a way that suggests tool invocation
-        // Look for patterns like "Read /path", "● Read", "Tool: Read", etc.
-        let has_tool = line_lower.starts_with(keyword)
-            || line_lower.contains(&format!(" {}", keyword))
-            || line_lower.contains(&format!("●{}", keyword))
-            || line_lower.contains(&format!("● {}", keyword))
-            || line_lower.contains(&format!("tool: {}", keyword));
+    for (verb, action_type) in tool_verbs {
+        if stripped.starts_with(verb) && stripped.len() > verb.len() {
+            let next_char = stripped.chars().nth(verb.len());
+            if next_char == Some(' ') || next_char == Some(':') || next_char == Some('(') {
+                let detail = stripped[verb.len()..].trim();
+                let detail = detail
+                    .trim_start_matches([':', '(', ' '])
+                    .trim_end_matches(')')
+                    .trim();
 
-        if has_tool && line.len() < 150 {
-            // Extract what follows the keyword as detail
-            let detail = if let Some(pos) = line_lower.find(keyword) {
-                let rest = &line[pos + keyword.len()..].trim();
-                if !rest.is_empty() && rest.len() < 100 {
-                    Some(truncate_str(rest, 70))
+                let summary = if !detail.is_empty() {
+                    let filename = detail.split('/').last().unwrap_or(detail);
+                    let filename = filename.split_whitespace().next().unwrap_or(filename);
+                    format!("{} {}", verb, truncate_str(filename, 25))
                 } else {
-                    None
-                }
-            } else {
-                None
-            };
+                    verb.to_string()
+                };
 
+                return Some((
+                    summary.clone(),
+                    Some(verb.to_string()),
+                    Some(RecentAction {
+                        action_type: action_type.to_string(),
+                        summary,
+                        detail: if detail.is_empty() { None } else { Some(truncate_str(detail, 70)) },
+                        timestamp: ts,
+                    }),
+                ));
+            }
+        }
+    }
+
+    // === Progress indicators ===
+    let progress_patterns = [
+        ("reading ", "Read", "read"),
+        ("editing ", "Edit", "edit"),
+        ("writing ", "Write", "write"),
+        ("searching ", "Search", "search"),
+        ("running ", "Bash", "bash"),
+        ("executing ", "Bash", "bash"),
+        ("fetching ", "Web", "web"),
+    ];
+
+    for (pattern, step, action_type) in progress_patterns {
+        if stripped_lower.starts_with(pattern) {
+            let detail = &stripped[pattern.len()..];
             return Some((
                 format!("{}...", step),
                 Some(step.to_string()),
                 Some(RecentAction {
                     action_type: action_type.to_string(),
-                    summary: format!("{}", step),
-                    detail,
+                    summary: format!("{}...", step),
+                    detail: if detail.trim().is_empty() { None } else { Some(truncate_str(detail.trim(), 70)) },
                     timestamp: ts,
                 }),
             ));
@@ -468,12 +634,10 @@ fn parse_tool_activity_flexible(line: &str, line_lower: &str) -> Option<(String,
         ("compiling ", "build", "Building"),
         ("building ", "build", "Building"),
         ("testing ", "test", "Testing"),
-        ("running ", "run", "Running"),
         ("installing ", "install", "Installing"),
         ("downloading ", "download", "Downloading"),
         ("error[", "error", "Error"),
         ("warning:", "warning", "Warning"),
-        ("success", "success", "Success"),
         ("finished ", "build", "Finished"),
     ];
 
@@ -495,45 +659,6 @@ fn parse_tool_activity_flexible(line: &str, line_lower: &str) -> Option<(String,
     None
 }
 
-/// Extract a file path from a line - more flexible matching
-fn extract_file_path_flexible(line: &str) -> Option<String> {
-    // Look for absolute paths
-    if let Some(start) = line.find('/') {
-        // Extract path starting from /
-        let rest = &line[start..];
-        let end = rest.find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == ')' || c == ']' || c == '>')
-            .unwrap_or(rest.len());
-        let path = &rest[..end];
-
-        // Validate it looks like a real path
-        if path.len() > 3 && (path.contains('.') || path.ends_with('/')) {
-            // Skip if it looks like a URL
-            if !path.contains("://") && !path.starts_with("//") {
-                return Some(path.to_string());
-            }
-        }
-    }
-
-    // Look for relative paths with common extensions
-    let extensions = [".rs", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".json",
-                      ".toml", ".yaml", ".yml", ".md", ".txt", ".sh", ".css", ".html"];
-    for ext in extensions {
-        if let Some(pos) = line.find(ext) {
-            // Walk backwards to find start of filename
-            let before = &line[..pos + ext.len()];
-            let start = before.rfind(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '(' || c == '[')
-                .map(|i| i + 1)
-                .unwrap_or(0);
-            let path = &before[start..];
-            if path.len() > 2 && !path.contains(' ') {
-                return Some(path.to_string());
-            }
-        }
-    }
-
-    None
-}
-
 /// Truncate a string to a maximum length with ellipsis.
 fn truncate_str(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
@@ -541,6 +666,57 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len.saturating_sub(3)])
     }
+}
+
+/// Check if a string looks like an actual shell command rather than user instruction.
+fn looks_like_shell_command(cmd: &str) -> bool {
+    let cmd_lower = cmd.to_lowercase();
+
+    // Known command starters
+    let shell_commands = [
+        "cargo", "npm", "pnpm", "yarn", "git", "cd", "ls", "cat", "grep", "find",
+        "mkdir", "rm", "cp", "mv", "make", "python", "node", "rustc", "gcc", "go",
+        "docker", "kubectl", "brew", "apt", "pip", "npx", "bunx", "deno", "bun",
+        "echo", "export", "source", "curl", "wget", "ssh", "scp", "rsync",
+        "chmod", "chown", "tar", "zip", "unzip", "touch", "head", "tail", "sed", "awk",
+    ];
+
+    // Check if starts with a known command
+    let first_word = cmd_lower.split_whitespace().next().unwrap_or("");
+    if shell_commands.iter().any(|&c| first_word == c) {
+        return true;
+    }
+
+    // Check for absolute paths being executed
+    if first_word.starts_with('/') || first_word.starts_with("./") {
+        return true;
+    }
+
+    // Check for pipes, redirections, or other shell operators
+    if cmd.contains(" | ") || cmd.contains(" > ") || cmd.contains(" >> ")
+       || cmd.contains(" && ") || cmd.contains(" || ") {
+        return true;
+    }
+
+    // If it contains spaces and doesn't start with a capital letter or common prose words,
+    // it might be a command
+    if !cmd_lower.starts_with("please") && !cmd_lower.starts_with("can you")
+       && !cmd_lower.starts_with("help") && !cmd_lower.starts_with("fix")
+       && !cmd_lower.starts_with("add") && !cmd_lower.starts_with("create")
+       && !cmd_lower.starts_with("update") && !cmd_lower.starts_with("change")
+       && !cmd_lower.starts_with("make") && !cmd_lower.starts_with("implement")
+       && !cmd_lower.starts_with("write") && !cmd_lower.starts_with("show")
+       && !cmd_lower.starts_with("what") && !cmd_lower.starts_with("how")
+       && !cmd_lower.starts_with("why") && !cmd_lower.starts_with("where")
+       && !cmd_lower.starts_with("when") && !cmd_lower.starts_with("who")
+    {
+        // Check if it looks like a path with extension
+        if first_word.contains('.') && !first_word.ends_with('.') {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -565,8 +741,24 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_current_activity() {
-        assert_eq!(parse_current_activity("Reading file.txt"), Some("Reading file".to_string()));
-        assert_eq!(parse_current_activity("Writing to output.js"), Some("Writing file".to_string()));
+    fn test_parse_tool_invocation() {
+        // Test Claude Code's tool invocation format
+        let (_, _, actions) = parse_activity_and_action("● Bash(git status)").unwrap();
+        assert!(!actions.is_empty());
+        assert_eq!(actions[0].action_type, "bash");
+
+        let (_, _, actions) = parse_activity_and_action("● Read(README.md)").unwrap();
+        assert!(!actions.is_empty());
+        assert_eq!(actions[0].action_type, "read");
+    }
+
+    #[test]
+    fn test_parse_thinking_with_actions() {
+        // Test that thinking status is captured while also capturing tool actions
+        let input = "● Bash(git status)\n● Read(file.txt)\n* Actualizing... (thinking)";
+        let result = parse_activity_and_action(input).unwrap();
+        assert_eq!(result.0, "Thinking..."); // activity
+        assert_eq!(result.1.as_deref(), Some("Thinking")); // step
+        assert!(!result.2.is_empty()); // actions should be captured
     }
 }

@@ -152,6 +152,7 @@ pub async fn handle_websocket(
                         .session_manager
                         .update_status(session_id, clauset_types::SessionStatus::Stopped);
                     Some(WsServerMessage::StatusChange {
+                        session_id,
                         old_status: clauset_types::SessionStatus::Active,
                         new_status: clauset_types::SessionStatus::Stopped,
                     })
