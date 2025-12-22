@@ -4,7 +4,7 @@ use crate::state::AppState;
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket};
 use clauset_core::ProcessEvent;
-use clauset_types::WsServerMessage;
+use clauset_types::{SessionStatus, WsServerMessage};
 use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
 
@@ -16,6 +16,33 @@ pub async fn handle_global_websocket(socket: WebSocket, state: Arc<AppState>) ->
     let mut event_rx = state.session_manager.subscribe();
 
     tracing::info!("Global WebSocket client connected");
+
+    // Send initial activity state for all active sessions
+    // This ensures the client gets current state even if they missed earlier updates
+    if let Ok(sessions) = state.session_manager.list_sessions().await {
+        for session in sessions {
+            if matches!(session.status, SessionStatus::Active | SessionStatus::Starting) {
+                // Send activity update for this session
+                let msg = WsServerMessage::ActivityUpdate {
+                    session_id: session.id,
+                    model: session.model.clone(),
+                    cost: session.total_cost_usd,
+                    input_tokens: session.input_tokens,
+                    output_tokens: session.output_tokens,
+                    context_percent: session.context_percent,
+                    current_activity: session.preview.clone(),
+                    current_step: session.current_step.clone(),
+                    recent_actions: session.recent_actions.clone(),
+                };
+                if let Ok(json) = serde_json::to_string(&msg) {
+                    if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                        tracing::debug!("Failed to send initial activity state");
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
 
     // Spawn task to forward relevant events to WebSocket
     let mut send_task = tokio::spawn(async move {

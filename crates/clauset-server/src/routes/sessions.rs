@@ -26,6 +26,7 @@ pub async fn list(
     let sessions = state
         .session_manager
         .list_sessions()
+        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let active_count = sessions

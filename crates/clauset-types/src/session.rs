@@ -80,6 +80,12 @@ pub struct SessionSummary {
     pub output_tokens: u64,
     pub context_percent: u8,
     pub preview: String,
+    /// Current step/activity (e.g., "Thinking", "Read", "Ready")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_step: Option<String>,
+    /// Recent actions performed by Claude
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_actions: Vec<crate::RecentAction>,
 }
 
 impl From<Session> for SessionSummary {
@@ -98,6 +104,8 @@ impl From<Session> for SessionSummary {
             output_tokens: s.output_tokens,
             context_percent: s.context_percent,
             preview: s.preview,
+            current_step: None,
+            recent_actions: Vec::new(),
         }
     }
 }

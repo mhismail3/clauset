@@ -250,9 +250,33 @@ impl SessionManager {
         self.db.get(session_id)
     }
 
-    /// List all sessions.
-    pub fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
-        self.db.list()
+    /// List all sessions with current activity data.
+    pub async fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
+        let mut sessions = self.db.list()?;
+
+        // Enrich active sessions with current activity data from buffers
+        for session in &mut sessions {
+            if matches!(
+                session.status,
+                SessionStatus::Active | SessionStatus::Starting
+            ) {
+                if let Some(activity) = self.buffers.get_activity(session.id).await {
+                    session.current_step = activity.current_step;
+                    session.recent_actions = activity
+                        .recent_actions
+                        .into_iter()
+                        .map(|a| clauset_types::RecentAction {
+                            action_type: a.action_type,
+                            summary: a.summary,
+                            detail: a.detail,
+                            timestamp: a.timestamp,
+                        })
+                        .collect();
+                }
+            }
+        }
+
+        Ok(sessions)
     }
 
     /// Update session status.
