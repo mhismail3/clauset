@@ -302,17 +302,40 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
     // First pass: Find the current status (thinking, planning, etc.) from recent lines
     let mut current_status: Option<(String, String)> = None; // (activity, step)
 
-    // Check the last 20 lines for thinking/planning status
-    for line in lines.iter().rev().take(20) {
+    // Check the last 30 lines for current status
+    // We process in reverse order (most recent first) and take the first meaningful status
+    for line in lines.iter().rev().take(30) {
         let clean_line = strip_ansi_codes(line.trim());
         let clean_lower = clean_line.to_lowercase();
 
-        // Skip empty, status lines, and UI chrome
-        if clean_line.len() < 3 || clean_line.contains("ctx:") || clean_line.contains("| $") {
+        // Skip status lines (the bottom status bar)
+        if clean_line.contains("ctx:") || clean_line.contains("| $") {
+            continue;
+        }
+
+        // FIRST: Check for user input prompt (>) - highest priority
+        // This appears when Claude has finished responding and is ready for the next message
+        // The prompt can be just ">" or "> suggestion" or "> suggestion ↵ send"
+        // We check this BEFORE the length filter because ">" is only 1 char
+        let trimmed = clean_line.trim();
+        if trimmed == ">" || trimmed.starts_with("> ") {
+            current_status = Some(("Ready".to_string(), "Ready".to_string()));
+            break;
+        }
+
+        // Skip very short lines and UI chrome (but only AFTER prompt check)
+        if clean_line.len() < 3 {
             continue;
         }
         if is_ui_chrome(&clean_line) {
             continue;
+        }
+
+        // Check for "Actioning" - Claude is generating a suggested next message
+        // This means the main response is DONE, so we treat it as Ready
+        if clean_lower.contains("actioning") {
+            current_status = Some(("Ready".to_string(), "Ready".to_string()));
+            break;
         }
 
         // Check for thinking/planning/actualizing states (Claude's internal processing)
@@ -377,28 +400,18 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
         return Some((activity, Some(step), found_actions));
     }
 
-    // Fallback: if we found actions but no explicit status, use the most recent action's info
+    // Fallback: if we found actions but no explicit status, we're probably mid-execution
+    // Show "Processing" rather than the last action's summary to avoid confusion
     if !found_actions.is_empty() {
-        let last_action = found_actions.last().unwrap();
         return Some((
-            last_action.summary.clone(),
+            "Processing...".to_string(),
             None,
             found_actions,
         ));
     }
 
-    // Last resort: find any meaningful line
-    for line in lines.iter().rev().take(50) {
-        let clean = strip_ansi_codes(line.trim());
-        if clean.len() > 5 && clean.len() < 80
-            && !clean.contains("ctx:")
-            && !clean.contains("| $")
-            && !is_ui_chrome(&clean)
-        {
-            return Some((truncate_str(&clean, 50), None, Vec::new()));
-        }
-    }
-
+    // No status and no actions found - return None to let the frontend handle it
+    // We explicitly do NOT pick up random terminal text as the status
     None
 }
 
@@ -760,5 +773,36 @@ mod tests {
         assert_eq!(result.0, "Thinking..."); // activity
         assert_eq!(result.1.as_deref(), Some("Thinking")); // step
         assert!(!result.2.is_empty()); // actions should be captured
+    }
+
+    #[test]
+    fn test_parse_ready_state() {
+        // Test that user input prompt (> ) is detected as Ready state
+        let input = "● Bash(git status)\n● Read(file.txt)\n> run the tests";
+        let result = parse_activity_and_action(input).unwrap();
+        assert_eq!(result.0, "Ready"); // activity
+        assert_eq!(result.1.as_deref(), Some("Ready")); // step
+        assert!(!result.2.is_empty()); // actions should still be captured
+
+        // Test with prompt and suggestion
+        let input2 = "● Read(file.txt)\n> what next?";
+        let result2 = parse_activity_and_action(input2).unwrap();
+        assert_eq!(result2.0, "Ready");
+        assert_eq!(result2.1.as_deref(), Some("Ready"));
+
+        // Test with just ">" (empty prompt, no suggestion yet)
+        let input3 = "● Read(file.txt)\nSome response text\n>";
+        let result3 = parse_activity_and_action(input3).unwrap();
+        assert_eq!(result3.0, "Ready");
+        assert_eq!(result3.1.as_deref(), Some("Ready"));
+    }
+
+    #[test]
+    fn test_parse_actioning_as_ready() {
+        // Test that "Actioning" is detected as Ready (Claude generating suggestion)
+        let input = "● Read(file.txt)\n* Actioning... (esc to interrupt)";
+        let result = parse_activity_and_action(input).unwrap();
+        assert_eq!(result.0, "Ready"); // activity
+        assert_eq!(result.1.as_deref(), Some("Ready")); // step
     }
 }

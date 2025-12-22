@@ -118,60 +118,28 @@ export default function Sessions() {
 
   return (
     <div class="flex flex-col h-full">
-      {/* Header - Clean centered design */}
-      <header class="flex-none glass safe-top">
+      {/* Header */}
+      <header
+        class="flex-none glass safe-top"
+        style={{
+          "margin-left": 'calc(-1 * max(env(safe-area-inset-left, 0px), 8px))',
+          "margin-right": 'calc(-1 * max(env(safe-area-inset-right, 0px), 8px))',
+        }}
+      >
         <div
           style={{
             display: 'flex',
             "align-items": 'center',
             "justify-content": 'space-between',
-            padding: '14px 20px',
+            padding: '14px max(env(safe-area-inset-right, 0px), 16px) 14px max(env(safe-area-inset-left, 0px), 16px)',
           }}
         >
-          {/* Left: New Session Button with glow effect */}
-          <button
-            onClick={() => setShowNewSession(true)}
-            style={{
-              display: 'flex',
-              "align-items": 'center',
-              "justify-content": 'center',
-              gap: '6px',
-              padding: '8px 14px',
-              background: 'var(--color-accent)',
-              border: 'none',
-              "border-radius": '10px',
-              color: '#ffffff',
-              "font-size": '13px',
-              "font-weight": '600',
-              cursor: 'pointer',
-              "box-shadow": '0 0 16px rgba(196, 91, 55, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2)',
-              transition: 'all 0.2s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.boxShadow = '0 0 24px rgba(196, 91, 55, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3)';
-              e.currentTarget.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.boxShadow = '0 0 16px rgba(196, 91, 55, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2)';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <span>New</span>
-          </button>
-
-          {/* Center: Logo + Title */}
+          {/* Left: Logo + Title */}
           <div
             style={{
               display: 'flex',
               "align-items": 'center',
               gap: '10px',
-              position: 'absolute',
-              left: '50%',
-              transform: 'translateX(-50%)',
             }}
           >
             <img
@@ -289,6 +257,42 @@ export default function Sessions() {
           </div>
         </div>
       </main>
+
+      {/* Floating Action Button */}
+      <button
+        onClick={() => setShowNewSession(true)}
+        style={{
+          position: 'fixed',
+          bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 20px) + 16px)',
+          right: 'calc(max(env(safe-area-inset-right, 0px), 8px) + 16px)',
+          width: '56px',
+          height: '56px',
+          display: 'flex',
+          "align-items": 'center',
+          "justify-content": 'center',
+          background: 'var(--color-accent)',
+          border: 'none',
+          "border-radius": '16px',
+          color: '#ffffff',
+          cursor: 'pointer',
+          "box-shadow": '0 4px 16px rgba(0, 0, 0, 0.3), 0 0 24px rgba(196, 91, 55, 0.3)',
+          transition: 'all 0.2s ease',
+          "z-index": '30',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'scale(1.05)';
+          e.currentTarget.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.4), 0 0 32px rgba(196, 91, 55, 0.4)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'scale(1)';
+          e.currentTarget.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.3), 0 0 24px rgba(196, 91, 55, 0.3)';
+        }}
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </button>
 
       {/* Dropdown Menu */}
       <Show when={menuState()}>

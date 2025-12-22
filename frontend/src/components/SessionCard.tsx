@@ -72,6 +72,7 @@ function StepBadge(props: { step?: string }) {
     Task: { bg: 'rgba(91, 154, 138, 0.15)', text: '#5b9a8a' },
     Web: { bg: 'rgba(91, 138, 154, 0.15)', text: '#5b8a9a' },
     Thinking: { bg: 'rgba(240, 235, 227, 0.1)', text: 'var(--color-text-secondary)' },
+    Ready: { bg: 'rgba(44, 143, 122, 0.15)', text: '#2c8f7a' },
     Planning: { bg: 'rgba(240, 235, 227, 0.1)', text: 'var(--color-text-secondary)' },
   };
 
@@ -100,9 +101,16 @@ function StepBadge(props: { step?: string }) {
 }
 
 // Status indicator when there are no recent actions
-function StatusIndicator(props: { status: Session['status']; preview?: string }) {
+function StatusIndicator(props: { status: Session['status']; preview?: string; currentStep?: string }) {
   // Determine what to show based on session status
   const getStatusDisplay = () => {
+    // Check if current step is "Ready" - show green regardless of session status
+    const isReady = props.currentStep?.toLowerCase() === 'ready' ||
+                    props.preview?.toLowerCase() === 'ready';
+    if (isReady) {
+      return { icon: '✓', text: 'Ready', color: '#2c8f7a' };
+    }
+
     switch (props.status) {
       case 'active':
         // If active but no actions yet, show the preview or "Processing..."
@@ -195,6 +203,12 @@ export function SessionCard(props: SessionCardProps) {
 
   // Get the status color for the actions container border
   const getActionsBorderColor = createMemo(() => {
+    // Check if current_step indicates ready state
+    const step = props.session.current_step?.toLowerCase();
+    if (step === 'ready') {
+      return '#2c8f7a'; // Green for ready/idle
+    }
+
     switch (props.session.status) {
       case 'active':
       case 'starting':
@@ -202,7 +216,7 @@ export function SessionCard(props: SessionCardProps) {
       case 'stopped':
         return '#2c8f7a'; // Green for completed
       case 'waiting_input':
-        return 'var(--color-accent)';
+        return '#2c8f7a'; // Green for waiting
       case 'error':
         return 'var(--color-accent)';
       default:
@@ -275,6 +289,7 @@ export function SessionCard(props: SessionCardProps) {
           <StatusIndicator
             status={props.session.status}
             preview={props.session.preview}
+            currentStep={props.session.current_step}
           />
         </Show>
 
@@ -312,7 +327,8 @@ export function SessionCard(props: SessionCardProps) {
               >
                 {props.session.status === 'stopped' ? '✓' :
                  props.session.status === 'waiting_input' ? '▸' :
-                 props.session.status === 'error' ? '✕' : '●'}
+                 props.session.status === 'error' ? '✕' :
+                 props.session.current_step?.toLowerCase() === 'ready' ? '✓' : '●'}
               </span>
               <span
                 class="text-mono"
@@ -325,6 +341,7 @@ export function SessionCard(props: SessionCardProps) {
                 {props.session.status === 'stopped' ? 'Completed' :
                  props.session.status === 'waiting_input' ? 'Waiting for input' :
                  props.session.status === 'error' ? 'Error' :
+                 props.session.current_step?.toLowerCase() === 'ready' ? 'Ready' :
                  props.session.current_step ? props.session.current_step :
                  'Processing'}
               </span>

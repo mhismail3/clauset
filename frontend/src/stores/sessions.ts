@@ -41,6 +41,13 @@ export function updateSessionFromActivity(update: ActivityUpdate) {
   setSessionsStore('list', (sessions) =>
     sessions.map((session) => {
       if (session.id === update.session_id) {
+        // Preserve existing actions if update has empty array
+        // This prevents actions from disappearing when the prompt appears
+        // (the tool invocations might have scrolled out of the parse window)
+        const newActions = (update.recent_actions && update.recent_actions.length > 0)
+          ? update.recent_actions
+          : session.recent_actions || [];
+
         // Create updated session with new values
         return {
           ...session,
@@ -51,7 +58,7 @@ export function updateSessionFromActivity(update: ActivityUpdate) {
           context_percent: update.context_percent,
           preview: update.current_activity || session.preview,
           current_step: update.current_step,
-          recent_actions: update.recent_actions || session.recent_actions || [],
+          recent_actions: newActions,
         };
       }
       return session;
