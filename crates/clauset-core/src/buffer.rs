@@ -310,92 +310,92 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
 
     let mut current_status: Option<(String, String)> = None; // (activity, step)
 
-    // Track meaningful line count (lines that aren't just whitespace/chrome)
-    let mut meaningful_line_count = 0;
+    // HYBRID APPROACH:
+    // 1. First check if `>` is the ABSOLUTE NEWEST meaningful line (1-2 lines) → Ready
+    //    This catches the case when Claude finished and is waiting for input.
+    // 2. Then scan for tools/thinking → indicates active work
+    // 3. Fall back to checking for `>` elsewhere (but with strict filtering)
 
-    // Single pass: Find the FIRST (most recent) meaningful status indicator
-    // We iterate from newest to oldest and break on the first match
-    for line in lines.iter().rev().take(50) {
+    // Helper: check if line looks like the `>` prompt
+    let is_prompt_line = |line: &str| -> bool {
+        let trimmed = line.trim();
+        let is_short = trimmed.len() < 80;
+        let is_not_indented = !line.starts_with("  ") && !line.starts_with("\t");
+
+        if (trimmed == ">" || trimmed.starts_with("> ")) && is_short && is_not_indented {
+            // Verify it's not file content
+            if trimmed.len() > 2 {
+                let after = &trimmed[2..];
+                let is_file = after.contains('│') || after.contains('└') ||
+                              after.contains('├') || after.contains('─') ||
+                              after.starts_with('#') || after.starts_with("//") ||
+                              after.starts_with("/*") ||
+                              (after.len() > 50 && !after.contains('?'));
+                return !is_file;
+            }
+            return true;
+        }
+        false
+    };
+
+    // PHASE 1: Check if `>` is the ABSOLUTE NEWEST meaningful line
+    // If so, Claude is definitely ready for input
+    let mut meaningful_count = 0;
+    for line in lines.iter().rev().take(10) {
         let clean_line = strip_ansi_codes(line.trim());
-        let clean_lower = clean_line.to_lowercase();
 
-        // Skip metric/status lines (these show stats, not activity)
-        if clean_line.contains("ctx:") || clean_line.contains("| $") {
+        // Skip non-meaningful lines
+        if clean_line.contains("ctx:") || clean_line.contains("| $") ||
+           is_ui_chrome(&clean_line) || clean_line.is_empty() {
             continue;
         }
 
-        // Skip UI chrome (borders, spinners without text, etc.)
-        if is_ui_chrome(&clean_line) {
-            continue;
-        }
+        meaningful_count += 1;
 
-        // Skip empty lines
-        if clean_line.is_empty() {
-            continue;
-        }
-
-        meaningful_line_count += 1;
-        let trimmed = clean_line.trim();
-
-        // Check for user input prompt (>) - indicates Claude is ready for input
-        // KEY INSIGHT: The REAL prompt appears at the VERY END of output.
-        // If we're more than ~5 meaningful lines deep, any `>` we find is probably
-        // old user input or file content, not the current prompt.
-        let is_short_prompt = trimmed.len() < 80;
-        let is_not_indented = !clean_line.starts_with("  ") && !clean_line.starts_with("\t");
-        let is_near_end = meaningful_line_count <= 5;
-
-        if (trimmed == ">" || trimmed.starts_with("> ")) && is_short_prompt && is_not_indented && is_near_end {
-            // Additional check: verify it's not file content
-            let is_file_content = if trimmed.len() > 2 {
-                let after_prompt = &trimmed[2..];
-                // Skip if it looks like file output (box drawing chars, code comments)
-                after_prompt.contains('│') ||
-                after_prompt.contains('└') ||
-                after_prompt.contains('├') ||
-                after_prompt.contains('─') ||
-                after_prompt.starts_with('#') ||
-                after_prompt.starts_with("//") ||
-                after_prompt.starts_with("/*") ||
-                // Also skip if it looks like a markdown blockquote (long prose after >)
-                (after_prompt.len() > 50 && !after_prompt.contains('?'))
-            } else {
-                false
-            };
-
-            if !is_file_content {
+        // Only check the first 2 meaningful lines for `>` prompt
+        if meaningful_count <= 2 {
+            if is_prompt_line(&clean_line) {
                 current_status = Some(("Ready".to_string(), "Ready".to_string()));
                 break;
             }
-            // If it looks like file content, continue scanning
-            continue;
+        } else {
+            break; // Stop after checking first 2 meaningful lines
         }
+    }
 
-        // Skip very short lines (after checking for ">")
-        if clean_line.len() < 3 {
-            continue;
-        }
+    // PHASE 2: If no prompt found at the very end, scan for tools/thinking
+    if current_status.is_none() {
+        for line in lines.iter().rev().take(30) {
+            let clean_line = strip_ansi_codes(line.trim());
+            let clean_lower = clean_line.to_lowercase();
 
-        // Check for thinking/planning/actualizing status indicators
-        if is_thinking_status_line(&clean_line, &clean_lower) {
-            if clean_lower.contains("planning") {
-                current_status = Some(("Planning...".to_string(), "Planning".to_string()));
-            } else {
-                current_status = Some(("Thinking...".to_string(), "Thinking".to_string()));
+            // Skip non-meaningful lines
+            if clean_line.contains("ctx:") || clean_line.contains("| $") ||
+               is_ui_chrome(&clean_line) || clean_line.is_empty() || clean_line.len() < 3 {
+                continue;
             }
-            break;
-        }
 
-        // Check for "Actioning" - Claude generating a suggested message (user is ready to type)
-        if is_status_indicator(&clean_line) && clean_lower.contains("actioning") {
-            current_status = Some(("Ready".to_string(), "Ready".to_string()));
-            break;
-        }
+            // Check for thinking/planning status
+            if is_thinking_status_line(&clean_line, &clean_lower) {
+                if clean_lower.contains("planning") {
+                    current_status = Some(("Planning...".to_string(), "Planning".to_string()));
+                } else {
+                    current_status = Some(("Thinking...".to_string(), "Thinking".to_string()));
+                }
+                break;
+            }
 
-        // Check for tool invocations
-        if let Some((activity, step, _)) = parse_tool_activity_flexible(&clean_line, &clean_lower) {
-            current_status = Some((activity, step.unwrap_or_default()));
-            break;
+            // Check for tool invocations
+            if let Some((activity, step, _)) = parse_tool_activity_flexible(&clean_line, &clean_lower) {
+                current_status = Some((activity, step.unwrap_or_default()));
+                break;
+            }
+
+            // Check for "Actioning"
+            if is_status_indicator(&clean_line) && clean_lower.contains("actioning") {
+                current_status = Some(("Ready".to_string(), "Ready".to_string()));
+                break;
+            }
         }
     }
 
