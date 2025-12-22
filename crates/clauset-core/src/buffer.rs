@@ -304,6 +304,11 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
 
     // Check the last 30 lines for current status
     // We process in reverse order (most recent first) and take the first meaningful status
+    // PRIORITY ORDER (check first = highest priority):
+    //   1. Thinking/Actualizing/Planning = actively processing
+    //   2. Tool invocations = actively executing tools
+    //   3. Actioning = generating suggestion (response done)
+    //   4. ">" prompt = waiting for input (lowest priority - only if nothing else active)
     for line in lines.iter().rev().take(30) {
         let clean_line = strip_ansi_codes(line.trim());
         let clean_lower = clean_line.to_lowercase();
@@ -313,32 +318,16 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
             continue;
         }
 
-        // FIRST: Check for user input prompt (>) - highest priority
-        // This appears when Claude has finished responding and is ready for the next message
-        // The prompt can be just ">" or "> suggestion" or "> suggestion ↵ send"
-        // We check this BEFORE the length filter because ">" is only 1 char
-        let trimmed = clean_line.trim();
-        if trimmed == ">" || trimmed.starts_with("> ") {
-            current_status = Some(("Ready".to_string(), "Ready".to_string()));
-            break;
-        }
-
-        // Skip very short lines and UI chrome (but only AFTER prompt check)
-        if clean_line.len() < 3 {
+        // Skip very short lines (but we'll check for ">" prompt separately at the end)
+        if clean_line.len() < 3 && clean_line.trim() != ">" {
             continue;
         }
         if is_ui_chrome(&clean_line) {
             continue;
         }
 
-        // Check for "Actioning" - Claude is generating a suggested next message
-        // This means the main response is DONE, so we treat it as Ready
-        if clean_lower.contains("actioning") {
-            current_status = Some(("Ready".to_string(), "Ready".to_string()));
-            break;
-        }
-
-        // Check for thinking/planning/actualizing states (Claude's internal processing)
+        // HIGHEST PRIORITY: Check for thinking/planning/actualizing states
+        // These indicate Claude is actively processing - this should ALWAYS take precedence
         if clean_lower.contains("thinking") && !clean_lower.contains("thinking about") {
             current_status = Some(("Thinking...".to_string(), "Thinking".to_string()));
             break;
@@ -352,9 +341,24 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
             break;
         }
 
-        // If we hit a tool invocation line first, the status is that tool
+        // SECOND PRIORITY: Tool invocations - Claude is actively executing a tool
         if let Some((activity, step, _)) = parse_tool_activity_flexible(&clean_line, &clean_lower) {
             current_status = Some((activity, step.unwrap_or_default()));
+            break;
+        }
+
+        // THIRD PRIORITY: "Actioning" - Claude generating a suggested next message
+        // This means the main response is DONE, treat as Ready
+        if clean_lower.contains("actioning") {
+            current_status = Some(("Ready".to_string(), "Ready".to_string()));
+            break;
+        }
+
+        // LOWEST PRIORITY: User input prompt (>) - only if nothing else is happening
+        // The prompt can be just ">" or "> suggestion" or "> suggestion ↵ send"
+        let trimmed = clean_line.trim();
+        if trimmed == ">" || trimmed.starts_with("> ") {
+            current_status = Some(("Ready".to_string(), "Ready".to_string()));
             break;
         }
     }
@@ -804,5 +808,23 @@ mod tests {
         let result = parse_activity_and_action(input).unwrap();
         assert_eq!(result.0, "Ready"); // activity
         assert_eq!(result.1.as_deref(), Some("Ready")); // step
+    }
+
+    #[test]
+    fn test_priority_thinking_over_prompt() {
+        // Test that Thinking takes precedence over ">" prompt
+        // Even if there's a ">" in the output, if Thinking is more recent, show Thinking
+        let input = "> old prompt\n● Read(file.txt)\n* Thinking... (thought for 3s)";
+        let result = parse_activity_and_action(input).unwrap();
+        assert_eq!(result.0, "Thinking..."); // Should be Thinking, NOT Ready
+        assert_eq!(result.1.as_deref(), Some("Thinking"));
+    }
+
+    #[test]
+    fn test_priority_tool_over_prompt() {
+        // Test that tool invocation takes precedence over ">" prompt
+        let input = "> old prompt\n● Read(README.md)";
+        let result = parse_activity_and_action(input).unwrap();
+        assert!(result.0.contains("Read")); // Should show tool, NOT Ready
     }
 }
