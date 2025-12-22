@@ -310,11 +310,19 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
 
     let mut current_status: Option<(String, String)> = None; // (activity, step)
 
-    // HYBRID APPROACH:
-    // 1. First check if `>` is the ABSOLUTE NEWEST meaningful line (1-2 lines) → Ready
-    //    This catches the case when Claude finished and is waiting for input.
-    // 2. Then scan for tools/thinking → indicates active work
-    // 3. Fall back to checking for `>` elsewhere (but with strict filtering)
+    // RECENCY-BASED APPROACH with special handling for Claude Code's UI:
+    //
+    // Claude Code's UI shows `>` prompt at the bottom even while thinking/working.
+    // The key insight is:
+    // - When Claude FINISHES: there's prose/output BETWEEN activity indicator and `>`
+    // - When Claude is WORKING: `>` appears directly after activity (only empty lines/status between)
+    //
+    // Strategy:
+    // 1. Find the position of `>` prompt (if any)
+    // 2. Find the position of the most recent activity indicator
+    // 3. Check if there's meaningful output BETWEEN them
+    // 4. If meaningful output exists between activity and `>`, then `>` means Ready
+    // 5. If `>` appears directly after activity (no meaningful content), activity is current
 
     // Helper: check if line looks like the `>` prompt
     let is_prompt_line = |line: &str| -> bool {
@@ -338,65 +346,132 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
         false
     };
 
-    // PHASE 1: Check if `>` is the ABSOLUTE NEWEST meaningful line
-    // If so, Claude is definitely ready for input
-    let mut meaningful_count = 0;
-    for line in lines.iter().rev().take(10) {
+    // Helper: check if line is meaningful content (not just status/chrome/empty)
+    let is_meaningful_content = |line: &str| -> bool {
+        let clean = strip_ansi_codes(line.trim());
+        !clean.is_empty() &&
+        !clean.contains("ctx:") &&
+        !clean.contains("| $") &&
+        !is_ui_chrome(&clean) &&
+        clean.len() >= 3
+    };
+
+    // Find position of `>` prompt in the last 10 lines
+    let mut prompt_pos: Option<usize> = None;
+    for (i, line) in lines.iter().rev().take(10).enumerate() {
         let clean_line = strip_ansi_codes(line.trim());
-
-        // Skip non-meaningful lines
-        if clean_line.contains("ctx:") || clean_line.contains("| $") ||
-           is_ui_chrome(&clean_line) || clean_line.is_empty() {
-            continue;
-        }
-
-        meaningful_count += 1;
-
-        // Only check the first 2 meaningful lines for `>` prompt
-        if meaningful_count <= 2 {
-            if is_prompt_line(&clean_line) {
-                current_status = Some(("Ready".to_string(), "Ready".to_string()));
-                break;
-            }
-        } else {
-            break; // Stop after checking first 2 meaningful lines
+        if is_prompt_line(&clean_line) {
+            prompt_pos = Some(i);
+            break;
         }
     }
 
-    // PHASE 2: If no prompt found at the very end, scan for tools/thinking
-    if current_status.is_none() {
-        for line in lines.iter().rev().take(30) {
-            let clean_line = strip_ansi_codes(line.trim());
-            let clean_lower = clean_line.to_lowercase();
+    // Find position and type of most recent activity indicator in last 30 lines
+    let mut activity_pos: Option<usize> = None;
+    let mut activity_type: Option<(String, String)> = None;
 
-            // Skip non-meaningful lines
-            if clean_line.contains("ctx:") || clean_line.contains("| $") ||
-               is_ui_chrome(&clean_line) || clean_line.is_empty() || clean_line.len() < 3 {
-                continue;
+    for (i, line) in lines.iter().rev().take(30).enumerate() {
+        let clean_line = strip_ansi_codes(line.trim());
+        let clean_lower = clean_line.to_lowercase();
+
+        // Skip non-meaningful lines
+        if !is_meaningful_content(line) {
+            continue;
+        }
+
+        // Skip prompt lines
+        if is_prompt_line(&clean_line) {
+            continue;
+        }
+
+        // Check for thinking/planning status
+        if is_thinking_status_line(&clean_line, &clean_lower) {
+            activity_pos = Some(i);
+            if clean_lower.contains("planning") {
+                activity_type = Some(("Planning...".to_string(), "Planning".to_string()));
+            } else {
+                activity_type = Some(("Thinking...".to_string(), "Thinking".to_string()));
             }
+            break;
+        }
 
-            // Check for thinking/planning status
-            if is_thinking_status_line(&clean_line, &clean_lower) {
-                if clean_lower.contains("planning") {
-                    current_status = Some(("Planning...".to_string(), "Planning".to_string()));
+        // Check for tool invocations
+        if let Some((activity, step, _)) = parse_tool_activity_flexible(&clean_line, &clean_lower) {
+            activity_pos = Some(i);
+            activity_type = Some((activity, step.unwrap_or_default()));
+            break;
+        }
+
+        // Check for "Actioning" - this means Claude is generating a response (Ready)
+        if is_status_indicator(&clean_line) && clean_lower.contains("actioning") {
+            activity_pos = Some(i);
+            activity_type = Some(("Ready".to_string(), "Ready".to_string()));
+            break;
+        }
+    }
+
+    // Check if prompt has user input (not just empty `>`)
+    let prompt_has_user_input = prompt_pos.map(|p_pos| {
+        lines.iter().rev().nth(p_pos).map(|line| {
+            let clean = strip_ansi_codes(line.trim());
+            // `> something` means user has typed, not just empty prompt
+            clean.len() > 1 && clean.starts_with("> ")
+        }).unwrap_or(false)
+    }).unwrap_or(false);
+
+    // Determine current status based on positions
+    match (prompt_pos, activity_pos, activity_type) {
+        // Both prompt and activity found
+        (Some(p_pos), Some(a_pos), Some(activity)) => {
+            if p_pos < a_pos {
+                // Prompt is more recent (closer to end) than activity
+                // If prompt has user input, Claude is definitely ready
+                if prompt_has_user_input {
+                    current_status = Some(("Ready".to_string(), "Ready".to_string()));
                 } else {
-                    current_status = Some(("Thinking...".to_string(), "Thinking".to_string()));
+                    // Empty prompt - check if there's meaningful content between them
+                    let mut has_content_between = false;
+                    for (i, line) in lines.iter().rev().take(30).enumerate() {
+                        if i <= p_pos {
+                            continue; // Skip lines at or after prompt
+                        }
+                        if i >= a_pos {
+                            break; // Stop at activity indicator
+                        }
+                        let clean_line = strip_ansi_codes(line.trim());
+                        // Check for meaningful prose/output (not just status lines or chrome)
+                        if is_meaningful_content(line) &&
+                           !is_prompt_line(&clean_line) &&
+                           !is_thinking_status_line(&clean_line, &clean_line.to_lowercase()) &&
+                           parse_tool_activity_flexible(&clean_line, &clean_line.to_lowercase()).is_none() {
+                            has_content_between = true;
+                            break;
+                        }
+                    }
+
+                    if has_content_between {
+                        // There's output between activity and prompt - Claude finished
+                        current_status = Some(("Ready".to_string(), "Ready".to_string()));
+                    } else {
+                        // No output between - Claude is still working (prompt is just UI chrome)
+                        current_status = Some(activity);
+                    }
                 }
-                break;
-            }
-
-            // Check for tool invocations
-            if let Some((activity, step, _)) = parse_tool_activity_flexible(&clean_line, &clean_lower) {
-                current_status = Some((activity, step.unwrap_or_default()));
-                break;
-            }
-
-            // Check for "Actioning"
-            if is_status_indicator(&clean_line) && clean_lower.contains("actioning") {
-                current_status = Some(("Ready".to_string(), "Ready".to_string()));
-                break;
+            } else {
+                // Activity is more recent than prompt - show activity
+                current_status = Some(activity);
             }
         }
+        // Only prompt found, no activity
+        (Some(_), None, _) => {
+            current_status = Some(("Ready".to_string(), "Ready".to_string()));
+        }
+        // Only activity found, no prompt
+        (None, Some(_), Some(activity)) => {
+            current_status = Some(activity);
+        }
+        // Nothing found
+        _ => {}
     }
 
     // Second pass: Find ALL tool actions in the buffer (scan more lines)
