@@ -421,6 +421,12 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
         }).unwrap_or(false)
     }).unwrap_or(false);
 
+    // Count meaningful lines in the buffer (excluding status/chrome/prompt)
+    let meaningful_line_count: usize = lines.iter().rev().take(50).filter(|line| {
+        let clean = strip_ansi_codes(line.trim());
+        is_meaningful_content(line) && !is_prompt_line(&clean)
+    }).count();
+
     // Determine current status based on positions
     match (prompt_pos, activity_pos, activity_type) {
         // Both prompt and activity found
@@ -464,16 +470,30 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
                 current_status = Some(activity);
             }
         }
-        // Only prompt found, no activity
+        // Only prompt found, no activity - but check if buffer is minimal
         (Some(_), None, _) => {
-            current_status = Some(("Ready".to_string(), "Ready".to_string()));
+            // If buffer has very few meaningful lines, Claude might still be initializing/processing
+            // Don't assume Ready - show Processing instead
+            if meaningful_line_count <= 3 {
+                current_status = Some(("Processing...".to_string(), "Thinking".to_string()));
+            } else if prompt_has_user_input {
+                // Has user input, so user has typed and Claude is ready
+                current_status = Some(("Ready".to_string(), "Ready".to_string()));
+            } else {
+                // Buffer has content but no clear activity - assume Ready
+                current_status = Some(("Ready".to_string(), "Ready".to_string()));
+            }
         }
         // Only activity found, no prompt
         (None, Some(_), Some(activity)) => {
             current_status = Some(activity);
         }
-        // Nothing found
-        _ => {}
+        // Nothing found - if buffer is minimal, might be processing
+        _ => {
+            if meaningful_line_count <= 3 && lines.len() > 0 {
+                current_status = Some(("Processing...".to_string(), "Thinking".to_string()));
+            }
+        }
     }
 
     // Second pass: Find ALL tool actions in the buffer (scan more lines)
@@ -581,7 +601,13 @@ fn is_thinking_status_line(line: &str, line_lower: &str) -> bool {
     let has_thinking_keyword = (line_lower.contains("thinking") && !line_lower.contains("thinking about"))
         || line_lower.contains("actualizing")
         || line_lower.contains("mustering")
-        || line_lower.contains("planning");
+        || line_lower.contains("planning")
+        || line_lower.contains("philosophising")
+        || line_lower.contains("philosophizing")
+        || line_lower.contains("pondering")
+        || line_lower.contains("considering")
+        || line_lower.contains("reasoning")
+        || line_lower.contains("reflecting");
 
     if !has_thinking_keyword {
         return false;
@@ -594,7 +620,7 @@ fn is_thinking_status_line(line: &str, line_lower: &str) -> bool {
     }
 
     // Option 2: Very short line (status lines are typically brief)
-    if line.len() < 40 {
+    if line.len() < 50 {
         return true;
     }
 

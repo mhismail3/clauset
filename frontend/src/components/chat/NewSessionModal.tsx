@@ -14,10 +14,17 @@ export function NewSessionModal(props: NewSessionModalProps) {
   const [projects, setProjects] = createSignal<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = createSignal(false);
   const [selectedProject, setSelectedProject] = createSignal('');
+  const [selectedModel, setSelectedModel] = createSignal('haiku');
   const [prompt, setPrompt] = createSignal('');
   const [chatMode, setChatMode] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+
+  const models = [
+    { value: 'haiku', label: 'Haiku', description: 'Fast and efficient' },
+    { value: 'sonnet', label: 'Sonnet', description: 'Balanced performance' },
+    { value: 'opus', label: 'Opus', description: 'Most capable' },
+  ];
 
   async function fetchProjects() {
     setProjectsLoading(true);
@@ -56,6 +63,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
       const response = await api.sessions.create({
         project_path: selectedProject(),
         prompt: prompt() || undefined,
+        model: selectedModel(),
         terminal_mode: !chatMode(), // Invert: chatMode=false means terminal_mode=true
       });
 
@@ -243,6 +251,51 @@ export function NewSessionModal(props: NewSessionModalProps) {
                     </select>
                   </Show>
                 </Show>
+              </div>
+
+              {/* Model Selection */}
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    "font-size": "14px",
+                    "font-weight": "500",
+                    "margin-bottom": "8px",
+                    color: "var(--color-text-secondary)",
+                  }}
+                >
+                  Model
+                </label>
+                <select
+                  value={selectedModel()}
+                  onChange={(e) => setSelectedModel(e.currentTarget.value)}
+                  class="text-text-primary"
+                  style={{
+                    width: "100%",
+                    "box-sizing": "border-box",
+                    padding: "12px 16px",
+                    "font-size": "16px",
+                    "border-radius": "12px",
+                    border: "1px solid var(--color-bg-overlay)",
+                    background: "var(--color-bg-base)",
+                    outline: "none",
+                    cursor: "pointer",
+                    appearance: "none",
+                    "-webkit-appearance": "none",
+                    "background-image": `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239a9590' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+                    "background-repeat": "no-repeat",
+                    "background-position": "right 12px center",
+                    "padding-right": "40px",
+                  }}
+                >
+                  <For each={models}>
+                    {(model) => (
+                      <option value={model.value}>
+                        {model.label} — {model.description}
+                      </option>
+                    )}
+                  </For>
+                </select>
               </div>
 
               {/* Initial Prompt (Optional) */}

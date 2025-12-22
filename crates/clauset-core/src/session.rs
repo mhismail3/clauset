@@ -26,7 +26,7 @@ impl Default for SessionManagerConfig {
                 .join("clauset")
                 .join("sessions.db"),
             max_concurrent_sessions: 10,
-            default_model: "sonnet".to_string(),
+            default_model: "haiku".to_string(),
         }
     }
 }

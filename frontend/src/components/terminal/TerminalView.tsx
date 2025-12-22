@@ -70,53 +70,42 @@ export function TerminalView(props: TerminalViewProps) {
   }
 
   function doFitAndResize() {
-    console.log('[Terminal] doFitAndResize called');
     if (!terminal || !fitAddon || !containerRef) {
-      console.log('[Terminal] Missing refs:', { terminal: !!terminal, fitAddon: !!fitAddon, containerRef: !!containerRef });
       return;
     }
 
     try {
-      // Ensure container has dimensions before fitting
       const rect = containerRef.getBoundingClientRect();
-      console.log('[Terminal] Container rect:', rect.width, 'x', rect.height);
       if (rect.width === 0 || rect.height === 0) {
-        console.log('[Terminal] Container not sized, retrying...');
         setTimeout(doFitAndResize, 50);
         return;
       }
 
-      // Let FitAddon calculate based on actual container size (no padding now)
+      // First let FitAddon do its calculation
       fitAddon.fit();
 
-      const fitCols = terminal.cols;
-      const fitRows = terminal.rows;
-      console.log('[Terminal] FitAddon calculated:', fitCols, 'x', fitRows);
+      // Then get xterm's actual cell dimensions from the renderer
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const core = (terminal as any)._core;
+      const actualCellWidth = core?._renderService?.dimensions?.css?.cell?.width;
+      const actualCellHeight = core?._renderService?.dimensions?.css?.cell?.height;
 
-      // Additional safety: ensure we don't exceed what viewport can show
-      // Container width should already be correct, but double-check
-      const currentFontSize = fontSize();
-      const estimatedCellWidth = currentFontSize * 0.6;
-      const maxColsForContainer = Math.floor(rect.width / estimatedCellWidth);
+      if (actualCellWidth && actualCellHeight) {
+        // Use actual measured cell dimensions with safety buffer
+        const availableWidth = rect.width - 1;
+        const cols = Math.floor(availableWidth / actualCellWidth);
+        const rows = Math.floor(rect.height / actualCellHeight);
 
-      // Use the smaller of FitAddon's calculation and our estimate
-      const cols = Math.min(fitCols, maxColsForContainer);
-      const rows = fitRows;
-
-      console.log('[Terminal] Max cols for container:', maxColsForContainer, '-> using:', cols);
-
-      // If we need to constrain, resize the terminal
-      if (cols !== fitCols) {
-        console.log('[Terminal] Constraining from', fitCols, 'to', cols);
-        terminal.resize(cols, rows);
+        if (cols > 0 && rows > 0 && cols !== terminal.cols) {
+          terminal.resize(cols, rows);
+        }
       }
 
-      const newDims = { cols, rows };
+      const newDims = { cols: terminal.cols, rows: terminal.rows };
 
       // Only send resize if dimensions actually changed
       const current = dimensions();
       if (newDims.cols !== current.cols || newDims.rows !== current.rows) {
-        console.log(`[Terminal] Sending resize: ${newDims.cols}x${newDims.rows}`);
         setDimensions(newDims);
         props.onResize(newDims.cols, newDims.rows);
       }

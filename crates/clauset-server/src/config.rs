@@ -58,7 +58,7 @@ fn default_max_sessions() -> usize {
 }
 
 fn default_model() -> String {
-    "sonnet".to_string()
+    "haiku".to_string()
 }
 
 impl Default for Config {
