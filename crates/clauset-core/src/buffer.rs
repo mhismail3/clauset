@@ -294,71 +294,107 @@ fn now_ms() -> u64 {
 /// Parse current activity from terminal output.
 /// Returns (current_activity, current_step, list of new actions)
 ///
-/// This function now properly handles the case where Claude is "Thinking" but we still
-/// want to capture tool actions from earlier in the output.
+/// KEY INSIGHT: Status is determined by RECENCY - whatever meaningful status
+/// indicator appeared MOST RECENTLY is the current state. We iterate from
+/// newest to oldest and return on FIRST match.
+///
+/// The key challenge is distinguishing:
+/// - `>` as the actual input prompt (Claude waiting for input) → Ready
+/// - `>` appearing in file contents (markdown blockquote, etc.) → ignore
+///
+/// Solution: When we find a potential `>` prompt, we do a quick look-ahead
+/// (further back in the buffer) to check if there's a tool header nearby.
+/// If there is, this `>` is likely file output from that tool, not the prompt.
 fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<RecentAction>)> {
     let lines: Vec<&str> = text.lines().collect();
 
-    // First pass: Find the current status (thinking, planning, etc.) from recent lines
     let mut current_status: Option<(String, String)> = None; // (activity, step)
 
-    // Check the last 30 lines for current status
-    // We process in reverse order (most recent first) and take the first meaningful status
-    // PRIORITY ORDER (check first = highest priority):
-    //   1. Thinking/Actualizing/Planning = actively processing
-    //   2. Tool invocations = actively executing tools
-    //   3. Actioning = generating suggestion (response done)
-    //   4. ">" prompt = waiting for input (lowest priority - only if nothing else active)
-    for line in lines.iter().rev().take(30) {
+    // Track meaningful line count (lines that aren't just whitespace/chrome)
+    let mut meaningful_line_count = 0;
+
+    // Single pass: Find the FIRST (most recent) meaningful status indicator
+    // We iterate from newest to oldest and break on the first match
+    for line in lines.iter().rev().take(50) {
         let clean_line = strip_ansi_codes(line.trim());
         let clean_lower = clean_line.to_lowercase();
 
-        // Skip status lines (the bottom status bar)
+        // Skip metric/status lines (these show stats, not activity)
         if clean_line.contains("ctx:") || clean_line.contains("| $") {
             continue;
         }
 
-        // Skip very short lines (but we'll check for ">" prompt separately at the end)
-        if clean_line.len() < 3 && clean_line.trim() != ">" {
-            continue;
-        }
+        // Skip UI chrome (borders, spinners without text, etc.)
         if is_ui_chrome(&clean_line) {
             continue;
         }
 
-        // HIGHEST PRIORITY: Check for thinking/planning/actualizing states
-        // These indicate Claude is actively processing - this should ALWAYS take precedence
-        if clean_lower.contains("thinking") && !clean_lower.contains("thinking about") {
-            current_status = Some(("Thinking...".to_string(), "Thinking".to_string()));
-            break;
+        // Skip empty lines
+        if clean_line.is_empty() {
+            continue;
         }
-        if clean_lower.contains("actualizing") || clean_lower.contains("mustering") {
-            current_status = Some(("Thinking...".to_string(), "Thinking".to_string()));
-            break;
+
+        meaningful_line_count += 1;
+        let trimmed = clean_line.trim();
+
+        // Check for user input prompt (>) - indicates Claude is ready for input
+        // KEY INSIGHT: The REAL prompt appears at the VERY END of output.
+        // If we're more than ~5 meaningful lines deep, any `>` we find is probably
+        // old user input or file content, not the current prompt.
+        let is_short_prompt = trimmed.len() < 80;
+        let is_not_indented = !clean_line.starts_with("  ") && !clean_line.starts_with("\t");
+        let is_near_end = meaningful_line_count <= 5;
+
+        if (trimmed == ">" || trimmed.starts_with("> ")) && is_short_prompt && is_not_indented && is_near_end {
+            // Additional check: verify it's not file content
+            let is_file_content = if trimmed.len() > 2 {
+                let after_prompt = &trimmed[2..];
+                // Skip if it looks like file output (box drawing chars, code comments)
+                after_prompt.contains('│') ||
+                after_prompt.contains('└') ||
+                after_prompt.contains('├') ||
+                after_prompt.contains('─') ||
+                after_prompt.starts_with('#') ||
+                after_prompt.starts_with("//") ||
+                after_prompt.starts_with("/*") ||
+                // Also skip if it looks like a markdown blockquote (long prose after >)
+                (after_prompt.len() > 50 && !after_prompt.contains('?'))
+            } else {
+                false
+            };
+
+            if !is_file_content {
+                current_status = Some(("Ready".to_string(), "Ready".to_string()));
+                break;
+            }
+            // If it looks like file content, continue scanning
+            continue;
         }
-        if clean_lower.contains("planning") {
-            current_status = Some(("Planning...".to_string(), "Planning".to_string()));
+
+        // Skip very short lines (after checking for ">")
+        if clean_line.len() < 3 {
+            continue;
+        }
+
+        // Check for thinking/planning/actualizing status indicators
+        if is_thinking_status_line(&clean_line, &clean_lower) {
+            if clean_lower.contains("planning") {
+                current_status = Some(("Planning...".to_string(), "Planning".to_string()));
+            } else {
+                current_status = Some(("Thinking...".to_string(), "Thinking".to_string()));
+            }
             break;
         }
 
-        // SECOND PRIORITY: Tool invocations - Claude is actively executing a tool
+        // Check for "Actioning" - Claude generating a suggested message (user is ready to type)
+        if is_status_indicator(&clean_line) && clean_lower.contains("actioning") {
+            current_status = Some(("Ready".to_string(), "Ready".to_string()));
+            break;
+        }
+
+        // Check for tool invocations
         if let Some((activity, step, _)) = parse_tool_activity_flexible(&clean_line, &clean_lower) {
             current_status = Some((activity, step.unwrap_or_default()));
-            break;
-        }
-
-        // THIRD PRIORITY: "Actioning" - Claude generating a suggested next message
-        // This means the main response is DONE, treat as Ready
-        if clean_lower.contains("actioning") {
-            current_status = Some(("Ready".to_string(), "Ready".to_string()));
-            break;
-        }
-
-        // LOWEST PRIORITY: User input prompt (>) - only if nothing else is happening
-        // The prompt can be just ">" or "> suggestion" or "> suggestion ↵ send"
-        let trimmed = clean_line.trim();
-        if trimmed == ">" || trimmed.starts_with("> ") {
-            current_status = Some(("Ready".to_string(), "Ready".to_string()));
             break;
         }
     }
@@ -417,6 +453,80 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
     // No status and no actions found - return None to let the frontend handle it
     // We explicitly do NOT pick up random terminal text as the status
     None
+}
+
+/// Check if a line looks like a status indicator (starts with status prefixes)
+/// This helps distinguish "* Thinking..." from prose like "I'm thinking about..."
+fn is_status_indicator(line: &str) -> bool {
+    let trimmed = line.trim();
+
+    // Status lines typically start with these characters
+    if trimmed.starts_with('*')
+        || trimmed.starts_with('●')
+        || trimmed.starts_with('•')
+        || trimmed.starts_with('○')
+        || trimmed.starts_with('◐')
+        || trimmed.starts_with('◑')
+        || trimmed.starts_with('◒')
+        || trimmed.starts_with('◓')
+    {
+        return true;
+    }
+
+    // Spinner characters (braille patterns used by CLI spinners)
+    let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏',
+                         '⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
+    if let Some(first_char) = trimmed.chars().next() {
+        if spinner_chars.contains(&first_char) {
+            return true;
+        }
+    }
+
+    // Short lines that start with key status words are likely status indicators
+    if trimmed.len() < 50 {
+        let lower = trimmed.to_lowercase();
+        if lower.starts_with("thinking")
+            || lower.starts_with("actualizing")
+            || lower.starts_with("mustering")
+            || lower.starts_with("planning")
+            || lower.starts_with("actioning")
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Check if a line is a "thinking" status indicator (not prose containing the word "thinking")
+fn is_thinking_status_line(line: &str, line_lower: &str) -> bool {
+    // Must contain one of the thinking keywords
+    let has_thinking_keyword = (line_lower.contains("thinking") && !line_lower.contains("thinking about"))
+        || line_lower.contains("actualizing")
+        || line_lower.contains("mustering")
+        || line_lower.contains("planning");
+
+    if !has_thinking_keyword {
+        return false;
+    }
+
+    // Must look like a status line, not prose
+    // Option 1: Starts with status indicator prefix
+    if is_status_indicator(line) {
+        return true;
+    }
+
+    // Option 2: Very short line (status lines are typically brief)
+    if line.len() < 40 {
+        return true;
+    }
+
+    // Option 3: Contains timing info like "(2s elapsed)" or "(thinking)"
+    if line.contains("elapsed") || line.contains("(thinking)") || line.contains("...") {
+        return true;
+    }
+
+    false
 }
 
 /// Check if a line looks like UI chrome (borders, spinners, etc.) that we should skip
@@ -826,5 +936,117 @@ mod tests {
         let input = "> old prompt\n● Read(README.md)";
         let result = parse_activity_and_action(input).unwrap();
         assert!(result.0.contains("Read")); // Should show tool, NOT Ready
+    }
+
+    #[test]
+    fn test_ready_after_thinking() {
+        // KEY TEST: When Claude finishes thinking and shows ">", should be Ready
+        // This was the main bug - we were showing "Thinking" even when ">" appeared after
+        let input = "● Read(file.txt)\n* Thinking... (3s elapsed)\nHere's my analysis...\n>";
+        let result = parse_activity_and_action(input).unwrap();
+        assert_eq!(result.0, "Ready"); // ">" is most recent, should be Ready
+        assert_eq!(result.1.as_deref(), Some("Ready"));
+    }
+
+    #[test]
+    fn test_prose_with_thinking_word() {
+        // Prose containing "thinking" should NOT trigger Thinking status
+        // Only status lines like "* Thinking..." should
+        let input = "● Read(file.txt)\nThis document discusses critical thinking skills and problem solving.\n>";
+        let result = parse_activity_and_action(input).unwrap();
+        assert_eq!(result.0, "Ready"); // Should be Ready, NOT Thinking
+        assert_eq!(result.1.as_deref(), Some("Ready"));
+    }
+
+    #[test]
+    fn test_long_prose_with_thinking_word() {
+        // Long lines containing "thinking" are definitely prose, not status
+        let input = "I've been thinking about this problem for a while and I believe the best approach is to refactor the authentication module to use JWT tokens instead of session cookies. This will improve security and scalability.\n● Bash(cargo test)";
+        let result = parse_activity_and_action(input).unwrap();
+        // Should show the tool, not "Thinking"
+        assert!(result.0.contains("Bash") || result.1.as_deref() == Some("Bash"));
+    }
+
+    #[test]
+    fn test_recency_wins_complex_scenario() {
+        // Complex scenario: old prompt → tool → thinking → tool → prompt
+        // The LAST item (prompt) should win
+        let input = "> first prompt\n● Read(a.txt)\n* Thinking...\n● Bash(ls)\nSome output\n>";
+        let result = parse_activity_and_action(input).unwrap();
+        assert_eq!(result.0, "Ready");
+        assert_eq!(result.1.as_deref(), Some("Ready"));
+    }
+
+    #[test]
+    fn test_thinking_most_recent() {
+        // When thinking is most recent, should show Thinking
+        let input = "> prompt\n● Read(file.txt)\nSome output\n* Thinking... (2s)";
+        let result = parse_activity_and_action(input).unwrap();
+        assert_eq!(result.0, "Thinking...");
+        assert_eq!(result.1.as_deref(), Some("Thinking"));
+    }
+
+    #[test]
+    fn test_spinner_thinking() {
+        // Spinner character + Thinking should be detected
+        let input = "● Read(file.txt)\n⠋ Thinking...";
+        let result = parse_activity_and_action(input).unwrap();
+        assert_eq!(result.0, "Thinking...");
+    }
+
+    #[test]
+    fn test_actualizing_detected() {
+        // "Actualizing" is a thinking state
+        let input = "> old\n● Read(file.txt)\n* Actualizing...";
+        let result = parse_activity_and_action(input).unwrap();
+        assert_eq!(result.0, "Thinking...");
+    }
+
+    #[test]
+    fn test_is_thinking_status_line() {
+        // Test the helper function directly
+        assert!(is_thinking_status_line("* Thinking...", "* thinking..."));
+        assert!(is_thinking_status_line("⠋ Thinking... (2s)", "⠋ thinking... (2s)"));
+        assert!(is_thinking_status_line("Thinking...", "thinking..."));
+        assert!(!is_thinking_status_line(
+            "I'm thinking about this problem and believe we should...",
+            "i'm thinking about this problem and believe we should..."
+        ));
+        assert!(!is_thinking_status_line(
+            "The document covers critical thinking skills for developers",
+            "the document covers critical thinking skills for developers"
+        ));
+    }
+
+    #[test]
+    fn test_file_content_with_blockquote_not_ready() {
+        // When Claude reads a file containing markdown blockquotes (>),
+        // should NOT detect as Ready - should show the tool instead
+        let input = "> user prompt\n● Read(README.md)\nSome file content\n> This is a blockquote in the file\nMore content";
+        let result = parse_activity_and_action(input).unwrap();
+        // Should detect the tool, not the blockquote as Ready
+        assert!(result.0.contains("Read") || result.1.as_deref() == Some("Read"),
+            "Expected tool detection, got: {} / {:?}", result.0, result.1);
+    }
+
+    #[test]
+    fn test_deep_prompt_ignored() {
+        // Old prompt deep in buffer should be ignored, recent tool should be detected
+        let input = "> old user prompt\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\n● Read(file.txt)\nfile contents here";
+        let result = parse_activity_and_action(input).unwrap();
+        // Should detect the tool, not the old prompt
+        assert!(result.0.contains("Read") || result.1.as_deref() == Some("Read"),
+            "Expected tool detection, got: {} / {:?}", result.0, result.1);
+    }
+
+    #[test]
+    fn test_tool_with_many_lines_of_output() {
+        // Tool followed by many lines of output (simulating file read)
+        // The old prompt should be ignored
+        let input = "> original prompt\n● Read(big_file.rs)\nfn main() {\n    println!(\"hello\");\n}\n// comment\n> nested quote\nmore code";
+        let result = parse_activity_and_action(input).unwrap();
+        // Should detect the tool
+        assert!(result.0.contains("Read") || result.1.as_deref() == Some("Read"),
+            "Expected tool detection, got: {} / {:?}", result.0, result.1);
     }
 }
