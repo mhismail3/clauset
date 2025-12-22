@@ -27,7 +27,7 @@ export default function App(props: ParentProps) {
   });
 
   return (
-    <div class="min-h-screen bg-bg-base text-text-primary">
+    <div class="h-full flex flex-col bg-bg-base text-text-primary" style={{ overflow: 'hidden' }}>
       <ConnectionStatus isOnline={isOnline()} />
       {props.children}
     </div>

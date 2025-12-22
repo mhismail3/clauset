@@ -600,12 +600,14 @@ export default function SessionPage() {
 
         {/* Terminal View */}
         <div
-          class={`flex-1 flex flex-col ${showTerminal() ? '' : 'hidden'}`}
+          class={showTerminal() ? '' : 'hidden'}
           style={{
-            "min-width": "0",
+            display: 'flex',
+            "flex-direction": 'column',
+            flex: '1 1 0%',
+            "min-height": '0',
             width: "100%",
-            "max-width": "100%",
-            overflow: "hidden",
+            overflow: 'hidden',
           }}
         >
           <TerminalView

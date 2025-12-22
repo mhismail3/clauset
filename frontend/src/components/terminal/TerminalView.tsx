@@ -240,42 +240,42 @@ export function TerminalView(props: TerminalViewProps) {
 
   return (
     <div
-      class="flex-1 flex flex-col"
       style={{
-        background: '#0d0d0d',
+        display: 'flex',
+        "flex-direction": 'column',
+        flex: '1 1 0%',
+        "min-height": '0',
         width: '100%',
-        "max-width": '100%',
-        "min-width": '0',
+        background: '#0d0d0d',
         overflow: 'hidden',
       }}
     >
-      {/* Padding wrapper - keeps padding separate from terminal measurement */}
+      {/* Terminal area - fills space above toolbar */}
       <div
-        class="flex-1 flex flex-col"
         style={{
-          "min-height": "0",
-          "min-width": "0",
+          flex: '1 1 0%',
+          "min-height": '0',
           padding: "8px 12px 0 12px",
           overflow: "hidden",
+          display: 'flex',
+          "flex-direction": 'column',
         }}
       >
-        {/* Terminal Container - NO padding, so FitAddon measures accurately */}
         <div
           ref={containerRef}
-          class="flex-1"
           style={{
-            "min-height": "0",
-            "min-width": "0",
+            flex: '1 1 0%',
+            "min-height": '0',
             width: "100%",
             overflow: "hidden",
           }}
         />
       </div>
 
-      {/* Special Keys Toolbar */}
+      {/* Special Keys Toolbar - fixed at bottom */}
       <div
-        class="flex-none"
         style={{
+          "flex-shrink": '0',
           background: 'var(--color-bg-surface)',
           "border-top": '1px solid var(--color-bg-overlay)',
         }}
