@@ -543,6 +543,8 @@ select:focus {
   max-width: 100% !important;
   min-width: 0 !important;
   overflow: hidden !important;
+  /* Allow our custom touch handler to control scrolling */
+  touch-action: none;
 }
 
 .xterm-viewport {
@@ -550,6 +552,21 @@ select:focus {
   max-width: 100% !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
+  /* iOS Safari touch scrolling optimizations */
+  -webkit-overflow-scrolling: touch;
+  /* Prevent scroll chaining to parent */
+  overscroll-behavior: contain;
+  /* Our custom touch handler manages scrolling */
+  touch-action: none;
+  /* Smooth scroll performance */
+  will-change: scroll-position;
+  /* Hide scrollbar on touch devices for cleaner look */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.xterm-viewport::-webkit-scrollbar {
+  display: none;
 }
 
 .xterm-screen {
@@ -570,4 +587,18 @@ select:focus {
 /* Ensure the terminal helper span (used for measuring) is hidden */
 .xterm-helper-textarea {
   opacity: 0 !important;
+}
+
+/* iOS Safari specific: prevent text selection during scroll */
+@supports (-webkit-touch-callout: none) {
+  .xterm {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Re-enable selection when needed */
+  .xterm.xterm-selection-active {
+    -webkit-user-select: text;
+    user-select: text;
+  }
 }

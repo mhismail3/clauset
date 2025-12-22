@@ -11,6 +11,223 @@ interface TerminalViewProps {
   isConnected?: boolean;
 }
 
+// Touch scroll physics configuration
+const SCROLL_DECELERATION = 0.95; // Friction coefficient (0.95 = smooth, 0.9 = faster stop)
+const VELOCITY_SCALE = 1.8; // Amplify velocity for more responsive feel
+const MIN_VELOCITY = 0.5; // Stop animation when velocity drops below this
+const RUBBER_BAND_FACTOR = 0.3; // Resistance when scrolling past bounds
+const SNAP_BACK_DURATION = 300; // ms to snap back from overscroll
+const TAP_THRESHOLD_MS = 150; // Max duration to consider a touch a tap
+const TAP_MOVE_THRESHOLD = 10; // Max movement to consider a touch a tap
+
+interface TouchState {
+  startY: number;
+  startX: number;
+  startTime: number;
+  lastY: number;
+  lastTime: number;
+  velocityY: number;
+  isScrolling: boolean;
+  startScrollTop: number;
+}
+
+function createTouchScroller(getViewport: () => HTMLElement | null) {
+  let touchState: TouchState | null = null;
+  let animationFrame: number | null = null;
+  let snapBackAnimation: number | null = null;
+
+  function getScrollBounds(viewport: HTMLElement) {
+    const maxScroll = viewport.scrollHeight - viewport.clientHeight;
+    return { min: 0, max: Math.max(0, maxScroll) };
+  }
+
+  function handleTouchStart(e: TouchEvent) {
+    const viewport = getViewport();
+    if (!viewport) return;
+
+    // Cancel any ongoing animations
+    if (animationFrame) {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+    }
+    if (snapBackAnimation) {
+      cancelAnimationFrame(snapBackAnimation);
+      snapBackAnimation = null;
+    }
+
+    const touch = e.touches[0];
+    touchState = {
+      startY: touch.clientY,
+      startX: touch.clientX,
+      startTime: Date.now(),
+      lastY: touch.clientY,
+      lastTime: Date.now(),
+      velocityY: 0,
+      isScrolling: false,
+      startScrollTop: viewport.scrollTop,
+    };
+  }
+
+  function handleTouchMove(e: TouchEvent) {
+    if (!touchState) return;
+    const viewport = getViewport();
+    if (!viewport) return;
+
+    const touch = e.touches[0];
+    const deltaY = touchState.lastY - touch.clientY;
+    const deltaX = touch.clientX - touchState.startX;
+    const now = Date.now();
+    const timeDelta = Math.max(1, now - touchState.lastTime);
+
+    // Determine if this is primarily a vertical scroll gesture
+    const totalDeltaY = Math.abs(touch.clientY - touchState.startY);
+    const totalDeltaX = Math.abs(deltaX);
+
+    // If horizontal movement dominates, let the system handle it
+    if (!touchState.isScrolling && totalDeltaX > totalDeltaY && totalDeltaX > TAP_MOVE_THRESHOLD) {
+      touchState = null;
+      return;
+    }
+
+    // Start scrolling if we've moved enough vertically
+    if (!touchState.isScrolling && totalDeltaY > TAP_MOVE_THRESHOLD) {
+      touchState.isScrolling = true;
+    }
+
+    if (touchState.isScrolling) {
+      // Prevent default to stop the page from scrolling
+      e.preventDefault();
+
+      // Calculate instantaneous velocity (pixels per ms)
+      const instantVelocity = deltaY / timeDelta;
+      // Smooth velocity using exponential moving average
+      touchState.velocityY = 0.7 * instantVelocity + 0.3 * touchState.velocityY;
+
+      // Get scroll bounds
+      const bounds = getScrollBounds(viewport);
+      const newScrollTop = viewport.scrollTop + deltaY;
+
+      // Apply rubber band effect when scrolling past bounds
+      if (newScrollTop < bounds.min) {
+        const overscroll = bounds.min - newScrollTop;
+        viewport.scrollTop = bounds.min - overscroll * RUBBER_BAND_FACTOR;
+      } else if (newScrollTop > bounds.max) {
+        const overscroll = newScrollTop - bounds.max;
+        viewport.scrollTop = bounds.max + overscroll * RUBBER_BAND_FACTOR;
+      } else {
+        viewport.scrollTop = newScrollTop;
+      }
+    }
+
+    touchState.lastY = touch.clientY;
+    touchState.lastTime = now;
+  }
+
+  function handleTouchEnd(e: TouchEvent) {
+    if (!touchState) return;
+    const viewport = getViewport();
+    if (!viewport) return;
+
+    const state = touchState;
+    touchState = null;
+
+    // Check if this was a tap (short duration, minimal movement)
+    const duration = Date.now() - state.startTime;
+    const moved = Math.abs(state.lastY - state.startY);
+    if (duration < TAP_THRESHOLD_MS && moved < TAP_MOVE_THRESHOLD) {
+      // This was a tap, don't interfere
+      return;
+    }
+
+    if (!state.isScrolling) return;
+
+    const bounds = getScrollBounds(viewport);
+    const currentScroll = viewport.scrollTop;
+
+    // If we're outside bounds, snap back
+    if (currentScroll < bounds.min || currentScroll > bounds.max) {
+      snapBack(viewport, bounds);
+      return;
+    }
+
+    // Apply momentum scrolling
+    let velocity = state.velocityY * VELOCITY_SCALE * 16; // Convert to pixels per frame (~16ms)
+
+    if (Math.abs(velocity) < MIN_VELOCITY) return;
+
+    function momentumStep() {
+      const bounds = getScrollBounds(viewport);
+      const currentScroll = viewport.scrollTop;
+
+      // Check if we've hit bounds - just stop, don't snap back
+      // (snap back is only for recovering from manual overscroll, not momentum)
+      if (currentScroll <= bounds.min && velocity < 0) {
+        viewport.scrollTop = bounds.min;
+        animationFrame = null;
+        return;
+      }
+      if (currentScroll >= bounds.max && velocity > 0) {
+        viewport.scrollTop = bounds.max;
+        animationFrame = null;
+        return;
+      }
+
+      // Apply velocity
+      viewport.scrollTop = currentScroll + velocity;
+
+      // Apply deceleration
+      velocity *= SCROLL_DECELERATION;
+
+      // Continue or stop
+      if (Math.abs(velocity) > MIN_VELOCITY) {
+        animationFrame = requestAnimationFrame(momentumStep);
+      } else {
+        animationFrame = null;
+      }
+    }
+
+    animationFrame = requestAnimationFrame(momentumStep);
+  }
+
+  function snapBack(viewport: HTMLElement, bounds: { min: number; max: number }) {
+    const startScroll = viewport.scrollTop;
+    // Determine which bound we overshot
+    const targetScroll = startScroll < bounds.min ? bounds.min
+                       : startScroll > bounds.max ? bounds.max
+                       : startScroll; // Already in bounds, no-op
+    const startTime = Date.now();
+
+    function snapStep() {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(1, elapsed / SNAP_BACK_DURATION);
+      // Ease out cubic
+      const eased = 1 - Math.pow(1 - progress, 3);
+
+      viewport.scrollTop = startScroll + (targetScroll - startScroll) * eased;
+
+      if (progress < 1) {
+        snapBackAnimation = requestAnimationFrame(snapStep);
+      } else {
+        snapBackAnimation = null;
+      }
+    }
+
+    snapBackAnimation = requestAnimationFrame(snapStep);
+  }
+
+  function cleanup() {
+    if (animationFrame) cancelAnimationFrame(animationFrame);
+    if (snapBackAnimation) cancelAnimationFrame(snapBackAnimation);
+  }
+
+  return {
+    handleTouchStart,
+    handleTouchMove,
+    handleTouchEnd,
+    cleanup,
+  };
+}
+
 // Special keys for mobile keyboard toolbar
 const SPECIAL_KEYS = [
   { label: 'esc', code: '\x1b' },
@@ -34,6 +251,7 @@ export function TerminalView(props: TerminalViewProps) {
   let terminal: Terminal | undefined;
   let fitAddon: FitAddon | undefined;
   let resizeTimeout: number | undefined;
+  let touchScrollerCleanup: (() => void) | undefined;
 
   const [fontSize, setFontSize] = createSignal(13);
   const [ctrlActive, setCtrlActive] = createSignal(false);
@@ -166,6 +384,21 @@ export function TerminalView(props: TerminalViewProps) {
 
     terminal.open(containerRef!);
 
+    // Set up custom touch scrolling for smooth iOS experience
+    const getViewport = () => containerRef?.querySelector('.xterm-viewport') as HTMLElement | null;
+    const touchScroller = createTouchScroller(getViewport);
+
+    // Attach touch handlers to the container (captures events before xterm)
+    containerRef!.addEventListener('touchstart', touchScroller.handleTouchStart, { passive: true });
+    containerRef!.addEventListener('touchmove', touchScroller.handleTouchMove, { passive: false });
+    containerRef!.addEventListener('touchend', touchScroller.handleTouchEnd, { passive: true });
+    touchScrollerCleanup = () => {
+      containerRef?.removeEventListener('touchstart', touchScroller.handleTouchStart);
+      containerRef?.removeEventListener('touchmove', touchScroller.handleTouchMove);
+      containerRef?.removeEventListener('touchend', touchScroller.handleTouchEnd);
+      touchScroller.cleanup();
+    };
+
     // Wait for fonts to load before fitting to ensure accurate column calculation
     const fitAfterFonts = () => {
       requestAnimationFrame(() => {
@@ -205,6 +438,7 @@ export function TerminalView(props: TerminalViewProps) {
       if (resizeTimeout) {
         clearTimeout(resizeTimeout);
       }
+      touchScrollerCleanup?.();
       window.removeEventListener('resize', handleResize);
       resizeObserver.disconnect();
       terminal?.dispose();
