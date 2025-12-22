@@ -341,13 +341,12 @@ export function TerminalView(props: TerminalViewProps) {
 
         {/* Main toolbar - scrollable for narrow screens */}
         <div
-          class="safe-all scrollable-x"
+          class="scrollable-x safe-bottom"
           style={{
             display: 'flex',
             "align-items": 'center',
             gap: '8px',
-            padding: '10px 12px',
-            "padding-bottom": 'max(env(safe-area-inset-bottom, 0px), 16px)',
+            padding: '10px 16px',
           }}
         >
           <For each={SPECIAL_KEYS}>

@@ -364,25 +364,15 @@ export default function SessionPage() {
     return id ? getStreamingContent(params.id, id) : '';
   };
 
-  const connectionStatus = () => {
-    switch (wsState()) {
-      case 'connected': return { text: 'connected', class: 'status-dot-active' };
-      case 'connecting': return { text: 'connecting', class: 'status-dot-idle' };
-      case 'reconnecting': return { text: 'reconnecting', class: 'status-dot-idle' };
-      default: return { text: 'offline', class: 'status-dot-inactive' };
-    }
-  };
-
   return (
     <div class="flex flex-col h-full" style={{ width: "100%", "max-width": "100%", "min-width": "0", overflow: "hidden" }}>
       {/* Header */}
-      <header class="flex-none glass safe-top">
+      <header class="flex-none glass safe-top" style={{ padding: '12px 16px' }}>
         <div
           style={{
             display: 'flex',
             "align-items": 'center',
             gap: '12px',
-            padding: '12px 16px',
           }}
         >
           {/* Back button */}
@@ -396,7 +386,7 @@ export default function SessionPage() {
               display: 'flex',
               "align-items": 'center',
               "justify-content": 'center',
-              color: 'var(--color-accent)',
+              color: 'var(--color-text-secondary)',
               background: 'none',
               border: 'none',
               "border-radius": '50%',
@@ -408,47 +398,27 @@ export default function SessionPage() {
             </svg>
           </button>
 
-          {/* Session info - center section */}
-          <div style={{ flex: '1', "min-width": '0', overflow: 'hidden' }}>
+          {/* Session info */}
+          <div style={{ flex: '1', "min-width": '0', display: 'flex', "align-items": 'center', gap: '10px' }}>
             <Show when={session()} fallback={<Spinner size="sm" />}>
               {(s) => (
                 <>
-                  {/* Project name + badge row */}
-                  <div style={{ display: 'flex', "align-items": 'center', gap: '8px' }}>
-                    <span
-                      class="text-mono"
-                      style={{
-                        "font-size": '14px',
-                        "font-weight": '600',
-                        color: 'var(--color-text-primary)',
-                        overflow: 'hidden',
-                        "text-overflow": 'ellipsis',
-                        "white-space": 'nowrap',
-                      }}
-                    >
-                      {s().project_path.split('/').pop()}
-                    </span>
-                    <Badge variant={getStatusVariant(s().status)}>
-                      {getStatusLabel(s().status)}
-                    </Badge>
-                  </div>
-                  {/* Connection status row */}
-                  <div
+                  <span
                     class="text-mono"
                     style={{
-                      display: 'flex',
-                      "align-items": 'center',
-                      gap: '6px',
-                      "margin-top": '2px',
-                      "font-size": '11px',
-                      color: 'var(--color-text-muted)',
+                      "font-size": '15px',
+                      "font-weight": '600',
+                      color: 'var(--color-text-primary)',
+                      overflow: 'hidden',
+                      "text-overflow": 'ellipsis',
+                      "white-space": 'nowrap',
                     }}
                   >
-                    <span class={`status-dot ${connectionStatus().class}`} />
-                    <span>{connectionStatus().text}</span>
-                    <span style={{ color: 'var(--color-bg-overlay)' }}>·</span>
-                    <span>{s().model}</span>
-                  </div>
+                    {s().project_path.split('/').pop()}
+                  </span>
+                  <Badge variant={getStatusVariant(s().status)}>
+                    {getStatusLabel(s().status)}
+                  </Badge>
                 </>
               )}
             </Show>
@@ -466,24 +436,6 @@ export default function SessionPage() {
             }}
           >
             <button
-              onClick={() => setShowTerminal(false)}
-              class="text-mono"
-              style={{
-                padding: '6px 12px',
-                "font-size": '11px',
-                "font-weight": '500',
-                "border-radius": '8px',
-                border: 'none',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                background: !showTerminal() ? 'var(--color-bg-elevated)' : 'transparent',
-                color: !showTerminal() ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-                "box-shadow": !showTerminal() ? 'var(--shadow-retro-sm)' : 'none',
-              }}
-            >
-              chat
-            </button>
-            <button
               onClick={() => setShowTerminal(true)}
               class="text-mono"
               style={{
@@ -500,6 +452,24 @@ export default function SessionPage() {
               }}
             >
               term
+            </button>
+            <button
+              onClick={() => setShowTerminal(false)}
+              class="text-mono"
+              style={{
+                padding: '6px 12px',
+                "font-size": '11px',
+                "font-weight": '500',
+                "border-radius": '8px',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                background: !showTerminal() ? 'var(--color-bg-elevated)' : 'transparent',
+                color: !showTerminal() ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                "box-shadow": !showTerminal() ? 'var(--shadow-retro-sm)' : 'none',
+              }}
+            >
+              chat
             </button>
           </div>
         </div>

@@ -119,19 +119,12 @@ export default function Sessions() {
   return (
     <div class="flex flex-col h-full">
       {/* Header */}
-      <header
-        class="flex-none glass safe-top"
-        style={{
-          "margin-left": 'calc(-1 * max(env(safe-area-inset-left, 0px), 8px))',
-          "margin-right": 'calc(-1 * max(env(safe-area-inset-right, 0px), 8px))',
-        }}
-      >
+      <header class="flex-none glass safe-top" style={{ padding: '14px 16px' }}>
         <div
           style={{
             display: 'flex',
             "align-items": 'center',
             "justify-content": 'space-between',
-            padding: '14px max(env(safe-area-inset-right, 0px), 16px) 14px max(env(safe-area-inset-left, 0px), 16px)',
           }}
         >
           {/* Left: Logo + Title */}
