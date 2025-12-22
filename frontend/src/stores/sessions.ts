@@ -18,11 +18,60 @@ export async function fetchSessions() {
 
   try {
     const response: SessionListResponse = await api.sessions.list();
-    // Ensure recent_actions is always an array
-    const sessionsWithDefaults = response.sessions.map(s => ({
-      ...s,
-      recent_actions: s.recent_actions || [],
-    }));
+    const existingSessions = sessionsStore.list;
+
+    // Merge API data with existing local state, preserving recent_actions
+    // This is important because recent_actions come from WebSocket updates
+    // and may not be persisted in the backend or may be stale in the API response
+    const sessionsWithDefaults = response.sessions.map(newSession => {
+      const existing = existingSessions.find(s => s.id === newSession.id);
+
+      // Preserve local recent_actions if:
+      // 1. API response has no recent_actions or empty array
+      // 2. Local state has recent_actions that are more recent or more complete
+      let mergedActions = newSession.recent_actions || [];
+      if (existing?.recent_actions && existing.recent_actions.length > 0) {
+        if (mergedActions.length === 0) {
+          // API has no actions, keep local
+          mergedActions = existing.recent_actions;
+        } else {
+          // Merge: keep actions from both, deduplicate by type+summary, limit to 5
+          const actionKey = (a: RecentAction) => `${a.action_type}:${a.summary}`;
+          const seen = new Set<string>();
+          const combined: RecentAction[] = [];
+
+          // Add new actions first (they're more recent)
+          for (const action of mergedActions) {
+            const key = actionKey(action);
+            if (!seen.has(key)) {
+              seen.add(key);
+              combined.push(action);
+            }
+          }
+
+          // Add existing actions that aren't duplicates
+          for (const action of existing.recent_actions) {
+            const key = actionKey(action);
+            if (!seen.has(key) && combined.length < 5) {
+              seen.add(key);
+              combined.push(action);
+            }
+          }
+
+          mergedActions = combined.slice(0, 5);
+        }
+      }
+
+      // Also preserve current_step if API doesn't have it but we do locally
+      const currentStep = newSession.current_step || existing?.current_step;
+
+      return {
+        ...newSession,
+        recent_actions: mergedActions,
+        current_step: currentStep,
+      };
+    });
+
     setSessionsStore('list', sessionsWithDefaults);
     setActiveCount(response.active_count);
   } catch (e) {

@@ -71,9 +71,12 @@ function StepBadge(props: { step?: string }) {
     Glob: { bg: 'rgba(138, 107, 148, 0.15)', text: '#8a6b94' },
     Task: { bg: 'rgba(91, 154, 138, 0.15)', text: '#5b9a8a' },
     Web: { bg: 'rgba(91, 138, 154, 0.15)', text: '#5b8a9a' },
-    Thinking: { bg: 'rgba(240, 235, 227, 0.1)', text: 'var(--color-text-secondary)' },
+    // Thinking/Planning states - orange/warning color to indicate active work
+    Thinking: { bg: 'rgba(212, 166, 68, 0.15)', text: '#d4a644' },
+    Planning: { bg: 'rgba(212, 166, 68, 0.15)', text: '#d4a644' },
+    Working: { bg: 'rgba(212, 166, 68, 0.15)', text: '#d4a644' },
+    // Ready state - green
     Ready: { bg: 'rgba(44, 143, 122, 0.15)', text: '#2c8f7a' },
-    Planning: { bg: 'rgba(240, 235, 227, 0.1)', text: 'var(--color-text-secondary)' },
   };
 
   const colors = () => stepColors[props.step || ''] || { bg: 'rgba(240, 235, 227, 0.1)', text: 'var(--color-text-muted)' };
@@ -104,19 +107,33 @@ function StepBadge(props: { step?: string }) {
 function StatusIndicator(props: { status: Session['status']; preview?: string; currentStep?: string }) {
   // Determine what to show based on session status
   const getStatusDisplay = () => {
-    // Check if current step is "Ready" - show green regardless of session status
-    const isReady = props.currentStep?.toLowerCase() === 'ready' ||
-                    props.preview?.toLowerCase() === 'ready';
+    // Check if current step indicates thinking/processing (orange)
+    const stepLower = props.currentStep?.toLowerCase();
+    if (stepLower === 'thinking' || stepLower === 'planning') {
+      return { icon: '●', text: props.currentStep!, color: 'var(--color-warning, #d4a644)' };
+    }
+
+    // Check if current step is "Ready" - show green
+    const isReady = stepLower === 'ready' || props.preview?.toLowerCase() === 'ready';
     if (isReady) {
       return { icon: '✓', text: 'Ready', color: '#2c8f7a' };
     }
 
+    // Check if current step is a tool name (active work, show in orange)
+    const toolNames = ['read', 'edit', 'write', 'bash', 'grep', 'glob', 'task', 'search', 'webfetch', 'websearch'];
+    if (stepLower && toolNames.includes(stepLower.toLowerCase())) {
+      return { icon: '●', text: props.currentStep!, color: 'var(--color-warning, #d4a644)' };
+    }
+
     switch (props.status) {
       case 'active':
-        // If active but no actions yet, show the preview or "Processing..."
-        return props.preview && props.preview !== 'No preview available'
-          ? { icon: '●', text: props.preview, color: 'var(--color-accent)' }
-          : { icon: '◐', text: 'Processing...', color: 'var(--color-text-secondary)' };
+        // If active but no explicit step, default to "Ready" (Claude Code starts at prompt)
+        // Only show preview if it contains meaningful activity info
+        if (props.preview && props.preview !== 'No preview available' &&
+            !props.preview.toLowerCase().includes('ready')) {
+          return { icon: '●', text: props.preview, color: 'var(--color-warning, #d4a644)' };
+        }
+        return { icon: '✓', text: 'Ready', color: '#2c8f7a' };
       case 'starting':
         return { icon: '◐', text: 'Starting session...', color: 'var(--color-text-secondary)' };
       case 'waiting_input':
@@ -201,22 +218,47 @@ export function SessionCard(props: SessionCardProps) {
     return displayActions().length > 0;
   });
 
+  // Determine if session is actively working (thinking, running tools)
+  const isActivelyWorking = createMemo(() => {
+    const step = props.session.current_step?.toLowerCase();
+    // Actively working if: thinking, planning, or executing a tool
+    if (step === 'thinking' || step === 'planning') return true;
+    const toolNames = ['read', 'edit', 'write', 'bash', 'grep', 'glob', 'task', 'search', 'webfetch', 'websearch'];
+    if (step && toolNames.includes(step)) return true;
+    // Also actively working if status is active but step is NOT ready
+    if (props.session.status === 'active' && step && step !== 'ready') return true;
+    return false;
+  });
+
   // Get the status color for the actions container border
   const getActionsBorderColor = createMemo(() => {
-    // Check if current_step indicates ready state
     const step = props.session.current_step?.toLowerCase();
+
+    // Orange for thinking/planning/tool execution
+    if (step === 'thinking' || step === 'planning') {
+      return 'var(--color-warning, #d4a644)';
+    }
+
+    // Orange for tool execution
+    const toolNames = ['read', 'edit', 'write', 'bash', 'grep', 'glob', 'task', 'search', 'webfetch', 'websearch'];
+    if (step && toolNames.includes(step)) {
+      return 'var(--color-warning, #d4a644)';
+    }
+
+    // Green for ready state
     if (step === 'ready') {
-      return '#2c8f7a'; // Green for ready/idle
+      return '#2c8f7a';
     }
 
     switch (props.session.status) {
       case 'active':
       case 'starting':
-        return 'var(--color-accent)';
+        // If active with no specific step, default to ready (green)
+        return '#2c8f7a';
       case 'stopped':
-        return '#2c8f7a'; // Green for completed
+        return '#2c8f7a';
       case 'waiting_input':
-        return '#2c8f7a'; // Green for waiting
+        return '#2c8f7a';
       case 'error':
         return 'var(--color-accent)';
       default:
@@ -328,7 +370,8 @@ export function SessionCard(props: SessionCardProps) {
                 {props.session.status === 'stopped' ? '✓' :
                  props.session.status === 'waiting_input' ? '▸' :
                  props.session.status === 'error' ? '✕' :
-                 props.session.current_step?.toLowerCase() === 'ready' ? '✓' : '●'}
+                 isActivelyWorking() ? '●' :
+                 props.session.current_step?.toLowerCase() === 'ready' ? '✓' : '✓'}
               </span>
               <span
                 class="text-mono"
@@ -341,9 +384,12 @@ export function SessionCard(props: SessionCardProps) {
                 {props.session.status === 'stopped' ? 'Completed' :
                  props.session.status === 'waiting_input' ? 'Waiting for input' :
                  props.session.status === 'error' ? 'Error' :
-                 props.session.current_step?.toLowerCase() === 'ready' ? 'Ready' :
-                 props.session.current_step ? props.session.current_step :
-                 'Processing'}
+                 isActivelyWorking() ? (
+                   props.session.current_step?.toLowerCase() === 'thinking' ? 'Thinking' :
+                   props.session.current_step?.toLowerCase() === 'planning' ? 'Planning' :
+                   props.session.current_step ? props.session.current_step : 'Working'
+                 ) :
+                 'Ready'}
               </span>
             </div>
 
