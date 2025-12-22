@@ -8,7 +8,7 @@ use crate::state::AppState;
 use clauset_core::ProcessEvent;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn, instrument};
 
 /// Spawns a background task that processes all session events.
 /// This ensures terminal output is buffered and activity is tracked
@@ -25,8 +25,8 @@ pub fn spawn_event_processor(state: Arc<AppState>) {
                     process_event(&state, event).await;
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                    // We missed some events due to slow processing
-                    debug!("Event processor lagged by {} events", n);
+                    // We missed some events due to slow processing - this is important to know
+                    warn!("Event processor lagged by {} events - dashboard may miss activity updates", n);
                 }
                 Err(broadcast::error::RecvError::Closed) => {
                     info!("Event channel closed, stopping event processor");
@@ -37,6 +37,7 @@ pub fn spawn_event_processor(state: Arc<AppState>) {
     });
 }
 
+#[instrument(skip(state, event), fields(event_type = ?std::mem::discriminant(&event)))]
 async fn process_event(state: &AppState, event: ProcessEvent) {
     match event {
         ProcessEvent::TerminalOutput { session_id, ref data } => {

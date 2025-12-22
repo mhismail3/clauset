@@ -2,6 +2,7 @@ import { createSignal } from 'solid-js';
 import { createStore } from 'solid-js/store';
 import { api, Session, SessionListResponse, RecentAction } from '../lib/api';
 import type { ActivityUpdate } from '../lib/globalWs';
+import { cleanupOldSessions } from './terminal';
 
 // Use a store for more granular reactivity (avoids re-rendering entire cards)
 const [sessionsStore, setSessionsStore] = createStore<{ list: Session[] }>({ list: [] });
@@ -74,6 +75,10 @@ export async function fetchSessions() {
 
     setSessionsStore('list', sessionsWithDefaults);
     setActiveCount(response.active_count);
+
+    // Cleanup terminal history for sessions that no longer exist
+    const activeSessionIds = sessionsWithDefaults.map(s => s.id);
+    cleanupOldSessions(activeSessionIds);
   } catch (e) {
     setError(e instanceof Error ? e.message : 'Failed to fetch sessions');
   } finally {
@@ -83,36 +88,35 @@ export async function fetchSessions() {
 
 /**
  * Update a session from an activity update received via global WebSocket.
- * Uses produce() for fine-grained reactivity - only updates changed fields.
+ * Uses fine-grained path-based updates for better performance.
  * This prevents the entire card from flickering on updates.
  */
 export function updateSessionFromActivity(update: ActivityUpdate) {
-  setSessionsStore('list', (sessions) =>
-    sessions.map((session) => {
-      if (session.id === update.session_id) {
-        // Preserve existing actions if update has empty array
-        // This prevents actions from disappearing when the prompt appears
-        // (the tool invocations might have scrolled out of the parse window)
-        const newActions = (update.recent_actions && update.recent_actions.length > 0)
-          ? update.recent_actions
-          : session.recent_actions || [];
+  // Find the index of the session to update
+  const idx = sessionsStore.list.findIndex(s => s.id === update.session_id);
+  if (idx === -1) return;
 
-        // Create updated session with new values
-        return {
-          ...session,
-          model: update.model || session.model,
-          total_cost_usd: update.cost,
-          input_tokens: update.input_tokens,
-          output_tokens: update.output_tokens,
-          context_percent: update.context_percent,
-          preview: update.current_activity || session.preview,
-          current_step: update.current_step,
-          recent_actions: newActions,
-        };
-      }
-      return session;
-    })
-  );
+  const session = sessionsStore.list[idx];
+
+  // Preserve existing actions if update has empty array
+  // This prevents actions from disappearing when the prompt appears
+  // (the tool invocations might have scrolled out of the parse window)
+  const newActions = (update.recent_actions && update.recent_actions.length > 0)
+    ? update.recent_actions
+    : session.recent_actions || [];
+
+  // Use path-based update for fine-grained reactivity
+  // This only invalidates the specific session, not the entire list
+  setSessionsStore('list', idx, {
+    model: update.model || session.model,
+    total_cost_usd: update.cost,
+    input_tokens: update.input_tokens,
+    output_tokens: update.output_tokens,
+    context_percent: update.context_percent,
+    preview: update.current_activity || session.preview,
+    current_step: update.current_step,
+    recent_actions: newActions,
+  });
 }
 
 /**
@@ -120,19 +124,18 @@ export function updateSessionFromActivity(update: ActivityUpdate) {
  * Called from global WebSocket when status_change event is received.
  */
 export function updateSessionStatus(sessionId: string, newStatus: Session['status']) {
-  setSessionsStore('list', (sessions) =>
-    sessions.map((session) => {
-      if (session.id === sessionId) {
-        return {
-          ...session,
-          status: newStatus,
-          // Clear current_step when session is done
-          current_step: newStatus === 'stopped' ? undefined : session.current_step,
-        };
-      }
-      return session;
-    })
-  );
+  // Find the index of the session to update
+  const idx = sessionsStore.list.findIndex(s => s.id === sessionId);
+  if (idx === -1) return;
+
+  const session = sessionsStore.list[idx];
+
+  // Use path-based update for fine-grained reactivity
+  setSessionsStore('list', idx, {
+    status: newStatus,
+    // Clear current_step when session is done
+    current_step: newStatus === 'stopped' ? undefined : session.current_step,
+  });
 }
 
 /**

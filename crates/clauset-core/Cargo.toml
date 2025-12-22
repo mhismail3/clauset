@@ -23,3 +23,4 @@ portable-pty.workspace = true
 rusqlite.workspace = true
 regex.workspace = true
 once_cell.workspace = true
+libc.workspace = true

@@ -7,7 +7,14 @@ use clauset_core::ProcessEvent;
 use clauset_types::{WsClientMessage, WsServerMessage};
 use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
+use tracing::{debug, warn};
 use uuid::Uuid;
+
+/// Maximum size for text input messages (10KB)
+const MAX_INPUT_SIZE: usize = 10 * 1024;
+
+/// Maximum size for terminal input data (64KB - generous for paste operations)
+const MAX_TERMINAL_INPUT_SIZE: usize = 64 * 1024;
 
 pub async fn handle_websocket(
     socket: WebSocket,
@@ -169,9 +176,16 @@ pub async fn handle_websocket(
             if let Some(msg) = msg {
                 let json = match serde_json::to_string(&msg) {
                     Ok(j) => j,
-                    Err(_) => continue,
+                    Err(e) => {
+                        warn!("Failed to serialize WebSocket message for session {}: {}", session_id, e);
+                        continue;
+                    }
                 };
-                if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                if let Err(e) = ws_tx.send(Message::Text(json.into())).await {
+                    debug!(
+                        "WebSocket send failed for session {} (client likely disconnected): {}",
+                        session_id, e
+                    );
                     break;
                 }
             }
@@ -186,6 +200,16 @@ pub async fn handle_websocket(
                 if let Ok(client_msg) = serde_json::from_str::<WsClientMessage>(&text) {
                     match client_msg {
                         WsClientMessage::Input { content } => {
+                            // Validate input size
+                            if content.len() > MAX_INPUT_SIZE {
+                                warn!(
+                                    "Input message too large ({} bytes) from session {}, max {} bytes",
+                                    content.len(),
+                                    session_id,
+                                    MAX_INPUT_SIZE
+                                );
+                                continue;
+                            }
                             // Mark session as busy before sending input
                             // This ensures status shows "Thinking" immediately
                             state_clone
@@ -198,6 +222,16 @@ pub async fn handle_websocket(
                                 .await;
                         }
                         WsClientMessage::TerminalInput { data } => {
+                            // Validate terminal input size
+                            if data.len() > MAX_TERMINAL_INPUT_SIZE {
+                                warn!(
+                                    "Terminal input too large ({} bytes) from session {}, max {} bytes",
+                                    data.len(),
+                                    session_id,
+                                    MAX_TERMINAL_INPUT_SIZE
+                                );
+                                continue;
+                            }
                             // Check if input contains Enter key (carriage return)
                             // If so, mark session as busy since user is submitting a command
                             if data.contains(&b'\r') || data.contains(&b'\n') {

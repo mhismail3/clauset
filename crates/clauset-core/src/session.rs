@@ -5,7 +5,7 @@ use clauset_types::{Session, SessionMode, SessionStatus, SessionSummary};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// Configuration for the session manager.
@@ -168,7 +168,9 @@ impl SessionManager {
         if let Err(e) = spawn_result {
             error!("Failed to spawn Claude process for session {}: {}", session_id, e);
             // Update status to Error
-            let _ = self.db.update_status(session_id, SessionStatus::Error);
+            if let Err(db_err) = self.db.update_status(session_id, SessionStatus::Error) {
+                warn!("Failed to update session {} status to Error in DB: {}", session_id, db_err);
+            }
             return Err(e);
         }
 
@@ -356,18 +358,22 @@ impl SessionManager {
         // If activity changed, update the database with new stats
         if let Some(ref act) = activity {
             if !act.model.is_empty() {
-                let _ = self.db.update_stats(
+                if let Err(e) = self.db.update_stats(
                     session_id,
                     &act.model,
                     act.cost,
                     act.input_tokens,
                     act.output_tokens,
                     act.context_percent,
-                );
+                ) {
+                    warn!("Failed to update session {} stats in DB: {}", session_id, e);
+                }
             }
             // Update preview with current activity if meaningful
             if !act.current_activity.is_empty() {
-                let _ = self.db.update_preview(session_id, &act.current_activity);
+                if let Err(e) = self.db.update_preview(session_id, &act.current_activity) {
+                    warn!("Failed to update session {} preview in DB: {}", session_id, e);
+                }
             }
         }
 

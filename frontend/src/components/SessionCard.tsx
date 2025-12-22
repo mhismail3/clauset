@@ -268,7 +268,7 @@ export function SessionCard(props: SessionCardProps) {
 
   return (
     <div
-      class="card-retro card-pressable"
+      class="card-retro"
       style={{ overflow: 'hidden', position: 'relative' }}
     >
       <A
@@ -408,7 +408,7 @@ export function SessionCard(props: SessionCardProps) {
                     style={{
                       color: getActionsBorderColor(),
                       'flex-shrink': '0',
-                      'margin-top': '2px',
+                      'margin-top': '4px',
                     }}
                   >
                     <ActionIcon type={action.action_type} />

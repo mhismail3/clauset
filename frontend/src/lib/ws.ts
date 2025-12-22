@@ -15,11 +15,15 @@ export interface WebSocketManagerOptions {
   reconnectDelay?: number;
 }
 
+// Maximum number of messages to queue when disconnected
+const MAX_QUEUE_SIZE = 50;
+
 export function createWebSocketManager(options: WebSocketManagerOptions) {
   let ws: WebSocket | null = null;
   let reconnectCount = 0;
   let reconnectTimer: number | null = null;
   let state: ConnectionState = 'disconnected';
+  let messageQueue: unknown[] = [];
 
   const maxReconnectAttempts = options.reconnectAttempts ?? 10;
   const baseReconnectDelay = options.reconnectDelay ?? 1000;
@@ -42,6 +46,16 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
       ws.onopen = () => {
         setState('connected');
         reconnectCount = 0;
+
+        // Flush queued messages
+        if (messageQueue.length > 0) {
+          console.log(`Flushing ${messageQueue.length} queued messages after reconnect`);
+          const queue = messageQueue;
+          messageQueue = [];
+          for (const msg of queue) {
+            ws!.send(JSON.stringify(msg));
+          }
+        }
       };
 
       ws.onmessage = (event) => {
@@ -94,6 +108,8 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+    // Clear queued messages on intentional disconnect
+    messageQueue = [];
     ws?.close(1000, 'Client disconnect');
     ws = null;
     setState('disconnected');
@@ -103,6 +119,14 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(data));
       return true;
+    }
+
+    // Queue message for later delivery (with cap to prevent unbounded growth)
+    if (messageQueue.length < MAX_QUEUE_SIZE) {
+      messageQueue.push(data);
+      console.debug(`Queued message (${messageQueue.length}/${MAX_QUEUE_SIZE}), will send on reconnect`);
+    } else {
+      console.warn(`Message queue full (${MAX_QUEUE_SIZE}), dropping message`);
     }
     return false;
   }

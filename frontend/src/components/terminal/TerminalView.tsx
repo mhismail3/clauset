@@ -214,15 +214,9 @@ export function TerminalView(props: TerminalViewProps) {
   // Re-fit when connection state changes to send initial size
   createEffect(() => {
     if (props.isConnected) {
-      // Send resize immediately and multiple times to ensure backend receives it
-      // This handles race conditions where connection might not be fully ready
-      // and ensures PTY is resized before Claude outputs
-      doFitAndResize();
-      setTimeout(doFitAndResize, 50);
-      setTimeout(doFitAndResize, 150);
+      // Send resize with a delay to ensure connection is fully ready
+      // A single 300ms delay is sufficient - the server will receive and apply it
       setTimeout(doFitAndResize, 300);
-      setTimeout(doFitAndResize, 600);
-      setTimeout(doFitAndResize, 1000);
     }
   });
 

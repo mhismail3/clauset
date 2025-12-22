@@ -20,6 +20,9 @@ import {
 import { getStatusVariant, getStatusLabel } from '../stores/sessions';
 import { appendTerminalOutput, clearTerminalHistory } from '../stores/terminal';
 
+// Maximum chunks to queue when terminal is not yet ready (prevents OOM)
+const MAX_TERMINAL_QUEUE_CHUNKS = 100;
+
 // Parse Claude's status line: "Model | $Cost | InputK/OutputK | ctx:X%"
 interface StatusInfo {
   model: string;
@@ -162,7 +165,14 @@ export default function SessionPage() {
         if (terminalWriteFn) {
           terminalWriteFn(bytes);
         } else {
-          setTerminalData((prev) => [...prev, bytes]);
+          // Queue data (capped to prevent OOM if terminal takes too long to mount)
+          setTerminalData((prev) => {
+            if (prev.length >= MAX_TERMINAL_QUEUE_CHUNKS) {
+              // Drop oldest chunks to make room
+              return [...prev.slice(-MAX_TERMINAL_QUEUE_CHUNKS + 1), bytes];
+            }
+            return [...prev, bytes];
+          });
         }
 
         // Parse status from buffer
@@ -192,7 +202,13 @@ export default function SessionPage() {
         if (terminalWriteFn) {
           terminalWriteFn(bytes);
         } else {
-          setTerminalData((prev) => [...prev, bytes]);
+          // Queue data (capped to prevent OOM if terminal takes too long to mount)
+          setTerminalData((prev) => {
+            if (prev.length >= MAX_TERMINAL_QUEUE_CHUNKS) {
+              return [...prev.slice(-MAX_TERMINAL_QUEUE_CHUNKS + 1), bytes];
+            }
+            return [...prev, bytes];
+          });
         }
 
         // Try to parse status line from output

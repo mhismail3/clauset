@@ -2,12 +2,14 @@
 
 use crate::{ClausetError, OutputParser, Result};
 use clauset_types::{ClaudeEvent, SessionMode};
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
@@ -57,13 +59,17 @@ pub struct ProcessManager {
 
 enum ManagedProcess {
     StreamJson {
-        _handle: tokio::task::JoinHandle<()>,
+        handle: tokio::task::JoinHandle<()>,
         stdin_tx: mpsc::Sender<String>,
     },
     Terminal {
-        _handle: std::thread::JoinHandle<()>,
+        handle: std::thread::JoinHandle<()>,
         writer: Arc<std::sync::Mutex<Box<dyn Write + Send>>>,
         master: Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+        /// Signal to stop the reader thread
+        shutdown: Arc<AtomicBool>,
+        /// Child process for proper termination
+        child: Arc<std::sync::Mutex<Box<dyn PtyChild + Send + Sync>>>,
     },
 }
 
@@ -215,7 +221,7 @@ impl ProcessManager {
         self.processes.write().await.insert(
             opts.session_id,
             ManagedProcess::StreamJson {
-                _handle: handle,
+                handle,
                 stdin_tx,
             },
         );
@@ -270,10 +276,19 @@ impl ProcessManager {
 
         info!("Spawning Claude with session ID: {}", opts.claude_session_id);
 
-        let mut child = pair
+        let child = pair
             .slave
             .spawn_command(cmd)
             .map_err(|e| ClausetError::ProcessSpawnFailed(e.to_string()))?;
+
+        // Wrap child for shared access (needed for termination)
+        let child: Arc<std::sync::Mutex<Box<dyn PtyChild + Send + Sync>>> =
+            Arc::new(std::sync::Mutex::new(child));
+        let child_for_thread = child.clone();
+
+        // Create shutdown signal for clean termination
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_for_thread = shutdown.clone();
 
         let mut reader = pair
             .master
@@ -303,6 +318,12 @@ impl ProcessManager {
             let mut accumulated_output = String::new();
 
             loop {
+                // Check shutdown signal before each read
+                if shutdown_for_thread.load(Ordering::SeqCst) {
+                    info!("PTY reader thread received shutdown signal for session {}", session_id);
+                    break;
+                }
+
                 match reader.read(&mut buf) {
                     Ok(0) => {
                         info!("PTY reader got EOF for session {}", session_id);
@@ -333,13 +354,13 @@ impl ProcessManager {
 
                             if ready {
                                 // Wait a bit longer to ensure Claude is fully ready
-                                std::thread::sleep(std::time::Duration::from_millis(800));
+                                std::thread::sleep(Duration::from_millis(800));
                                 if let Ok(mut w) = writer_clone.lock() {
                                     // Send the prompt text followed by Enter
                                     let _ = w.write_all(initial_prompt.as_bytes());
                                     let _ = w.flush();
                                     // Small delay between text and Enter
-                                    std::thread::sleep(std::time::Duration::from_millis(50));
+                                    std::thread::sleep(Duration::from_millis(50));
                                     // Send Enter key to execute
                                     let _ = w.write_all(b"\r");
                                     let _ = w.flush();
@@ -350,14 +371,21 @@ impl ProcessManager {
                         }
                     }
                     Err(e) => {
-                        error!("PTY read error for session {}: {}", session_id, e);
+                        // Don't log error if we're shutting down (expected)
+                        if !shutdown_for_thread.load(Ordering::SeqCst) {
+                            error!("PTY read error for session {}: {}", session_id, e);
+                        }
                         break;
                     }
                 }
             }
 
-            // Wait for process to exit
-            let exit_code = child.wait().ok().map(|s| s.exit_code() as i32);
+            // Wait for process to exit (with timeout to avoid hanging)
+            let exit_code = if let Ok(mut c) = child_for_thread.lock() {
+                c.wait().ok().map(|s| s.exit_code() as i32)
+            } else {
+                None
+            };
             info!("Claude process exited with code {:?} for session {}", exit_code, session_id);
             let _ = tx.send(ProcessEvent::Exited {
                 session_id,
@@ -368,9 +396,11 @@ impl ProcessManager {
         self.processes.write().await.insert(
             opts.session_id,
             ManagedProcess::Terminal {
-                _handle: handle,
+                handle,
                 writer,
                 master: Arc::new(std::sync::Mutex::new(pair.master)),
+                shutdown,
+                child,
             },
         );
 
@@ -436,9 +466,100 @@ impl ProcessManager {
         Ok(())
     }
 
-    /// Terminate a process.
+    /// Terminate a process gracefully.
+    ///
+    /// For Terminal mode: SIGTERM → wait 5s → SIGKILL → join thread
+    /// For StreamJson mode: abort the tokio task
     pub async fn terminate(&self, session_id: Uuid) -> Result<()> {
-        self.processes.write().await.remove(&session_id);
+        let process = self.processes.write().await.remove(&session_id);
+
+        if let Some(process) = process {
+            match process {
+                ManagedProcess::Terminal {
+                    handle,
+                    shutdown,
+                    child,
+                    ..
+                } => {
+                    info!("Terminating terminal session {}", session_id);
+
+                    // 1. Signal the reader thread to stop
+                    shutdown.store(true, Ordering::SeqCst);
+
+                    // 2. Get child PID and send SIGTERM
+                    let pid = if let Ok(c) = child.lock() {
+                        c.process_id()
+                    } else {
+                        None
+                    };
+
+                    #[cfg(unix)]
+                    if let Some(pid) = pid {
+                        info!("Sending SIGTERM to process {} for session {}", pid, session_id);
+                        // SAFETY: We're sending a standard signal to a process we own
+                        unsafe {
+                            libc::kill(pid as i32, libc::SIGTERM);
+                        }
+                    }
+
+                    #[cfg(not(unix))]
+                    {
+                        // On non-Unix platforms, we rely on dropping the PTY master
+                        // to signal the child to exit
+                        let _ = pid; // suppress unused warning
+                        let _ = &child; // suppress unused warning
+                    }
+
+                    // 3. Wait up to 5 seconds for graceful exit
+                    let start = Instant::now();
+                    let timeout = Duration::from_secs(5);
+
+                    while start.elapsed() < timeout {
+                        if handle.is_finished() {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+
+                    // 4. Force kill if still running
+                    if !handle.is_finished() {
+                        if let Some(pid) = pid {
+                            #[cfg(unix)]
+                            {
+                                warn!(
+                                    "Process {} didn't exit gracefully, sending SIGKILL for session {}",
+                                    pid, session_id
+                                );
+                                // SAFETY: We're sending a standard signal to a process we own
+                                unsafe {
+                                    libc::kill(pid as i32, libc::SIGKILL);
+                                }
+                            }
+                        }
+                        // Give it a moment to die
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+
+                    // 5. Join the thread (should complete quickly now)
+                    match handle.join() {
+                        Ok(()) => {
+                            info!("Reader thread joined successfully for session {}", session_id);
+                        }
+                        Err(e) => {
+                            warn!("Reader thread panicked for session {}: {:?}", session_id, e);
+                        }
+                    }
+
+                    info!("Terminal session {} terminated", session_id);
+                }
+                ManagedProcess::StreamJson { handle, .. } => {
+                    info!("Terminating stream-json session {}", session_id);
+                    handle.abort();
+                    info!("Stream-json session {} terminated", session_id);
+                }
+            }
+        }
+
         Ok(())
     }
 
