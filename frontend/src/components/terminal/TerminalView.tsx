@@ -12,13 +12,20 @@ interface TerminalViewProps {
 }
 
 // Touch scroll physics configuration
-const SCROLL_DECELERATION = 0.95; // Friction coefficient (0.95 = smooth, 0.9 = faster stop)
-const VELOCITY_SCALE = 1.8; // Amplify velocity for more responsive feel
-const MIN_VELOCITY = 0.5; // Stop animation when velocity drops below this
+const SCROLL_DECELERATION = 0.94; // Friction coefficient (lower = faster stop)
+const VELOCITY_SCALE = 2.2; // Amplify velocity for more responsive feel
+const MIN_VELOCITY = 0.3; // Stop animation when velocity drops below this
 const RUBBER_BAND_FACTOR = 0.3; // Resistance when scrolling past bounds
-const SNAP_BACK_DURATION = 300; // ms to snap back from overscroll
-const TAP_THRESHOLD_MS = 150; // Max duration to consider a touch a tap
-const TAP_MOVE_THRESHOLD = 10; // Max movement to consider a touch a tap
+const SNAP_BACK_DURATION = 250; // ms to snap back from overscroll
+const TAP_THRESHOLD_MS = 120; // Max duration to consider a touch a tap
+const SCROLL_LOCK_THRESHOLD = 4; // Pixels moved before we decide scroll vs tap
+const DIRECTION_LOCK_THRESHOLD = 6; // Pixels before we lock scroll direction
+const VELOCITY_SAMPLE_COUNT = 5; // Number of velocity samples to track
+
+interface VelocitySample {
+  velocity: number;
+  time: number;
+}
 
 interface TouchState {
   startY: number;
@@ -26,9 +33,11 @@ interface TouchState {
   startTime: number;
   lastY: number;
   lastTime: number;
-  velocityY: number;
+  velocitySamples: VelocitySample[];
   isScrolling: boolean;
+  directionLocked: boolean;
   startScrollTop: number;
+  scrolledDistance: number; // Track how much we've actually scrolled
 }
 
 function createTouchScroller(getViewport: () => HTMLElement | null) {
@@ -41,11 +50,43 @@ function createTouchScroller(getViewport: () => HTMLElement | null) {
     return { min: 0, max: Math.max(0, maxScroll) };
   }
 
+  // Get the best velocity estimate from recent samples
+  function getBestVelocity(samples: VelocitySample[], fallbackVelocity: number): number {
+    if (samples.length === 0) return fallbackVelocity;
+
+    // Use samples from the last 100ms for better accuracy
+    const now = Date.now();
+    const recentSamples = samples.filter(s => now - s.time < 100);
+
+    if (recentSamples.length === 0) {
+      // Fall back to all samples if none are recent enough
+      return samples.reduce((max, s) => Math.abs(s.velocity) > Math.abs(max) ? s.velocity : max, 0);
+    }
+
+    // Weight recent samples higher and find the one with maximum magnitude
+    // This captures the "flick" velocity better
+    let bestVelocity = 0;
+    let bestWeight = 0;
+
+    for (const sample of recentSamples) {
+      const age = now - sample.time;
+      const weight = 1 - (age / 100); // More recent = higher weight
+      const weightedMagnitude = Math.abs(sample.velocity) * weight;
+
+      if (weightedMagnitude > bestWeight) {
+        bestWeight = weightedMagnitude;
+        bestVelocity = sample.velocity;
+      }
+    }
+
+    return bestVelocity || fallbackVelocity;
+  }
+
   function handleTouchStart(e: TouchEvent) {
     const viewport = getViewport();
     if (!viewport) return;
 
-    // Cancel any ongoing animations
+    // Cancel any ongoing animations immediately
     if (animationFrame) {
       cancelAnimationFrame(animationFrame);
       animationFrame = null;
@@ -62,9 +103,11 @@ function createTouchScroller(getViewport: () => HTMLElement | null) {
       startTime: Date.now(),
       lastY: touch.clientY,
       lastTime: Date.now(),
-      velocityY: 0,
+      velocitySamples: [],
       isScrolling: false,
+      directionLocked: false,
       startScrollTop: viewport.scrollTop,
+      scrolledDistance: 0,
     };
   }
 
@@ -74,36 +117,58 @@ function createTouchScroller(getViewport: () => HTMLElement | null) {
     if (!viewport) return;
 
     const touch = e.touches[0];
-    const deltaY = touchState.lastY - touch.clientY;
-    const deltaX = touch.clientX - touchState.startX;
     const now = Date.now();
     const timeDelta = Math.max(1, now - touchState.lastTime);
 
-    // Determine if this is primarily a vertical scroll gesture
-    const totalDeltaY = Math.abs(touch.clientY - touchState.startY);
-    const totalDeltaX = Math.abs(deltaX);
+    const deltaY = touchState.lastY - touch.clientY;
+    const totalDeltaY = touch.clientY - touchState.startY;
+    const totalDeltaX = touch.clientX - touchState.startX;
+    const absTotalY = Math.abs(totalDeltaY);
+    const absTotalX = Math.abs(totalDeltaX);
 
-    // If horizontal movement dominates, let the system handle it
-    if (!touchState.isScrolling && totalDeltaX > totalDeltaY && totalDeltaX > TAP_MOVE_THRESHOLD) {
-      touchState = null;
-      return;
+    // Direction locking: once we've moved enough, lock to vertical or horizontal
+    if (!touchState.directionLocked && (absTotalY > DIRECTION_LOCK_THRESHOLD || absTotalX > DIRECTION_LOCK_THRESHOLD)) {
+      touchState.directionLocked = true;
+
+      // If horizontal movement dominates, abandon this touch for scrolling
+      if (absTotalX > absTotalY) {
+        touchState = null;
+        return;
+      }
     }
 
-    // Start scrolling if we've moved enough vertically
-    if (!touchState.isScrolling && totalDeltaY > TAP_MOVE_THRESHOLD) {
+    // Start scrolling once we've moved past the small threshold
+    // This is a very small threshold to feel immediate
+    if (!touchState.isScrolling && absTotalY > SCROLL_LOCK_THRESHOLD) {
       touchState.isScrolling = true;
+
+      // Compensate: apply the initial movement that got us here
+      const initialDelta = -totalDeltaY; // Negative because scroll direction
+      const bounds = getScrollBounds(viewport);
+      const compensatedScroll = viewport.scrollTop + initialDelta;
+
+      if (compensatedScroll >= bounds.min && compensatedScroll <= bounds.max) {
+        viewport.scrollTop = compensatedScroll;
+        touchState.scrolledDistance += Math.abs(initialDelta);
+      }
     }
 
     if (touchState.isScrolling) {
       // Prevent default to stop the page from scrolling
       e.preventDefault();
 
-      // Calculate instantaneous velocity (pixels per ms)
-      const instantVelocity = deltaY / timeDelta;
-      // Smooth velocity using exponential moving average
-      touchState.velocityY = 0.7 * instantVelocity + 0.3 * touchState.velocityY;
+      // Calculate and store velocity sample
+      if (timeDelta > 0) {
+        const instantVelocity = deltaY / timeDelta;
+        touchState.velocitySamples.push({ velocity: instantVelocity, time: now });
 
-      // Get scroll bounds
+        // Keep only recent samples
+        if (touchState.velocitySamples.length > VELOCITY_SAMPLE_COUNT) {
+          touchState.velocitySamples.shift();
+        }
+      }
+
+      // Apply scroll
       const bounds = getScrollBounds(viewport);
       const newScrollTop = viewport.scrollTop + deltaY;
 
@@ -117,6 +182,8 @@ function createTouchScroller(getViewport: () => HTMLElement | null) {
       } else {
         viewport.scrollTop = newScrollTop;
       }
+
+      touchState.scrolledDistance += Math.abs(deltaY);
     }
 
     touchState.lastY = touch.clientY;
@@ -131,62 +198,75 @@ function createTouchScroller(getViewport: () => HTMLElement | null) {
     const state = touchState;
     touchState = null;
 
-    // Check if this was a tap (short duration, minimal movement)
     const duration = Date.now() - state.startTime;
-    const moved = Math.abs(state.lastY - state.startY);
-    if (duration < TAP_THRESHOLD_MS && moved < TAP_MOVE_THRESHOLD) {
-      // This was a tap, don't interfere
+    const totalMoved = Math.abs(state.lastY - state.startY);
+
+    // Tap detection: very short duration AND minimal movement AND didn't scroll
+    if (duration < TAP_THRESHOLD_MS && totalMoved < SCROLL_LOCK_THRESHOLD && !state.isScrolling) {
+      // This was a tap, let it pass through
       return;
     }
 
-    if (!state.isScrolling) return;
-
-    const bounds = getScrollBounds(viewport);
-    const currentScroll = viewport.scrollTop;
-
-    // If we're outside bounds, snap back
-    if (currentScroll < bounds.min || currentScroll > bounds.max) {
-      snapBack(viewport, bounds);
-      return;
-    }
-
-    // Apply momentum scrolling
-    let velocity = state.velocityY * VELOCITY_SCALE * 16; // Convert to pixels per frame (~16ms)
-
-    if (Math.abs(velocity) < MIN_VELOCITY) return;
-
-    function momentumStep() {
+    // If we scrolled, handle momentum
+    if (state.isScrolling && state.scrolledDistance > 0) {
       const bounds = getScrollBounds(viewport);
       const currentScroll = viewport.scrollTop;
 
-      // Check if we've hit bounds - just stop, don't snap back
-      // (snap back is only for recovering from manual overscroll, not momentum)
-      if (currentScroll <= bounds.min && velocity < 0) {
-        viewport.scrollTop = bounds.min;
-        animationFrame = null;
-        return;
-      }
-      if (currentScroll >= bounds.max && velocity > 0) {
-        viewport.scrollTop = bounds.max;
-        animationFrame = null;
+      // If we're outside bounds, snap back
+      if (currentScroll < bounds.min || currentScroll > bounds.max) {
+        snapBack(viewport, bounds);
         return;
       }
 
-      // Apply velocity
-      viewport.scrollTop = currentScroll + velocity;
+      // Calculate velocity for momentum
+      // Use displacement/time as fallback for very short gestures
+      const fallbackVelocity = totalMoved > 0 && duration > 0
+        ? (-Math.sign(state.lastY - state.startY) * totalMoved / duration)
+        : 0;
 
-      // Apply deceleration
-      velocity *= SCROLL_DECELERATION;
+      const bestVelocity = getBestVelocity(state.velocitySamples, fallbackVelocity);
+      let velocity = bestVelocity * VELOCITY_SCALE * 16; // Convert to pixels per frame
 
-      // Continue or stop
-      if (Math.abs(velocity) > MIN_VELOCITY) {
-        animationFrame = requestAnimationFrame(momentumStep);
-      } else {
-        animationFrame = null;
+      // For short quick flicks, boost the velocity
+      if (duration < 150 && totalMoved > 10) {
+        velocity *= 1.3;
       }
+
+      if (Math.abs(velocity) < MIN_VELOCITY) return;
+
+      function momentumStep() {
+        const bounds = getScrollBounds(viewport);
+        const currentScroll = viewport.scrollTop;
+
+        // Check if we've hit bounds - just stop, don't snap back
+        // (snap back is only for recovering from manual overscroll, not momentum)
+        if (currentScroll <= bounds.min && velocity < 0) {
+          viewport.scrollTop = bounds.min;
+          animationFrame = null;
+          return;
+        }
+        if (currentScroll >= bounds.max && velocity > 0) {
+          viewport.scrollTop = bounds.max;
+          animationFrame = null;
+          return;
+        }
+
+        // Apply velocity
+        viewport.scrollTop = currentScroll + velocity;
+
+        // Apply deceleration
+        velocity *= SCROLL_DECELERATION;
+
+        // Continue or stop
+        if (Math.abs(velocity) > MIN_VELOCITY) {
+          animationFrame = requestAnimationFrame(momentumStep);
+        } else {
+          animationFrame = null;
+        }
+      }
+
+      animationFrame = requestAnimationFrame(momentumStep);
     }
-
-    animationFrame = requestAnimationFrame(momentumStep);
   }
 
   function snapBack(viewport: HTMLElement, bounds: { min: number; max: number }) {
