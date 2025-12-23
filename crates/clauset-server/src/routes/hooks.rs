@@ -212,10 +212,8 @@ async fn update_activity_from_hook(
             // Filter out hook infrastructure (same as PreToolUse)
             if tool_name == "Bash" {
                 if let Some(ref input) = update.tool_input {
-                    if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
-                        if is_hook_infrastructure_command(cmd) {
-                            return;
-                        }
+                    if should_filter_bash_command(input) {
+                        return;
                     }
                 }
             }
@@ -264,14 +262,47 @@ fn tool_name_to_action_type(tool_name: &str) -> String {
     .to_string()
 }
 
-/// Check if a Bash command is hook-related infrastructure (should be filtered out).
-fn is_hook_infrastructure_command(cmd: &str) -> bool {
-    let cmd_lower = cmd.to_lowercase();
-    cmd_lower.contains("clauset-hook")
-        || cmd_lower.contains("clauset_hook")
-        || cmd_lower.contains("api/hooks")
-        || cmd_lower.contains("clauset_session_id")
-        || cmd_lower.contains("hook-debug.log")
+/// Check if text is hook-related infrastructure (should be filtered out).
+/// Checks for Clauset hook script, Claude Code hooks, and related patterns.
+fn is_hook_infrastructure(text: &str) -> bool {
+    let text_lower = text.to_lowercase();
+
+    // Clauset hook infrastructure
+    text_lower.contains("clauset-hook")
+        || text_lower.contains("clauset_hook")
+        || text_lower.contains("api/hooks")
+        || text_lower.contains("clauset_session_id")
+        || text_lower.contains("clauset_url")
+        || text_lower.contains("hook-debug.log")
+        // Claude Code hooks directory
+        || text_lower.contains("/.claude/hooks/")
+        || text_lower.contains("\\.claude\\hooks\\")
+        // Hook-related descriptions
+        || text_lower.contains("stop hook")
+        || text_lower.contains("pre hook")
+        || text_lower.contains("post hook")
+        || text_lower.contains("session hook")
+        || text_lower.contains("hook event")
+        || text_lower.contains("hook script")
+}
+
+/// Check if a Bash tool input should be filtered out (hook infrastructure).
+fn should_filter_bash_command(input: &Value) -> bool {
+    // Check command
+    if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
+        if is_hook_infrastructure(cmd) {
+            return true;
+        }
+    }
+
+    // Check description
+    if let Some(desc) = input.get("description").and_then(|v| v.as_str()) {
+        if is_hook_infrastructure(desc) {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Create a human-readable summary of the tool action.
@@ -304,15 +335,16 @@ fn create_action_summary(tool_name: &str, input: &Option<Value>) -> Option<Strin
                 }
             }
             "Bash" => {
+                // Filter out hook infrastructure (check both command and description)
+                if should_filter_bash_command(input) {
+                    return None;
+                }
+
+                // Prefer description if available, otherwise use command
+                if let Some(desc) = input.get("description").and_then(|v| v.as_str()) {
+                    return Some(format!("$ {}", truncate_str(desc, 50)));
+                }
                 if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
-                    // Filter out hook infrastructure commands
-                    if is_hook_infrastructure_command(cmd) {
-                        return None;
-                    }
-                    // Prefer description if available, otherwise use command
-                    if let Some(desc) = input.get("description").and_then(|v| v.as_str()) {
-                        return Some(format!("$ {}", truncate_str(desc, 50)));
-                    }
                     let short = truncate_str(cmd, 50);
                     return Some(format!("$ {}", short));
                 }
