@@ -127,6 +127,12 @@ const PONG_TIMEOUT_MS = 5000;       // Expect pong within 5s
 const STALE_THRESHOLD_MS = 25000;   // Mark stale if no pong in 25s
 const MAX_MISSED_PONGS = 2;         // Force reconnect after 2 missed pongs
 
+// Safari-specific: Check for stale connection even when readyState === OPEN
+const SAFARI_MESSAGE_RECENCY_MS = 45000;  // If no message in 45s, connection might be dead
+
+// Detect Safari
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
 // LocalStorage key for persisting message queue
 const QUEUE_STORAGE_KEY = 'clauset_message_queue';
 // Maximum age for queued messages (5 minutes)
@@ -158,6 +164,9 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     lastPongTime: Date.now(),
     missedPongs: 0,
   };
+
+  // Track last message received (for Safari staleness detection)
+  let lastMessageTime = Date.now();
 
   const maxReconnectAttempts = options.reconnectAttempts ?? 10;
   const baseReconnectDelay = options.reconnectDelay ?? 1000;
@@ -238,7 +247,17 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
 
       // Check if connection is stale
       const timeSinceLastPong = Date.now() - heartbeatState.lastPongTime;
-      if (timeSinceLastPong > STALE_THRESHOLD_MS && state === 'connected') {
+      const timeSinceLastMessage = Date.now() - lastMessageTime;
+
+      // Safari-specific: Also check message recency
+      // Safari's WebSocket.readyState can be OPEN even when connection is dead
+      const isStale = timeSinceLastPong > STALE_THRESHOLD_MS ||
+        (isSafari && timeSinceLastMessage > SAFARI_MESSAGE_RECENCY_MS);
+
+      if (isStale && state === 'connected') {
+        if (isSafari && timeSinceLastMessage > SAFARI_MESSAGE_RECENCY_MS) {
+          console.warn('Safari: No messages received recently, connection may be dead');
+        }
         setState('stale');
         options.onStale?.();
       }
@@ -345,6 +364,9 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
   }
 
   function handleMessage(data: WsMessage) {
+    // Track message recency for Safari staleness detection
+    lastMessageTime = Date.now();
+
     switch (data.type) {
       case 'pong':
         handlePong(data.timestamp as number);
