@@ -103,8 +103,16 @@ Success criteria: All features from docs/FEATURE_PLAN.md implemented with no reg
   - Added "history" tab to Session page view toggle
   - All frontend builds successfully, all backend tests pass
 
+- Create New Project in New Session Modal
+  - Added POST /api/projects endpoint with validation in `projects.rs`
+  - Registered route in `main.rs`
+  - Added `api.projects.create()` method in `api.ts`
+  - Replaced `<select>` with combobox in `NewSessionModal.tsx`
+  - Shows "Will create new project: {name}" indicator when typing new name
+  - Frontend UI tested and working
+
 ### Now
-- All phases complete + bug fixes
+- All features complete
 
 ### Next
 - None - feature implementation complete

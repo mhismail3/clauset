@@ -47,6 +47,10 @@ export interface ProjectsResponse {
   projects_root: string;
 }
 
+export interface CreateProjectRequest {
+  name: string;
+}
+
 export interface CreateSessionResponse {
   session_id: string;
   claude_session_id: string;
@@ -296,6 +300,11 @@ export const api = {
 
   projects: {
     list: () => fetchJSON<ProjectsResponse>('/projects'),
+    create: (req: CreateProjectRequest) =>
+      fetchJSON<Project>('/projects', {
+        method: 'POST',
+        body: JSON.stringify(req),
+      }),
   },
 
   interactions: {

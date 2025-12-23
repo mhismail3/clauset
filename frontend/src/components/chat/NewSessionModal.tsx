@@ -1,4 +1,4 @@
-import { Show, For, createSignal, onMount, createEffect } from 'solid-js';
+import { Show, For, createSignal, createEffect, createMemo } from 'solid-js';
 import { useNavigate } from '@solidjs/router';
 import { Button } from '../ui/Button';
 import { Spinner } from '../ui/Spinner';
@@ -13,12 +13,35 @@ export function NewSessionModal(props: NewSessionModalProps) {
   const navigate = useNavigate();
   const [projects, setProjects] = createSignal<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = createSignal(false);
-  const [selectedProject, setSelectedProject] = createSignal('');
+  const [projectInput, setProjectInput] = createSignal('');
+  const [showDropdown, setShowDropdown] = createSignal(false);
   const [selectedModel, setSelectedModel] = createSignal('haiku');
   const [prompt, setPrompt] = createSignal('');
   const [chatMode, setChatMode] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+
+  // Find matching project by path or name
+  const matchedProject = createMemo(() => {
+    const input = projectInput().toLowerCase();
+    return projects().find(
+      p => p.path === projectInput() || p.name.toLowerCase() === input
+    );
+  });
+
+  // Filter projects for dropdown
+  const filteredProjects = createMemo(() => {
+    const input = projectInput().toLowerCase();
+    if (!input) return projects();
+    return projects().filter(p => p.name.toLowerCase().includes(input));
+  });
+
+  // Check if creating new project
+  const isCreatingNew = createMemo(() => {
+    const input = projectInput().trim();
+    if (!input) return false;
+    return !matchedProject();
+  });
 
   const models = [
     { value: 'haiku', label: 'Haiku', description: 'Fast and efficient' },
@@ -32,8 +55,8 @@ export function NewSessionModal(props: NewSessionModalProps) {
       const response = await api.projects.list();
       setProjects(response.projects);
       // Auto-select first project if none selected
-      if (response.projects.length > 0 && !selectedProject()) {
-        setSelectedProject(response.projects[0].path);
+      if (response.projects.length > 0 && !projectInput()) {
+        setProjectInput(response.projects[0].name);
       }
     } catch (e) {
       console.error('Failed to fetch projects:', e);
@@ -51,8 +74,9 @@ export function NewSessionModal(props: NewSessionModalProps) {
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
-    if (!selectedProject()) {
-      setError('Please select a project');
+    const input = projectInput().trim();
+    if (!input) {
+      setError('Please enter a project name');
       return;
     }
 
@@ -60,8 +84,21 @@ export function NewSessionModal(props: NewSessionModalProps) {
     setError(null);
 
     try {
+      let projectPath: string;
+
+      if (isCreatingNew()) {
+        // Create new project first
+        const newProject = await api.projects.create({ name: input });
+        projectPath = newProject.path;
+        // Add to list so it's available next time
+        setProjects([...projects(), newProject]);
+      } else {
+        // Use existing project path
+        projectPath = matchedProject()!.path;
+      }
+
       const response = await api.sessions.create({
-        project_path: selectedProject(),
+        project_path: projectPath,
         prompt: prompt() || undefined,
         model: selectedModel(),
         terminal_mode: !chatMode(), // Invert: chatMode=false means terminal_mode=true
@@ -173,7 +210,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
               </Show>
 
               {/* Project Selection */}
-              <div>
+              <div style={{ position: "relative" }}>
                 <label
                   class="text-label"
                   style={{
@@ -203,27 +240,15 @@ export function NewSessionModal(props: NewSessionModalProps) {
                     </div>
                   }
                 >
-                  <Show
-                    when={projects().length > 0}
-                    fallback={
-                      <div
-                        class="text-text-muted"
-                        style={{
-                          padding: "10px 12px",
-                          "border-radius": "8px",
-                          background: "var(--color-bg-base)",
-                          "font-size": "14px",
-                        }}
-                      >
-                        No projects found
-                      </div>
-                    }
-                  >
-                    <select
-                      value={selectedProject()}
-                      onChange={(e) => setSelectedProject(e.currentTarget.value)}
-                      required
-                      class="text-text-primary"
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type="text"
+                      value={projectInput()}
+                      onInput={(e) => setProjectInput(e.currentTarget.value)}
+                      onFocus={() => setShowDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+                      placeholder="Select or create a project..."
+                      class="text-text-primary placeholder:text-text-muted"
                       style={{
                         width: "100%",
                         "box-sizing": "border-box",
@@ -233,21 +258,64 @@ export function NewSessionModal(props: NewSessionModalProps) {
                         border: "none",
                         background: "var(--color-bg-base)",
                         outline: "none",
-                        cursor: "pointer",
-                        appearance: "none",
-                        "-webkit-appearance": "none",
-                        "background-image": `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235c5855' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
-                        "background-repeat": "no-repeat",
-                        "background-position": "right 10px center",
-                        "padding-right": "32px",
+                      }}
+                    />
+                    {/* Dropdown */}
+                    <Show when={showDropdown() && filteredProjects().length > 0}>
+                      <div
+                        class="bg-bg-surface"
+                        style={{
+                          position: "absolute",
+                          top: "100%",
+                          left: "0",
+                          right: "0",
+                          "margin-top": "4px",
+                          "border-radius": "8px",
+                          "max-height": "160px",
+                          "overflow-y": "auto",
+                          "box-shadow": "0 4px 16px rgba(0, 0, 0, 0.3)",
+                          "z-index": "100",
+                        }}
+                      >
+                        <For each={filteredProjects()}>
+                          {(project) => (
+                            <div
+                              class="text-text-primary hover:bg-bg-base"
+                              style={{
+                                padding: "8px 12px",
+                                cursor: "pointer",
+                                "font-size": "14px",
+                              }}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setProjectInput(project.name);
+                                setShowDropdown(false);
+                              }}
+                            >
+                              {project.name}
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                  {/* Create new indicator */}
+                  <Show when={isCreatingNew() && projectInput().trim()}>
+                    <div
+                      class="text-accent"
+                      style={{
+                        "font-size": "12px",
+                        "margin-top": "6px",
+                        display: "flex",
+                        "align-items": "center",
+                        gap: "4px",
                       }}
                     >
-                      <For each={projects()}>
-                        {(project) => (
-                          <option value={project.path}>{project.name}</option>
-                        )}
-                      </For>
-                    </select>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                      <span>Will create new project: <strong>{projectInput().trim()}</strong></span>
+                    </div>
                   </Show>
                 </Show>
               </div>
@@ -385,7 +453,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
                 <Button
                   type="submit"
                   style={{ flex: "1" }}
-                  disabled={loading() || !selectedProject()}
+                  disabled={loading() || !projectInput().trim()}
                 >
                   {loading() ? 'Creating...' : 'Create'}
                 </Button>

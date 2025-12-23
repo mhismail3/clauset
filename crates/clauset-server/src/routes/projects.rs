@@ -1,9 +1,14 @@
 //! Project listing route handlers.
 
-use axum::{extract::State, Json};
-use serde::Serialize;
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::state::AppState;
 
@@ -54,4 +59,72 @@ pub async fn list(State(state): State<Arc<AppState>>) -> Json<ProjectsResponse> 
         projects,
         projects_root: projects_root.to_string_lossy().to_string(),
     })
+}
+
+#[derive(Deserialize)]
+pub struct CreateProjectRequest {
+    pub name: String,
+}
+
+/// Error type for project creation.
+pub enum CreateProjectError {
+    InvalidName(String),
+    AlreadyExists,
+    IoError(std::io::Error),
+}
+
+impl IntoResponse for CreateProjectError {
+    fn into_response(self) -> Response {
+        let (status, message) = match self {
+            CreateProjectError::InvalidName(reason) => {
+                (StatusCode::BAD_REQUEST, format!("Invalid project name: {}", reason))
+            }
+            CreateProjectError::AlreadyExists => {
+                (StatusCode::CONFLICT, "A project with this name already exists".to_string())
+            }
+            CreateProjectError::IoError(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create project: {}", e))
+            }
+        };
+        (status, message).into_response()
+    }
+}
+
+/// Create a new project directory.
+pub async fn create(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateProjectRequest>,
+) -> Result<Json<Project>, CreateProjectError> {
+    let name = req.name.trim();
+
+    // Validate project name
+    if name.is_empty() {
+        return Err(CreateProjectError::InvalidName("name cannot be empty".to_string()));
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err(CreateProjectError::InvalidName("name cannot contain path separators".to_string()));
+    }
+    if name == "." || name == ".." {
+        return Err(CreateProjectError::InvalidName("name cannot be '.' or '..'".to_string()));
+    }
+    if name.starts_with('.') {
+        return Err(CreateProjectError::InvalidName("name cannot start with '.'".to_string()));
+    }
+
+    let project_path = state.config.projects_root.join(name);
+
+    // Check if already exists
+    if project_path.exists() {
+        return Err(CreateProjectError::AlreadyExists);
+    }
+
+    // Create the directory
+    std::fs::create_dir(&project_path).map_err(CreateProjectError::IoError)?;
+
+    info!("Created new project directory: {:?}", project_path);
+
+    Ok(Json(Project {
+        name: name.to_string(),
+        path: project_path.to_string_lossy().to_string(),
+    }))
 }

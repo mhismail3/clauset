@@ -148,7 +148,7 @@ async fn main() -> Result<()> {
         )
         // Other routes
         .route("/history", get(routes::history::list))
-        .route("/projects", get(routes::projects::list))
+        .route("/projects", get(routes::projects::list).post(routes::projects::create))
         .route("/hooks", post(routes::hooks::receive))
         .route("/health", get(routes::health));
 
