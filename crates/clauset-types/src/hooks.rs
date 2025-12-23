@@ -165,6 +165,7 @@ pub enum HookEvent {
         tool_name: String,
         tool_input: Value,
         tool_use_id: String,
+        cwd: Option<String>,
     },
 
     /// Tool finished executing
@@ -239,6 +240,7 @@ impl TryFrom<HookEventPayload> for HookEvent {
                 tool_name: p.tool_name.ok_or("missing tool_name")?,
                 tool_input: p.tool_input.unwrap_or(Value::Null),
                 tool_use_id: p.tool_use_id.unwrap_or_default(),
+                cwd: p.cwd,
             }),
 
             "PostToolUse" => Ok(HookEvent::PostToolUse {
@@ -373,13 +375,15 @@ mod tests {
             tool_name: Some("Read".to_string()),
             tool_input: Some(serde_json::json!({"file_path": "/test/file.rs"})),
             tool_use_id: Some("toolu_123".to_string()),
+            cwd: Some("/home/user/project".to_string()),
             ..Default::default()
         };
 
         let event = HookEvent::try_from(payload).unwrap();
         match event {
-            HookEvent::PreToolUse { tool_name, .. } => {
+            HookEvent::PreToolUse { tool_name, cwd, .. } => {
                 assert_eq!(tool_name, "Read");
+                assert_eq!(cwd, Some("/home/user/project".to_string()));
             }
             _ => panic!("Expected PreToolUse event"),
         }

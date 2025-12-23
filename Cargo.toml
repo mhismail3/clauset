@@ -47,6 +47,13 @@ regex = "1.11"
 once_cell = "1.20"
 libc = "0.2"
 
+# Cryptography and compression
+sha2 = "0.10"
+zstd = "0.13"
+
+# Diff computation
+similar = "2.6"
+
 # Internal crates
 clauset-types = { path = "crates/clauset-types" }
 clauset-core = { path = "crates/clauset-core" }

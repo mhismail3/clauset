@@ -1,0 +1,121 @@
+# Continuity Ledger
+
+## Goal
+Implement comprehensive interaction tracking system with:
+- Interaction timeline (user prompts + tool invocations)
+- File diffs (before/after snapshots)
+- Cross-session full-text search
+- Cost analytics per interaction
+- Rollback capability
+
+Success criteria: All features from docs/FEATURE_PLAN.md implemented with no regressions.
+
+## Constraints/Assumptions
+- 30-day retention policy
+- Modified files only (Write/Edit tools)
+- Hook integration already exists (HookEventPayload)
+- Use same SQLite database file, separate tables
+- Content-addressed storage with SHA256 + zstd compression
+
+## Key Decisions
+- Created separate `InteractionStore` module (not extending SessionStore)
+- FTS5 for full-text search on user_prompt + assistant_summary + tool_name
+- Reference counting triggers for file content deduplication
+- Foreign key from interactions → sessions (requires sessions table to exist)
+- Using `similar` crate for diff computation
+
+## State
+
+### Done
+- Phase 1: Database Schema & Core Infrastructure
+  - Created `clauset_types::interaction` module with all type definitions
+  - Created `clauset_core::interaction_store` module with schema, CRUD, cleanup
+  - FTS5 virtual tables and triggers for full-text search
+  - Reference counting for content deduplication
+  - All tests passing
+
+- Phase 2: Interaction Capture Engine
+  - Created `InteractionProcessor` in clauset-server
+  - Integrated with hook processing via hooks.rs
+  - Captures interactions on UserPromptSubmit
+  - Captures tool invocations on PreToolUse/PostToolUse
+  - Captures before/after file snapshots for Write/Edit tools
+  - Completes interactions on Stop event
+
+- Phase 3: Diff Engine
+  - Created `diff.rs` module with `compute_diff()` and `generate_unified_diff()`
+  - Added `FileChangeWithDiff` type
+  - Added `get_file_changes_with_diffs()` and `get_unified_diff()` methods
+  - 6 new diff tests passing
+
+- Phase 4: Cross-Session Search
+  - Added FTS5 search methods: `search_interactions()`, `search_tool_invocations()`
+  - Added file path pattern search: `search_files_by_path()`
+  - Added combined `global_search()` method
+  - Types: `SearchField`, `SearchResult`, `FilePathMatch`, `GlobalSearchResults`
+
+- Phase 5: Cost Analytics
+  - Added `get_session_analytics()` for per-session stats
+  - Added `get_daily_cost_breakdown()` for cost over time
+  - Added `get_tool_cost_breakdown()` for per-tool analysis
+  - Added `get_analytics_summary()` for aggregate stats
+  - Added `get_most_expensive_interactions()` for outlier detection
+  - Types: `SessionAnalytics`, `DailyCostEntry`, `ToolCostEntry`, `AnalyticsSummary`
+
+- Phase 6: API Endpoints
+  - Created `routes/interactions.rs` with all endpoints:
+    - GET /api/sessions/{id}/interactions - list session interactions
+    - GET /api/interactions/{id} - get interaction detail
+    - GET /api/sessions/{id}/files-changed - list changed files
+    - GET /api/diff - compute diff between snapshots
+    - GET /api/search - cross-session search
+    - GET /api/analytics - cost analytics summary
+    - GET /api/analytics/expensive - most expensive interactions
+    - GET /api/analytics/storage - storage statistics
+  - Added `get_snapshot_content()` and `get_all_session_ids()` to store
+  - All 43 tests passing, workspace compiles
+
+- Phase 7: Timeline/Interaction UI Components
+  - Created `InteractionCard.tsx` - displays individual interactions with expandable details
+  - Created `TimelineView.tsx` - lists interactions in chronological order with session stats
+  - Added to Session page as "history" tab
+
+- Phase 8: Diff Viewer Component
+  - Created `DiffViewer.tsx` - unified diff display with syntax highlighting
+  - Shows line-by-line changes with added/removed/context coloring
+  - Includes stats bar and hunk headers
+
+- Phase 9: Search UI
+  - Created `SearchModal.tsx` - cross-session full-text search
+  - Supports scoped search (prompts, files, tools, all)
+  - Displays results grouped by type with links to interactions
+
+- Phase 10: Analytics Dashboard
+  - Created `Analytics.tsx` page with summary stats, charts, and storage info
+  - Daily cost chart (bar graph)
+  - Tool usage breakdown
+  - Sessions by cost list
+  - Storage statistics with compression ratio
+
+- Integration
+  - Added `/analytics` route to router
+  - Added search button and analytics link to Sessions page header
+  - Added "history" tab to Session page view toggle
+  - All frontend builds successfully, all backend tests pass
+
+### Now
+- All phases complete
+
+### Next
+- None - feature implementation complete
+
+## Open Questions
+- None currently
+
+## Working Set
+- `crates/clauset-types/src/interaction.rs` - type definitions
+- `crates/clauset-core/src/interaction_store.rs` - database layer
+- `crates/clauset-core/src/diff.rs` - diff computation
+- `crates/clauset-server/src/interaction_processor.rs` - hook integration
+- `crates/clauset-server/src/routes/interactions.rs` - API endpoints
+- `docs/FEATURE_PLAN.md` - comprehensive implementation plan

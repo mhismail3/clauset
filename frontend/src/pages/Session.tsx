@@ -7,6 +7,8 @@ import { ConnectionStatus } from '../components/ui/ConnectionStatus';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import { InputBar } from '../components/chat/InputBar';
 import { TerminalView } from '../components/terminal/TerminalView';
+import { TimelineView } from '../components/interactions/TimelineView';
+import { DiffViewer } from '../components/interactions/DiffViewer';
 import { api, Session } from '../lib/api';
 import { createWebSocketManager, WsMessage, SyncResponse, ConnectionState } from '../lib/ws';
 import {
@@ -72,8 +74,9 @@ export default function SessionPage() {
   const [error, setError] = createSignal<string | null>(null);
   const [wsState, setWsState] = createSignal<ConnectionState>('initial');
   const [connectionInfo, setConnectionInfo] = createSignal({ reconnectAttempt: 0, maxReconnectAttempts: 5, queuedMessageCount: 0 });
-  const [showTerminal, setShowTerminal] = createSignal(true);
+  const [currentView, setCurrentView] = createSignal<'term' | 'chat' | 'history'>('term');
   const [currentStreamingId, setCurrentStreamingId] = createSignal<string | null>(null);
+  const [diffState, setDiffState] = createSignal<{ interactionId: string; file: string } | null>(null);
   const [terminalData, setTerminalData] = createSignal<Uint8Array[]>([]);
   const [resuming, setResuming] = createSignal(false);
 
@@ -593,42 +596,26 @@ export default function SessionPage() {
               border: '1px solid var(--color-bg-overlay)',
             }}
           >
-            <button
-              onClick={() => setShowTerminal(true)}
-              class="text-mono"
-              style={{
-                padding: '6px 12px',
-                "font-size": '11px',
-                "font-weight": '500',
-                "border-radius": '8px',
-                border: 'none',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                background: showTerminal() ? 'var(--color-bg-elevated)' : 'transparent',
-                color: showTerminal() ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-                "box-shadow": showTerminal() ? 'var(--shadow-retro-sm)' : 'none',
-              }}
-            >
-              term
-            </button>
-            <button
-              onClick={() => setShowTerminal(false)}
-              class="text-mono"
-              style={{
-                padding: '6px 12px',
-                "font-size": '11px',
-                "font-weight": '500',
-                "border-radius": '8px',
-                border: 'none',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                background: !showTerminal() ? 'var(--color-bg-elevated)' : 'transparent',
-                color: !showTerminal() ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-                "box-shadow": !showTerminal() ? 'var(--shadow-retro-sm)' : 'none',
-              }}
-            >
-              chat
-            </button>
+            {(['term', 'chat', 'history'] as const).map((view) => (
+              <button
+                onClick={() => setCurrentView(view)}
+                class="text-mono"
+                style={{
+                  padding: '6px 12px',
+                  "font-size": '11px',
+                  "font-weight": '500',
+                  "border-radius": '8px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  background: currentView() === view ? 'var(--color-bg-elevated)' : 'transparent',
+                  color: currentView() === view ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                  "box-shadow": currentView() === view ? 'var(--shadow-retro-sm)' : 'none',
+                }}
+              >
+                {view}
+              </button>
+            ))}
           </div>
         </div>
       </header>
@@ -695,7 +682,7 @@ export default function SessionPage() {
         </Show>
 
         {/* Chat View */}
-        <div class={`flex-1 flex flex-col ${showTerminal() ? 'hidden' : ''}`}>
+        <div class={`flex-1 flex flex-col ${currentView() !== 'chat' ? 'hidden' : ''}`}>
           <main class="flex-1 scrollable p-4 space-y-4">
             {/* Terminal mode notice */}
             <Show when={session()?.mode === 'terminal' && messages().length === 0}>
@@ -723,7 +710,7 @@ export default function SessionPage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setShowTerminal(true)}
+                  onClick={() => setCurrentView('term')}
                 >
                   Switch to Terminal
                 </Button>
@@ -758,7 +745,7 @@ export default function SessionPage() {
 
         {/* Terminal View */}
         <div
-          class={showTerminal() ? '' : 'hidden'}
+          class={currentView() !== 'term' ? 'hidden' : ''}
           style={{
             display: 'flex',
             "flex-direction": 'column',
@@ -773,9 +760,46 @@ export default function SessionPage() {
           <TerminalView
             onInput={handleTerminalInput}
             onResize={handleTerminalResize}
-            onClose={() => setShowTerminal(false)}
+            onClose={() => setCurrentView('chat')}
             onReady={registerTerminalWrite}
             isConnected={wsState() === 'connected'}
+          />
+        </div>
+
+        {/* History/Timeline View */}
+        <div
+          class={currentView() !== 'history' ? 'hidden' : ''}
+          style={{
+            display: 'flex',
+            "flex-direction": 'column',
+            flex: '1 1 0%',
+            "min-height": '0',
+            overflow: 'hidden',
+          }}
+        >
+          <Show when={diffState()}>
+            {(diff) => (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: '0',
+                  background: 'var(--color-bg-base)',
+                  "z-index": '10',
+                  overflow: 'auto',
+                }}
+              >
+                <DiffViewer
+                  fromInteraction={diff().interactionId}
+                  toInteraction={diff().interactionId}
+                  filePath={diff().file}
+                  onClose={() => setDiffState(null)}
+                />
+              </div>
+            )}
+          </Show>
+          <TimelineView
+            sessionId={params.id}
+            onViewDiff={(interactionId, file) => setDiffState({ interactionId, file })}
           />
         </div>
       </Show>

@@ -2,6 +2,7 @@
 
 pub mod history;
 pub mod hooks;
+pub mod interactions;
 pub mod projects;
 pub mod sessions;
 pub mod ws;

@@ -3,6 +3,7 @@
 mod config;
 mod event_processor;
 mod global_ws;
+mod interaction_processor;
 mod logging;
 mod routes;
 mod state;
@@ -108,6 +109,7 @@ async fn main() -> Result<()> {
 
     // Build router
     let api_routes = Router::new()
+        // Session management
         .route("/sessions", get(routes::sessions::list))
         .route("/sessions", post(routes::sessions::create))
         .route("/sessions/{id}", get(routes::sessions::get))
@@ -117,6 +119,34 @@ async fn main() -> Result<()> {
         .route("/sessions/{id}/start", post(routes::sessions::start))
         .route("/sessions/{id}/resume", post(routes::sessions::resume))
         .route("/sessions/{id}/input", post(routes::sessions::send_input))
+        // Interaction timeline
+        .route(
+            "/sessions/{id}/interactions",
+            get(routes::interactions::list_session_interactions),
+        )
+        .route(
+            "/sessions/{id}/files-changed",
+            get(routes::interactions::get_session_files_changed),
+        )
+        .route(
+            "/interactions/{id}",
+            get(routes::interactions::get_interaction),
+        )
+        // Diff computation
+        .route("/diff", get(routes::interactions::get_diff))
+        // Cross-session search
+        .route("/search", get(routes::interactions::search))
+        // Cost analytics
+        .route("/analytics", get(routes::interactions::get_analytics))
+        .route(
+            "/analytics/expensive",
+            get(routes::interactions::get_expensive_interactions),
+        )
+        .route(
+            "/analytics/storage",
+            get(routes::interactions::get_storage_stats),
+        )
+        // Other routes
         .route("/history", get(routes::history::list))
         .route("/projects", get(routes::projects::list))
         .route("/hooks", post(routes::hooks::receive))

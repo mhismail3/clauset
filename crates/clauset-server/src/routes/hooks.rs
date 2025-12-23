@@ -42,7 +42,10 @@ pub async fn receive(
         }
     };
 
-    // Process the event
+    // Capture interaction data for persistence (runs concurrently with activity update)
+    state.interaction_processor.process_event(&event).await;
+
+    // Process the event for real-time activity updates
     if let Err(e) = process_hook_event(&state, event).await {
         warn!(target: "clauset::hooks", "Failed to process hook event: {}", e);
         // Return OK anyway - we don't want to block Claude
@@ -89,6 +92,7 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             session_id,
             tool_name,
             tool_input,
+            cwd: _,
             ..
         } => {
             debug!(

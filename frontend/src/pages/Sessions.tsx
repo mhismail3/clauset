@@ -1,5 +1,5 @@
 import { For, Show, onMount, createSignal, onCleanup } from 'solid-js';
-import { useNavigate } from '@solidjs/router';
+import { useNavigate, A } from '@solidjs/router';
 import { Button } from '../components/ui/Button';
 import { Spinner } from '../components/ui/Spinner';
 import { SessionCard } from '../components/SessionCard';
@@ -11,10 +11,12 @@ import {
   fetchSessions,
 } from '../stores/sessions';
 import { NewSessionModal } from '../components/chat/NewSessionModal';
+import { SearchModal } from '../components/interactions/SearchModal';
 import { api, Session } from '../lib/api';
 
 export default function Sessions() {
   const [showNewSession, setShowNewSession] = createSignal(false);
+  const [showSearch, setShowSearch] = createSignal(false);
   const [menuState, setMenuState] = createSignal<{
     session: Session;
     position: { top: number; bottom: number; right: number; openUpward: boolean };
@@ -162,34 +164,84 @@ export default function Sessions() {
             </h1>
           </div>
 
-          {/* Right: Active session count */}
-          <div
-            class="text-mono"
-            style={{
-              display: 'flex',
-              "align-items": 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              background: activeCount() > 0 ? 'rgba(44, 143, 122, 0.15)' : 'var(--color-bg-surface)',
-              "border-radius": '8px',
-              "font-size": '12px',
-              color: activeCount() > 0 ? '#2c8f7a' : 'var(--color-text-muted)',
-            }}
-          >
-            <Show when={activeCount() > 0} fallback={
-              <span>idle</span>
-            }>
-              <span
-                style={{
-                  width: '6px',
-                  height: '6px',
-                  background: '#2c8f7a',
-                  "border-radius": '50%',
-                  animation: 'pulse 2s infinite',
-                }}
-              />
-              <span>{activeCount()} active</span>
-            </Show>
+          {/* Right: Navigation buttons + Active session count */}
+          <div style={{ display: 'flex', "align-items": 'center', gap: '8px' }}>
+            {/* Search button */}
+            <button
+              onClick={() => setShowSearch(true)}
+              class="pressable"
+              style={{
+                width: '36px',
+                height: '36px',
+                display: 'flex',
+                "align-items": 'center',
+                "justify-content": 'center',
+                background: 'var(--color-bg-surface)',
+                border: '1px solid var(--color-bg-overlay)',
+                "border-radius": '8px',
+                cursor: 'pointer',
+                color: 'var(--color-text-muted)',
+              }}
+              title="Search"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            </button>
+
+            {/* Analytics link */}
+            <A
+              href="/analytics"
+              class="pressable"
+              style={{
+                width: '36px',
+                height: '36px',
+                display: 'flex',
+                "align-items": 'center',
+                "justify-content": 'center',
+                background: 'var(--color-bg-surface)',
+                border: '1px solid var(--color-bg-overlay)',
+                "border-radius": '8px',
+                color: 'var(--color-text-muted)',
+              }}
+              title="Analytics"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 3v18h18" />
+                <path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3" />
+              </svg>
+            </A>
+
+            {/* Active session count */}
+            <div
+              class="text-mono"
+              style={{
+                display: 'flex',
+                "align-items": 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                background: activeCount() > 0 ? 'rgba(44, 143, 122, 0.15)' : 'var(--color-bg-surface)',
+                "border-radius": '8px',
+                "font-size": '12px',
+                color: activeCount() > 0 ? '#2c8f7a' : 'var(--color-text-muted)',
+              }}
+            >
+              <Show when={activeCount() > 0} fallback={
+                <span>idle</span>
+              }>
+                <span
+                  style={{
+                    width: '6px',
+                    height: '6px',
+                    background: '#2c8f7a',
+                    "border-radius": '50%',
+                    animation: 'pulse 2s infinite',
+                  }}
+                />
+                <span>{activeCount()} active</span>
+              </Show>
+            </div>
           </div>
         </div>
       </header>
@@ -558,6 +610,12 @@ export default function Sessions() {
       <NewSessionModal
         isOpen={showNewSession()}
         onClose={() => setShowNewSession(false)}
+      />
+
+      {/* Search Modal */}
+      <SearchModal
+        isOpen={showSearch()}
+        onClose={() => setShowSearch(false)}
       />
     </div>
   );
