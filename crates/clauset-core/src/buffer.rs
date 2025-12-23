@@ -784,16 +784,20 @@ struct ParsedStatus {
 
 /// Regex for full status line: "Model | $Cost | Input/Output | ctx:X%"
 /// Also matches partial formats where tokens/context are missing
+/// NOTE: K suffix is REQUIRED to prevent false positives from matching
+/// patterns like "804/993 files" as token counts
 static STATUS_LINE_FULL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"^([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*(?:\|\s*([0-9.]+)K?/([0-9.]+)K?)?\s*(?:\|\s*ctx:(\d+)%)?"
+        r"^([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*(?:\|\s*([0-9.]+)K/([0-9.]+)K)?\s*(?:\|\s*ctx:(\d+)%)?"
     ).unwrap()
 });
 
-/// Regex for continuation line with tokens: "Input/Output | ctx:X%"
+/// Regex for continuation line with tokens: "InputK/OutputK | ctx:X%"
 /// This handles wrapped status lines on narrow terminals
+/// NOTE: K suffix is REQUIRED to prevent false positives from matching
+/// patterns like "804/993 files" as token counts
 static STATUS_LINE_TOKENS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^([0-9.]+)K?/([0-9.]+)K?\s*(?:\|\s*ctx:(\d+)%)?").unwrap()
+    Regex::new(r"^([0-9.]+)K/([0-9.]+)K\s*(?:\|\s*ctx:(\d+)%)?").unwrap()
 });
 
 /// Regex for model and cost pattern (allows trailing text like "Update available!")
@@ -835,6 +839,12 @@ fn parse_status_line(text: &str) -> Option<ParsedStatus> {
             let output_k: f64 = caps.get(4).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
             let context: u8 = caps.get(5).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
 
+            // Sanity check: Claude Code sessions don't exceed 1000K tokens per metric
+            // Reject obvious false positives from accidental pattern matches
+            if input_k > 1000.0 || output_k > 1000.0 {
+                continue;
+            }
+
             return Some(ParsedStatus {
                 model,
                 cost,
@@ -864,6 +874,11 @@ fn parse_status_line(text: &str) -> Option<ParsedStatus> {
                 (0.0, 0.0, 0)
             };
 
+            // Sanity check: Claude Code sessions don't exceed 1000K tokens per metric
+            if input_k > 1000.0 || output_k > 1000.0 {
+                continue;
+            }
+
             return Some(ParsedStatus {
                 model,
                 cost,
@@ -878,6 +893,11 @@ fn parse_status_line(text: &str) -> Option<ParsedStatus> {
             let input_k: f64 = token_caps.get(1)?.as_str().parse().ok()?;
             let output_k: f64 = token_caps.get(2)?.as_str().parse().ok()?;
             let context: u8 = token_caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+
+            // Sanity check: Claude Code sessions don't exceed 1000K tokens per metric
+            if input_k > 1000.0 || output_k > 1000.0 {
+                continue;
+            }
 
             // Look backwards for model+cost line
             if i > 0 {

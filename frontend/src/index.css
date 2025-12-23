@@ -411,6 +411,12 @@ select {
   font-size: 16px !important;
 }
 
+/* Override for modal inputs to allow custom sizing */
+input.modal-input,
+textarea.modal-input {
+  font-size: 13px !important;
+}
+
 input:focus,
 textarea:focus,
 select:focus {
