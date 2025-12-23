@@ -138,13 +138,13 @@ export function NewSessionModal(props: NewSessionModalProps) {
     }
   }
 
-  // Shared input styles
+  // Shared input styles - use monospace font to match session card titles
   const inputStyles = {
     width: "100%",
     "box-sizing": "border-box",
     padding: "12px 14px",
     "font-size": "14px",
-    "font-family": "inherit",
+    "font-family": "var(--font-mono)",
     "border-radius": "10px",
     border: "1px solid var(--color-bg-overlay)",
     background: "var(--color-bg-base)",
@@ -238,12 +238,11 @@ export function NewSessionModal(props: NewSessionModalProps) {
             }}
           >
             <h2
-              class="text-text-primary"
+              class="text-text-primary text-mono"
               style={{
-                "font-size": "17px",
+                "font-size": "16px",
                 "font-weight": "600",
                 margin: "0",
-                "letter-spacing": "-0.01em",
               }}
             >
               New Session
