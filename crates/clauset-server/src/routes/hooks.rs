@@ -186,13 +186,19 @@ async fn update_activity_from_hook(
         HookEventType::PreToolUse => {
             let tool_name = update.tool_name.clone().unwrap_or_else(|| "Unknown".to_string());
 
-            // Create action for the tool use
+            // Create action for the tool use (may be None if filtered out)
             let summary = create_action_summary(&tool_name, &update.tool_input);
+
+            // If the action should be filtered out (e.g., hook infrastructure), skip it
+            if summary.is_none() {
+                return;
+            }
+
             let detail = extract_tool_detail(&tool_name, &update.tool_input);
 
             let action = RecentAction {
                 action_type: tool_name_to_action_type(&tool_name),
-                summary,
+                summary: summary.unwrap(),
                 detail,
                 timestamp: now_ms(),
             };
@@ -201,8 +207,20 @@ async fn update_activity_from_hook(
         }
 
         HookEventType::PostToolUse => {
-            // Post-tool doesn't add new action, just confirms completion
             let tool_name = update.tool_name.clone().unwrap_or_else(|| "Unknown".to_string());
+
+            // Filter out hook infrastructure (same as PreToolUse)
+            if tool_name == "Bash" {
+                if let Some(ref input) = update.tool_input {
+                    if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
+                        if is_hook_infrastructure_command(cmd) {
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Post-tool doesn't add new action, just confirms completion
             (format!("{} completed", tool_name), Some(tool_name), None, true)
         }
 
@@ -246,61 +264,86 @@ fn tool_name_to_action_type(tool_name: &str) -> String {
     .to_string()
 }
 
+/// Check if a Bash command is hook-related infrastructure (should be filtered out).
+fn is_hook_infrastructure_command(cmd: &str) -> bool {
+    let cmd_lower = cmd.to_lowercase();
+    cmd_lower.contains("clauset-hook")
+        || cmd_lower.contains("clauset_hook")
+        || cmd_lower.contains("api/hooks")
+        || cmd_lower.contains("clauset_session_id")
+        || cmd_lower.contains("hook-debug.log")
+}
+
 /// Create a human-readable summary of the tool action.
-fn create_action_summary(tool_name: &str, input: &Option<Value>) -> String {
+/// Returns None if the action should be filtered out (e.g., hook infrastructure).
+fn create_action_summary(tool_name: &str, input: &Option<Value>) -> Option<String> {
     if let Some(input) = input {
         match tool_name {
             "Read" => {
                 if let Some(path) = input.get("file_path").and_then(|v| v.as_str()) {
                     let filename = path.rsplit('/').next().unwrap_or(path);
-                    return format!("Read {}", filename);
+                    // Check if reading with offset/limit (partial read)
+                    let has_offset = input.get("offset").is_some();
+                    let has_limit = input.get("limit").is_some();
+                    if has_offset || has_limit {
+                        return Some(format!("Read lines from {}", filename));
+                    }
+                    return Some(format!("Read {}", filename));
                 }
             }
             "Write" => {
                 if let Some(path) = input.get("file_path").and_then(|v| v.as_str()) {
                     let filename = path.rsplit('/').next().unwrap_or(path);
-                    return format!("Write {}", filename);
+                    return Some(format!("Write {}", filename));
                 }
             }
             "Edit" => {
                 if let Some(path) = input.get("file_path").and_then(|v| v.as_str()) {
                     let filename = path.rsplit('/').next().unwrap_or(path);
-                    return format!("Edit {}", filename);
+                    return Some(format!("Edit {}", filename));
                 }
             }
             "Bash" => {
                 if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
+                    // Filter out hook infrastructure commands
+                    if is_hook_infrastructure_command(cmd) {
+                        return None;
+                    }
+                    // Prefer description if available, otherwise use command
+                    if let Some(desc) = input.get("description").and_then(|v| v.as_str()) {
+                        return Some(format!("$ {}", truncate_str(desc, 50)));
+                    }
                     let short = truncate_str(cmd, 50);
-                    return format!("$ {}", short);
+                    return Some(format!("$ {}", short));
                 }
             }
             "Grep" => {
                 if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
-                    return format!("Grep: {}", truncate_str(pattern, 40));
+                    return Some(format!("Grep: {}", truncate_str(pattern, 40)));
                 }
             }
             "Glob" => {
                 if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
-                    return format!("Glob: {}", pattern);
+                    return Some(format!("Glob: {}", pattern));
                 }
             }
             "Task" => {
                 if let Some(desc) = input.get("description").and_then(|v| v.as_str()) {
-                    return format!("Task: {}", truncate_str(desc, 40));
+                    return Some(format!("Task: {}", truncate_str(desc, 40)));
                 }
             }
             "WebFetch" | "WebSearch" => {
                 if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
-                    return format!("Fetch: {}", truncate_str(url, 40));
+                    return Some(format!("Fetch: {}", truncate_str(url, 40)));
                 }
                 if let Some(query) = input.get("query").and_then(|v| v.as_str()) {
-                    return format!("Search: {}", truncate_str(query, 40));
+                    return Some(format!("Search: {}", truncate_str(query, 40)));
                 }
             }
             _ => {}
         }
     }
-    tool_name.to_string()
+    Some(tool_name.to_string())
 }
 
 /// Extract detail information from tool input.
