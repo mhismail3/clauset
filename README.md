@@ -67,6 +67,28 @@ cd frontend && npm run build
 ./target/release/clauset-server
 ```
 
+### Rebuilding After Changes
+
+```bash
+pkill -f clauset-server
+cargo build --release
+./target/release/clauset-server
+```
+
+### Logging
+
+The server supports multiple logging modes via CLI flags:
+
+```bash
+./target/release/clauset-server        # Production (minimal logs)
+./target/release/clauset-server -v     # Verbose (operational detail)
+./target/release/clauset-server -d     # Debug (troubleshooting)
+./target/release/clauset-server -q     # Quiet (warnings/errors only)
+./target/release/clauset-server --log-format json  # JSON output
+```
+
+See [docs/logging.md](docs/logging.md) for full documentation on log targets and debugging specific subsystems.
+
 ### Auto-start on Boot
 
 ```bash

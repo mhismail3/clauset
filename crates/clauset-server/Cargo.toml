@@ -11,6 +11,7 @@ path = "src/main.rs"
 clauset-types.workspace = true
 clauset-core.workspace = true
 
+clap.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 futures.workspace = true

@@ -3,6 +3,7 @@
 mod config;
 mod event_processor;
 mod global_ws;
+mod logging;
 mod routes;
 mod state;
 mod websocket;
@@ -17,6 +18,7 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
+use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::{
@@ -24,7 +26,40 @@ use tower_http::{
     services::ServeDir,
     trace::TraceLayer,
 };
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use logging::{LogConfig, LogFormat};
+
+/// Clauset server - Claude Code session management dashboard.
+#[derive(Parser, Debug)]
+#[command(name = "clauset-server")]
+#[command(about = "HTTP/WebSocket server for Claude Code session management")]
+#[command(version)]
+struct Cli {
+    /// Enable verbose logging (INFO level for most targets)
+    #[arg(short, long)]
+    verbose: bool,
+
+    /// Enable debug logging (DEBUG level, excludes ping traces)
+    #[arg(short, long)]
+    debug: bool,
+
+    /// Enable trace logging (TRACE level for everything)
+    #[arg(long)]
+    trace: bool,
+
+    /// Quiet mode (WARN and ERROR only)
+    #[arg(short, long)]
+    quiet: bool,
+
+    /// Set log level for specific targets (e.g., "activity=debug" or "ws::ping=trace")
+    /// Can be specified multiple times. Targets are prefixed with "clauset::" automatically.
+    #[arg(long = "log", value_name = "TARGET=LEVEL")]
+    log_overrides: Vec<String>,
+
+    /// Log output format
+    #[arg(long = "log-format", value_name = "FORMAT", default_value = "text")]
+    log_format: LogFormat,
+}
 
 use config::Config;
 use state::AppState;
@@ -39,32 +74,37 @@ async fn global_events_ws(
 
 async fn handle_global_events(socket: WebSocket, state: Arc<AppState>) {
     if let Err(e) = global_ws::handle_global_websocket(socket, state).await {
-        tracing::error!("Global WebSocket error: {}", e);
+        tracing::error!(target: "clauset::ws", "Global WebSocket error: {}", e);
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "clauset_server=debug,clauset_core=debug,tower_http=debug".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    // Parse CLI arguments
+    let cli = Cli::parse();
+
+    // Initialize logging
+    let log_config = LogConfig::from_cli(
+        cli.verbose,
+        cli.debug,
+        cli.trace,
+        cli.quiet,
+        cli.log_overrides,
+        cli.log_format,
+    );
+    logging::init(&log_config);
 
     // Load configuration
     let config = Config::load()?;
-    tracing::info!("Loaded configuration");
+    tracing::info!(target: "clauset::startup", "Loaded configuration");
 
     // Initialize application state
     let state = Arc::new(AppState::new(config.clone())?);
-    tracing::info!("Initialized application state");
+    tracing::info!(target: "clauset::startup", "Initialized application state");
 
     // Start background event processor for continuous terminal buffering
     event_processor::spawn_event_processor(state.clone());
-    tracing::info!("Started background event processor");
+    tracing::info!(target: "clauset::startup", "Started background event processor");
 
     // Build router
     let api_routes = Router::new()
@@ -101,7 +141,7 @@ async fn main() -> Result<()> {
 
     // Start server
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
-    tracing::info!("Starting server on {}", addr);
+    tracing::info!(target: "clauset::startup", "Starting server on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;

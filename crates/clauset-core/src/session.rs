@@ -70,7 +70,7 @@ impl SessionManager {
 
         // Clean up orphaned sessions from previous runs
         if let Err(e) = manager.cleanup_orphaned_sessions() {
-            error!("Failed to cleanup orphaned sessions: {}", e);
+            error!(target: "clauset::session", "Failed to cleanup orphaned sessions: {}", e);
         }
 
         Ok(manager)
@@ -83,12 +83,12 @@ impl SessionManager {
         let count = orphaned.len();
 
         for session in orphaned {
-            info!("Marking orphaned session {} as stopped", session.id);
+            info!(target: "clauset::session", "Marking orphaned session {} as stopped", session.id);
             self.db.update_status(session.id, SessionStatus::Stopped)?;
         }
 
         if count > 0 {
-            info!("Cleaned up {} orphaned sessions", count);
+            info!(target: "clauset::session", "Cleaned up {} orphaned sessions", count);
         }
 
         Ok(())
@@ -137,7 +137,7 @@ impl SessionManager {
 
     /// Start a session (spawn Claude process).
     pub async fn start_session(&self, session_id: Uuid, prompt: &str) -> Result<()> {
-        info!("Starting session {} with prompt: {}", session_id, prompt);
+        debug!(target: "clauset::session", "Starting session {} with prompt: {}", session_id, prompt);
 
         let session = self
             .db
@@ -166,10 +166,10 @@ impl SessionManager {
 
         // Handle spawn failure
         if let Err(e) = spawn_result {
-            error!("Failed to spawn Claude process for session {}: {}", session_id, e);
+            error!(target: "clauset::session", "Failed to spawn Claude process for session {}: {}", session_id, e);
             // Update status to Error
             if let Err(db_err) = self.db.update_status(session_id, SessionStatus::Error) {
-                warn!("Failed to update session {} status to Error in DB: {}", session_id, db_err);
+                warn!(target: "clauset::session", "Failed to update session {} status to Error in DB: {}", session_id, db_err);
             }
             return Err(e);
         }
@@ -183,7 +183,7 @@ impl SessionManager {
         // Initialize activity buffer with "Ready" state and broadcast
         self.initialize_session_activity(session_id).await;
 
-        info!("Session {} started successfully", session_id);
+        info!(target: "clauset::session", "Session {} started successfully", session_id);
         Ok(())
     }
 
@@ -332,9 +332,9 @@ impl SessionManager {
                 activity.current_step.as_deref(),
                 &recent_actions,
             ) {
-                warn!("Failed to persist session {} activity: {}", session_id, e);
+                warn!(target: "clauset::session", "Failed to persist session {} activity: {}", session_id, e);
             } else {
-                debug!("Persisted {} recent actions for session {}", recent_actions.len(), session_id);
+                debug!(target: "clauset::session", "Persisted {} recent actions for session {}", recent_actions.len(), session_id);
             }
         }
     }
@@ -367,14 +367,14 @@ impl SessionManager {
         // Delete from database
         self.db.delete(session_id)?;
 
-        info!("Session {} deleted", session_id);
+        info!(target: "clauset::session", "Session {} deleted", session_id);
         Ok(())
     }
 
     /// Rename a session (update its preview/name).
     pub fn rename_session(&self, session_id: Uuid, name: &str) -> Result<()> {
         self.db.update_preview(session_id, name)?;
-        info!("Session {} renamed to: {}", session_id, name);
+        info!(target: "clauset::session", "Session {} renamed to: {}", session_id, name);
         Ok(())
     }
 
@@ -397,6 +397,7 @@ impl SessionManager {
             context_percent,
         )?;
         debug!(
+            target: "clauset::activity::stats",
             "Session {} stats updated: {} ${:.2} {}K/{}K ctx:{}%",
             session_id, model, cost, input_tokens / 1000, output_tokens / 1000, context_percent
         );
@@ -419,13 +420,13 @@ impl SessionManager {
                     act.output_tokens,
                     act.context_percent,
                 ) {
-                    warn!("Failed to update session {} stats in DB: {}", session_id, e);
+                    warn!(target: "clauset::session", "Failed to update session {} stats in DB: {}", session_id, e);
                 }
             }
             // Update preview with current activity if meaningful
             if !act.current_activity.is_empty() {
                 if let Err(e) = self.db.update_preview(session_id, &act.current_activity) {
-                    warn!("Failed to update session {} preview in DB: {}", session_id, e);
+                    warn!(target: "clauset::session", "Failed to update session {} preview in DB: {}", session_id, e);
                 }
             }
         }
@@ -516,16 +517,15 @@ impl SessionManager {
             new_action,
             is_busy,
         ).await {
-            tracing::info!(
-                "[STATS_DEBUG] >>> BROADCASTING ActivityUpdate from HOOK! session={}, model='{}', cost=${:.4}, tokens={}K/{}K, ctx={}%, activity='{}', step={:?}",
+            tracing::debug!(
+                target: "clauset::hooks",
+                "Broadcasting ActivityUpdate from hook: session={}, model='{}', cost=${:.4}, tokens={}K/{}K, ctx={}%",
                 session_id,
                 activity.model,
                 activity.cost,
                 activity.input_tokens / 1000,
                 activity.output_tokens / 1000,
-                activity.context_percent,
-                activity.current_activity,
-                activity.current_step
+                activity.context_percent
             );
 
             // Broadcast the updated activity

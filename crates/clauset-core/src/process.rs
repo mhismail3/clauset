@@ -101,7 +101,7 @@ impl ProcessManager {
     ) -> Result<()> {
         // Validate project path exists
         if !opts.project_path.exists() {
-            error!("Project path does not exist: {:?}", opts.project_path);
+            error!(target: "clauset::process", "Project path does not exist: {:?}", opts.project_path);
             return Err(ClausetError::ProcessSpawnFailed(format!(
                 "Project path does not exist: {:?}",
                 opts.project_path
@@ -110,7 +110,7 @@ impl ProcessManager {
 
         // Validate Claude binary exists
         if !self.claude_path.exists() {
-            error!("Claude binary not found at: {:?}", self.claude_path);
+            error!(target: "clauset::process", "Claude binary not found at: {:?}", self.claude_path);
             return Err(ClausetError::ProcessSpawnFailed(format!(
                 "Claude binary not found at: {:?}",
                 self.claude_path
@@ -142,13 +142,14 @@ impl ProcessManager {
             .stderr(Stdio::piped());
 
         info!(
+            target: "clauset::process",
             "Spawning Claude process: {:?} in {:?}",
             self.claude_path, opts.project_path
         );
-        debug!("Prompt: {}", opts.prompt);
+        debug!(target: "clauset::process", "Prompt: {}", opts.prompt);
 
         let mut child = cmd.spawn().map_err(|e| {
-            error!("Failed to spawn Claude process: {}", e);
+            error!(target: "clauset::process", "Failed to spawn Claude process: {}", e);
             ClausetError::ProcessSpawnFailed(format!("Failed to spawn: {}", e))
         })?;
 
@@ -187,7 +188,7 @@ impl ProcessManager {
                 let mut lines = reader.lines();
 
                 while let Ok(Some(line)) = lines.next_line().await {
-                    warn!("Claude stderr [{}]: {}", sid, line);
+                    warn!(target: "clauset::process", "Claude stderr [{}]: {}", sid, line);
                     // Send error events to frontend
                     let _ = tx_err.send(ProcessEvent::Error {
                         session_id: sid,
@@ -206,7 +207,7 @@ impl ProcessManager {
             let mut parser = OutputParser::new();
 
             while let Ok(Some(line)) = lines.next_line().await {
-                debug!("Claude stdout: {}", line);
+                debug!(target: "clauset::process", "Claude stdout: {}", line);
                 if let Ok(Some(event)) = parser.parse_line(&line) {
                     let _ = tx.send(ProcessEvent::Claude(event));
                 }
@@ -214,7 +215,7 @@ impl ProcessManager {
 
             // Wait for process to exit
             let exit_code = child.wait().await.ok().and_then(|s| s.code());
-            info!("Claude process exited with code: {:?}", exit_code);
+            info!(target: "clauset::process", "Claude process exited with code: {:?}", exit_code);
             let _ = tx.send(ProcessEvent::Exited { session_id, exit_code });
         });
 
@@ -226,7 +227,7 @@ impl ProcessManager {
             },
         );
 
-        info!("Claude process spawned successfully for session {}", session_id);
+        info!(target: "clauset::process", "Claude process spawned successfully for session {}", session_id);
         Ok(())
     }
 
@@ -236,6 +237,7 @@ impl ProcessManager {
         event_tx: broadcast::Sender<ProcessEvent>,
     ) -> Result<()> {
         info!(
+            target: "clauset::process",
             "Spawning Claude terminal session in {:?}",
             opts.project_path
         );
@@ -247,7 +249,7 @@ impl ProcessManager {
         // Frontend will send actual resize immediately after connecting
         let initial_cols = 40;
         let initial_rows = 24;
-        info!("Creating PTY with initial size: {}x{}", initial_cols, initial_rows);
+        debug!(target: "clauset::process", "Creating PTY with initial size: {}x{}", initial_cols, initial_rows);
 
         let pair = pty_system
             .openpty(PtySize {
@@ -269,7 +271,7 @@ impl ProcessManager {
         // Pass the selected model to Claude CLI
         if let Some(model) = &opts.model {
             cmd.args(["--model", model]);
-            info!("Using model: {}", model);
+            debug!(target: "clauset::process", "Using model: {}", model);
         }
 
         // Set environment variables for Clauset hooks integration
@@ -279,7 +281,7 @@ impl ProcessManager {
 
         cmd.cwd(&opts.project_path);
 
-        info!("Spawning Claude with session ID: {}", opts.claude_session_id);
+        debug!(target: "clauset::process", "Spawning Claude with session ID: {}", opts.claude_session_id);
 
         let child = pair
             .slave
@@ -314,7 +316,7 @@ impl ProcessManager {
         // Reader thread (PTY reading is blocking)
         let handle = std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
-            info!("PTY reader thread started for session {}", session_id);
+            debug!(target: "clauset::process", "PTY reader thread started for session {}", session_id);
 
             // Track if we've sent the initial prompt
             let mut prompt_sent = initial_prompt.is_empty();
@@ -324,19 +326,19 @@ impl ProcessManager {
             loop {
                 // Check shutdown signal before each read
                 if shutdown_for_thread.load(Ordering::SeqCst) {
-                    info!("PTY reader thread received shutdown signal for session {}", session_id);
+                    debug!(target: "clauset::process", "PTY reader thread received shutdown signal for session {}", session_id);
                     break;
                 }
 
                 match reader.read(&mut buf) {
                     Ok(0) => {
-                        info!("PTY reader got EOF for session {}", session_id);
+                        debug!(target: "clauset::process", "PTY reader got EOF for session {}", session_id);
                         break;
                     }
                     Ok(n) => {
                         total_bytes += n;
                         let output_str = String::from_utf8_lossy(&buf[..n]);
-                        trace!("PTY output ({} bytes, total {}): {}", n, total_bytes,
+                        trace!(target: "clauset::process", "PTY output ({} bytes, total {}): {}", n, total_bytes,
                               output_str.chars().take(200).collect::<String>());
 
                         let _ = tx.send(ProcessEvent::TerminalOutput {
@@ -368,7 +370,7 @@ impl ProcessManager {
                                     // Send Enter key to execute
                                     let _ = w.write_all(b"\r");
                                     let _ = w.flush();
-                                    info!("Sent initial prompt to Claude: {}", initial_prompt);
+                                    debug!(target: "clauset::process", "Sent initial prompt to Claude: {}", initial_prompt);
                                 }
                                 prompt_sent = true;
                             }
@@ -377,7 +379,7 @@ impl ProcessManager {
                     Err(e) => {
                         // Don't log error if we're shutting down (expected)
                         if !shutdown_for_thread.load(Ordering::SeqCst) {
-                            error!("PTY read error for session {}: {}", session_id, e);
+                            error!(target: "clauset::process", "PTY read error for session {}: {}", session_id, e);
                         }
                         break;
                     }
@@ -386,7 +388,7 @@ impl ProcessManager {
 
             // Don't wait for process here - that's handled by terminate()
             // Just signal that the reader thread is done
-            info!("PTY reader thread exiting for session {}", session_id);
+            debug!(target: "clauset::process", "PTY reader thread exiting for session {}", session_id);
         });
 
         self.processes.write().await.insert(
@@ -400,7 +402,7 @@ impl ProcessManager {
             },
         );
 
-        info!("Claude terminal session spawned for session {}", session_id);
+        info!(target: "clauset::process", "Claude terminal session spawned for session {}", session_id);
         Ok(())
     }
 
@@ -443,7 +445,7 @@ impl ProcessManager {
 
     /// Resize a PTY terminal.
     pub async fn resize_terminal(&self, session_id: Uuid, rows: u16, cols: u16) -> Result<()> {
-        info!("Resizing PTY for session {} to {}x{}", session_id, cols, rows);
+        debug!(target: "clauset::process", "Resizing PTY for session {} to {}x{}", session_id, cols, rows);
         let processes = self.processes.read().await;
         if let Some(ManagedProcess::Terminal { master, .. }) = processes.get(&session_id) {
             let master = master.lock().unwrap();
@@ -455,9 +457,9 @@ impl ProcessManager {
                     pixel_height: 0,
                 })
                 .map_err(|e| ClausetError::PtyError(e.to_string()))?;
-            info!("PTY resize successful for session {}", session_id);
+            debug!(target: "clauset::process", "PTY resize successful for session {}", session_id);
         } else {
-            warn!("No terminal process found for session {} during resize", session_id);
+            warn!(target: "clauset::process", "No terminal process found for session {} during resize", session_id);
         }
         Ok(())
     }
@@ -478,7 +480,7 @@ impl ProcessManager {
                     master,
                     writer,
                 } => {
-                    info!("Terminating terminal session {}", session_id);
+                    info!(target: "clauset::process", "Terminating terminal session {}", session_id);
 
                     // 1. Get child PID for later cleanup
                     let pid = if let Ok(c) = child.lock() {
@@ -489,7 +491,7 @@ impl ProcessManager {
 
                     // 2. Try graceful exit by sending "exit" command to Claude
                     if let Ok(mut w) = writer.lock() {
-                        info!("Sending 'exit' command to Claude for session {}", session_id);
+                        info!(target: "clauset::process", "Sending 'exit' command to Claude for session {}", session_id);
                         // Send Ctrl+C first to cancel any pending operation, then exit
                         let _ = w.write_all(b"\x03");
                         let _ = w.flush();
@@ -504,7 +506,7 @@ impl ProcessManager {
 
                     while start.elapsed() < graceful_timeout {
                         if handle.is_finished() {
-                            info!("Claude exited gracefully for session {}", session_id);
+                            info!(target: "clauset::process", "Claude exited gracefully for session {}", session_id);
                             exited_gracefully = true;
                             break;
                         }
@@ -520,7 +522,7 @@ impl ProcessManager {
                     drop(writer);
                     drop(master);
                     if !exited_gracefully {
-                        info!("PTY closed (forcing exit) for session {}", session_id);
+                        info!(target: "clauset::process", "PTY closed (forcing exit) for session {}", session_id);
                     }
 
                     // 6. Join the thread using spawn_blocking (should complete quickly now)
@@ -528,13 +530,13 @@ impl ProcessManager {
 
                     match join_result {
                         Ok(Ok(())) => {
-                            info!("Reader thread joined successfully for session {}", session_id);
+                            debug!(target: "clauset::process", "Reader thread joined successfully for session {}", session_id);
                         }
                         Ok(Err(e)) => {
-                            warn!("Reader thread panicked for session {}: {:?}", session_id, e);
+                            warn!(target: "clauset::process", "Reader thread panicked for session {}: {:?}", session_id, e);
                         }
                         Err(e) => {
-                            warn!("Failed to join reader thread for session {}: {:?}", session_id, e);
+                            warn!(target: "clauset::process", "Failed to join reader thread for session {}: {:?}", session_id, e);
                         }
                     }
 
@@ -543,7 +545,7 @@ impl ProcessManager {
                     #[cfg(unix)]
                     if !exited_gracefully {
                         if let Some(pid) = pid {
-                            info!("Sending SIGKILL to process group {} for session {}", pid, session_id);
+                            info!(target: "clauset::process", "Sending SIGKILL to process group {} for session {}", pid, session_id);
                             unsafe {
                                 // Negative PID kills the entire process group
                                 libc::kill(-(pid as i32), libc::SIGKILL);
@@ -563,12 +565,12 @@ impl ProcessManager {
                         let _ = c.try_wait();
                     }
 
-                    info!("Terminal session {} terminated", session_id);
+                    info!(target: "clauset::process", "Terminal session {} terminated", session_id);
                 }
                 ManagedProcess::StreamJson { handle, .. } => {
-                    info!("Terminating stream-json session {}", session_id);
+                    info!(target: "clauset::process", "Terminating stream-json session {}", session_id);
                     handle.abort();
-                    info!("Stream-json session {} terminated", session_id);
+                    info!(target: "clauset::process", "Stream-json session {} terminated", session_id);
                 }
             }
         }

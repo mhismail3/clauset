@@ -22,6 +22,6 @@ pub async fn upgrade(
 
 async fn handle_connection(socket: WebSocket, state: Arc<AppState>, session_id: Uuid) {
     if let Err(e) = handle_websocket(socket, state, session_id).await {
-        tracing::error!("WebSocket error for session {}: {}", session_id, e);
+        tracing::error!(target: "clauset::ws", "WebSocket error for session {}: {}", session_id, e);
     }
 }

@@ -28,6 +28,7 @@ pub async fn receive(
     Json(payload): Json<HookEventPayload>,
 ) -> Result<Json<HookResponse>, (StatusCode, String)> {
     debug!(
+        target: "clauset::hooks",
         "Received hook event: {} for session {}",
         payload.hook_event_name, payload.clauset_session_id
     );
@@ -36,14 +37,14 @@ pub async fn receive(
     let event = match HookEvent::try_from(payload) {
         Ok(e) => e,
         Err(err) => {
-            warn!("Failed to parse hook event: {}", err);
+            warn!(target: "clauset::hooks", "Failed to parse hook event: {}", err);
             return Err((StatusCode::BAD_REQUEST, err.to_string()));
         }
     };
 
     // Process the event
     if let Err(e) = process_hook_event(&state, event).await {
-        warn!("Failed to process hook event: {}", e);
+        warn!(target: "clauset::hooks", "Failed to process hook event: {}", e);
         // Return OK anyway - we don't want to block Claude
         // Errors are logged but not propagated
     }
@@ -57,7 +58,7 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
         HookEvent::SessionStart {
             session_id, source, ..
         } => {
-            info!("Hook: Session {} started (source: {})", session_id, source);
+            info!(target: "clauset::hooks", "Session {} started (source: {})", session_id, source);
             // Confirm Ready state - session is initialized when spawned but this reinforces it
             // This ensures the dashboard shows Ready after Claude fully starts
             let update = HookActivityUpdate::stop(); // "stop" = Ready state
@@ -67,14 +68,14 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
         HookEvent::SessionEnd {
             session_id, reason, ..
         } => {
-            info!("Hook: Session {} ended (reason: {})", session_id, reason);
+            info!(target: "clauset::hooks", "Session {} ended (reason: {})", session_id, reason);
             // Persist activity data before updating status
             state.session_manager.persist_session_activity(session_id).await;
             let _ = state.session_manager.update_status(session_id, SessionStatus::Stopped);
         }
 
         HookEvent::UserPromptSubmit { session_id, .. } => {
-            debug!("Hook: User submitted prompt for session {}", session_id);
+            debug!(target: "clauset::hooks", "User submitted prompt for session {}", session_id);
 
             // Mark session as busy (user sent input)
             state.session_manager.mark_session_busy(session_id).await;
@@ -91,7 +92,8 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             ..
         } => {
             debug!(
-                "Hook: Pre-tool use {} for session {}",
+                target: "clauset::hooks",
+                "Pre-tool use {} for session {}",
                 tool_name, session_id
             );
 
@@ -107,13 +109,14 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             ..
         } => {
             debug!(
-                "Hook: Post-tool use {} for session {}",
+                target: "clauset::hooks",
+                "Post-tool use {} for session {}",
                 tool_name, session_id
             );
 
             let update = HookActivityUpdate::post_tool_use(tool_name, tool_input, tool_response);
             if update.is_error {
-                warn!("Hook: Tool {} failed for session {}", update.tool_name.as_deref().unwrap_or("unknown"), session_id);
+                warn!(target: "clauset::hooks", "Tool {} failed for session {}", update.tool_name.as_deref().unwrap_or("unknown"), session_id);
             }
             update_activity_from_hook(&state, session_id, update).await;
         }
@@ -124,7 +127,8 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             ..
         } => {
             debug!(
-                "Hook: Claude stopped for session {} (continuing: {})",
+                target: "clauset::hooks",
+                "Claude stopped for session {} (continuing: {})",
                 session_id, stop_hook_active
             );
 
@@ -141,7 +145,8 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             ..
         } => {
             debug!(
-                "Hook: Subagent stopped for session {} (continuing: {})",
+                target: "clauset::hooks",
+                "Subagent stopped for session {} (continuing: {})",
                 session_id, stop_hook_active
             );
             // Could track subagent completion separately if needed
@@ -154,7 +159,8 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             ..
         } => {
             debug!(
-                "Hook: Notification for session {}: {} ({})",
+                target: "clauset::hooks",
+                "Notification for session {}: {} ({})",
                 session_id, message, notification_type
             );
 
@@ -165,7 +171,7 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
         HookEvent::PreCompact {
             session_id, ..
         } => {
-            debug!("Hook: Pre-compact for session {}", session_id);
+            debug!(target: "clauset::hooks", "Pre-compact for session {}", session_id);
             // Could show "Compacting context..." in UI
         }
     }

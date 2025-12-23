@@ -28,7 +28,7 @@ impl OutputParser {
             Ok(event) => Ok(Some(event)),
             Err(e) => {
                 // Log but don't fail on parse errors - Claude outputs non-JSON sometimes
-                tracing::debug!("Failed to parse line as ClaudeEvent: {}: {}", e, trimmed);
+                tracing::debug!(target: "clauset::parser", "Failed to parse line as ClaudeEvent: {}: {}", e, trimmed);
                 Ok(None)
             }
         }

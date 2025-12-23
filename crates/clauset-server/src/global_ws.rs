@@ -15,7 +15,7 @@ pub async fn handle_global_websocket(socket: WebSocket, state: Arc<AppState>) ->
     // Subscribe to all session events
     let mut event_rx = state.session_manager.subscribe();
 
-    tracing::info!("Global WebSocket client connected");
+    tracing::info!(target: "clauset::ws", "Global WebSocket client connected");
 
     // Send initial activity state for all active sessions
     // This ensures the client gets current state even if they missed earlier updates
@@ -36,7 +36,7 @@ pub async fn handle_global_websocket(socket: WebSocket, state: Arc<AppState>) ->
                 };
                 if let Ok(json) = serde_json::to_string(&msg) {
                     if ws_tx.send(Message::Text(json.into())).await.is_err() {
-                        tracing::debug!("Failed to send initial activity state");
+                        tracing::debug!(target: "clauset::ws", "Failed to send initial activity state");
                         return Ok(());
                     }
                 }
@@ -104,7 +104,7 @@ pub async fn handle_global_websocket(socket: WebSocket, state: Arc<AppState>) ->
                     Err(_) => continue,
                 };
                 if ws_tx.send(Message::Text(json.into())).await.is_err() {
-                    tracing::debug!("Global WebSocket client disconnected");
+                    tracing::debug!(target: "clauset::ws", "Global WebSocket client disconnected");
                     break;
                 }
             }
@@ -117,10 +117,10 @@ pub async fn handle_global_websocket(socket: WebSocket, state: Arc<AppState>) ->
             match msg {
                 Message::Ping(data) => {
                     // Pong is handled automatically by axum
-                    tracing::trace!("Received ping from global WebSocket client");
+                    tracing::trace!(target: "clauset::ws::ping", "Received ping from global WebSocket client");
                 }
                 Message::Close(_) => {
-                    tracing::debug!("Global WebSocket client closed connection");
+                    tracing::debug!(target: "clauset::ws", "Global WebSocket client closed connection");
                     break;
                 }
                 _ => {}
@@ -138,6 +138,6 @@ pub async fn handle_global_websocket(socket: WebSocket, state: Arc<AppState>) ->
         }
     }
 
-    tracing::info!("Global WebSocket client disconnected");
+    tracing::info!(target: "clauset::ws", "Global WebSocket client disconnected");
     Ok(())
 }

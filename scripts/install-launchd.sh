@@ -51,11 +51,13 @@ cat > "$PLIST_PATH" << EOF
     <key>StandardErrorPath</key>
     <string>$HOME/.local/share/clauset/server.err</string>
 
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>RUST_LOG</key>
-        <string>clauset_server=info,clauset_core=info</string>
-    </dict>
+    <!-- Logging is controlled via CLI flags. Default is production mode (minimal logs).
+         Add flags to ProgramArguments for different modes:
+           -v (verbose): info + operational detail
+           -d (debug): full debug output
+           -q (quiet): warnings/errors only
+           - -log-format json: JSON structured output
+         Or set RUST_LOG for fine-grained control. -->
 </dict>
 </plist>
 EOF

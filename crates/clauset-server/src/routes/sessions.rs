@@ -132,18 +132,18 @@ pub async fn start(
     Json(req): Json<StartSessionRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let prompt = req.prompt.unwrap_or_default();
-    info!("Starting session {} with prompt: {}", id, prompt);
+    info!(target: "clauset::session", "Starting session {} with prompt: {}", id, prompt);
 
     state
         .session_manager
         .start_session(id, &prompt)
         .await
         .map_err(|e| {
-            error!("Failed to start session {}: {}", id, e);
+            error!(target: "clauset::session", "Failed to start session {}: {}", id, e);
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         })?;
 
-    info!("Session {} started successfully", id);
+    info!(target: "clauset::session", "Session {} started successfully", id);
     Ok(StatusCode::OK)
 }
 

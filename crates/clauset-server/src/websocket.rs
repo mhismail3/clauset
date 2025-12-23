@@ -57,11 +57,11 @@ pub async fn handle_websocket(
                     // Send terminal buffer if available
                     if let Some(buffer) = state_clone.session_manager.get_terminal_buffer(session_id).await {
                         if !buffer.is_empty() {
-                            debug!("Sending terminal buffer for session {}: {} bytes", session_id, buffer.len());
+                            debug!(target: "clauset::ws", "Sending terminal buffer for session {}: {} bytes", session_id, buffer.len());
                             let buffer_msg = WsServerMessage::TerminalBuffer { data: buffer };
                             if let Ok(json) = serde_json::to_string(&buffer_msg) {
                                 if let Err(e) = ws_tx.send(Message::Text(json.into())).await {
-                                    debug!("WebSocket send failed for session {}: {}", session_id, e);
+                                    debug!(target: "clauset::ws", "WebSocket send failed for session {}: {}", session_id, e);
                                     break;
                                 }
                             }
@@ -196,12 +196,13 @@ pub async fn handle_websocket(
                         let json = match serde_json::to_string(&msg) {
                             Ok(j) => j,
                             Err(e) => {
-                                warn!("Failed to serialize WebSocket message for session {}: {}", session_id, e);
+                                warn!(target: "clauset::ws", "Failed to serialize WebSocket message for session {}: {}", session_id, e);
                                 continue;
                             }
                         };
                         if let Err(e) = ws_tx.send(Message::Text(json.into())).await {
                             debug!(
+                                target: "clauset::ws",
                                 "WebSocket send failed for session {} (client likely disconnected): {}",
                                 session_id, e
                             );
@@ -224,6 +225,7 @@ pub async fn handle_websocket(
                             // Validate input size
                             if content.len() > MAX_INPUT_SIZE {
                                 warn!(
+                                    target: "clauset::ws",
                                     "Input message too large ({} bytes) from session {}, max {} bytes",
                                     content.len(),
                                     session_id,
@@ -246,6 +248,7 @@ pub async fn handle_websocket(
                             // Validate terminal input size
                             if data.len() > MAX_TERMINAL_INPUT_SIZE {
                                 warn!(
+                                    target: "clauset::ws",
                                     "Terminal input too large ({} bytes) from session {}, max {} bytes",
                                     data.len(),
                                     session_id,
@@ -267,7 +270,7 @@ pub async fn handle_websocket(
                                 .await;
                         }
                         WsClientMessage::Resize { rows, cols } => {
-                            debug!("Resize for session {}: {}x{}", session_id, cols, rows);
+                            debug!(target: "clauset::ws", "Resize for session {}: {}x{}", session_id, cols, rows);
                             let _ = state_clone
                                 .session_manager
                                 .resize_terminal(session_id, rows, cols)
@@ -279,7 +282,7 @@ pub async fn handle_websocket(
                         }
                         WsClientMessage::Ping { timestamp } => {
                             // Pong is handled by the send task
-                            tracing::debug!("Received ping: {}", timestamp);
+                            tracing::debug!(target: "clauset::ws::ping", "Received ping: {}", timestamp);
                         }
                         WsClientMessage::GetState => {
                             // TODO: Send current state

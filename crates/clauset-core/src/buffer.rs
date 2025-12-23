@@ -185,6 +185,7 @@ impl SessionBuffers {
             if model_changed || cost_changed || input_changed || output_changed || ctx_changed
             {
                 tracing::debug!(
+                    target: "clauset::activity::stats",
                     "Stats updated: model='{}', cost=${:.4}, tokens={}K/{}K, ctx={}%",
                     status.model, status.cost, status.input_tokens/1000, status.output_tokens/1000, status.context_percent
                 );
@@ -221,7 +222,8 @@ impl SessionBuffers {
                 if buffer.activity.is_busy {
                     // Already busy - update tracking to confirm activity is happening
                     tracing::debug!(
-                        "[STATUS] Activity indicator in NEW chunk: {:?} - updating activity tracking",
+                        target: "clauset::activity::state",
+                        "Activity indicator in NEW chunk: {:?} - updating activity tracking",
                         step
                     );
                     buffer.activity.saw_activity_since_busy = true;
@@ -230,7 +232,8 @@ impl SessionBuffers {
                 } else {
                     // Not busy (Ready state) - this is likely a terminal redraw, ignore
                     tracing::debug!(
-                        "[STATUS] Activity indicator in NEW chunk: {:?} - but not busy, ignoring (likely terminal redraw)",
+                        target: "clauset::activity::state",
+                        "Activity indicator in NEW chunk: {:?} - but not busy, ignoring (likely terminal redraw)",
                         step
                     );
                 }
@@ -274,9 +277,10 @@ impl SessionBuffers {
             .map(|t| now.duration_since(t).as_millis())
             .unwrap_or(0);
 
-        // DEBUG: Log state for troubleshooting
-        tracing::debug!(
-            "[STATUS] is_busy={}, saw_activity={}, time_since_busy={}ms, time_since_activity={}ms, bytes={}, parsed_step={:?}",
+        // TRACE: Log state for troubleshooting (high frequency - fires every chunk)
+        tracing::trace!(
+            target: "clauset::activity::state",
+            "is_busy={}, saw_activity={}, time_since_busy={}ms, time_since_activity={}ms, bytes={}, parsed_step={:?}",
             buffer.activity.is_busy,
             buffer.activity.saw_activity_since_busy,
             time_since_busy,
@@ -313,7 +317,8 @@ impl SessionBuffers {
             let fallback_timeout = time_since_busy >= 5000 && parsed_ready;
 
             tracing::debug!(
-                "[STATUS] BUSY CHECK: saw_activity={}, time_ok={}, bytes_ok={}, parsed_ready={}, fallback={}",
+                target: "clauset::activity::state",
+                "BUSY CHECK: saw_activity={}, time_ok={}, bytes_ok={}, parsed_ready={}, fallback={}",
                 saw_activity, time_ok, bytes_ok, parsed_ready, fallback_timeout
             );
 
@@ -321,7 +326,7 @@ impl SessionBuffers {
 
             if can_transition {
                 // Transition to Ready
-                tracing::info!("[STATUS] >>> TRANSITION TO READY <<<");
+                tracing::info!(target: "clauset::activity", ">>> TRANSITION TO READY <<<");
                 buffer.activity.is_busy = false;
                 buffer.activity.busy_since = None;
                 buffer.activity.saw_activity_since_busy = false;
@@ -394,7 +399,7 @@ impl SessionBuffers {
     /// Mark a session as busy (user sent input, waiting for Claude's response).
     /// This ensures the status stays "Thinking" until Claude reliably finishes.
     pub async fn mark_busy(&self, session_id: Uuid) {
-        tracing::info!("[STATUS] mark_busy called for session {}", session_id);
+        tracing::debug!(target: "clauset::session", "mark_busy called for session {}", session_id);
         let mut buffers = self.buffers.write().await;
         if let Some(buffer) = buffers.get_mut(&session_id) {
             buffer.activity.is_busy = true;
@@ -409,7 +414,7 @@ impl SessionBuffers {
 
     /// Mark a session as ready (Claude finished responding).
     pub async fn mark_ready(&self, session_id: Uuid) {
-        tracing::info!("[STATUS] mark_ready called for session {}", session_id);
+        tracing::debug!(target: "clauset::session", "mark_ready called for session {}", session_id);
         let mut buffers = self.buffers.write().await;
         if let Some(buffer) = buffers.get_mut(&session_id) {
             buffer.activity.is_busy = false;
@@ -423,7 +428,7 @@ impl SessionBuffers {
     /// Initialize a session buffer with Ready state.
     /// Called when a new session starts to ensure it shows "Ready" immediately.
     pub async fn initialize_session(&self, session_id: Uuid) -> SessionActivity {
-        tracing::info!("[STATUS] initialize_session called for session {}", session_id);
+        tracing::debug!(target: "clauset::session", "initialize_session called for session {}", session_id);
         let mut buffers = self.buffers.write().await;
         let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
 
@@ -487,7 +492,8 @@ impl SessionBuffers {
         }
 
         tracing::debug!(
-            "[HOOK] Updated activity for session {}: step={:?}, busy={}, actions={}",
+            target: "clauset::hooks",
+            "Updated activity for session {}: step={:?}, busy={}, actions={}",
             session_id,
             buffer.activity.current_step,
             buffer.activity.is_busy,
