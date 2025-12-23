@@ -127,7 +127,7 @@ export default function Sessions() {
   return (
     <div class="flex flex-col h-full">
       {/* Header */}
-      <header class="flex-none glass safe-top" style={{ padding: '14px 16px' }}>
+      <header class="flex-none glass safe-top" style={{ "padding-inline": '16px', "padding-bottom": '14px' }}>
         <div
           style={{
             display: 'flex',
@@ -194,9 +194,20 @@ export default function Sessions() {
         </div>
       </header>
 
-      {/* Content */}
-      <main class="flex-1 scrollable">
-        <div style={{ padding: '16px', "padding-bottom": '32px' }}>
+      {/* Content - use overflow:hidden when few items, auto when many to scroll */}
+      <main
+        class="flex-1"
+        style={{
+          "overflow-y": sessions().length > 3 ? 'auto' : 'hidden',
+          "overflow-x": 'hidden',
+          "-webkit-overflow-scrolling": 'touch',
+          "min-height": '0',
+          /* Hide scrollbar but keep scroll functionality */
+          "-ms-overflow-style": 'none',
+          "scrollbar-width": 'none',
+        }}
+      >
+        <div style={{ padding: '16px', "padding-bottom": sessions().length > 3 ? '100px' : '16px' }}>
           <Show when={loading() && sessions().length === 0}>
             <div style={{ display: 'flex', "justify-content": 'center', padding: '64px 0' }}>
               <Spinner size="lg" />
@@ -262,27 +273,26 @@ export default function Sessions() {
       {/* Floating Action Button */}
       <button
         onClick={() => setShowNewSession(true)}
-        class="pressable"
+        class="card-pressable"
         style={{
           position: 'fixed',
-          bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 20px) + 16px)',
-          right: 'calc(max(env(safe-area-inset-right, 0px), 8px) + 16px)',
-          width: '48px',
-          height: '48px',
+          bottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)',
+          right: '24px',
+          width: '56px',
+          height: '56px',
           display: 'flex',
           "align-items": 'center',
           "justify-content": 'center',
-          background: 'var(--color-accent)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          "border-radius": '50%',
-          color: '#ffffff',
+          background: 'var(--color-bg-surface)',
+          border: '1.5px solid var(--color-bg-overlay)',
+          "border-radius": '18px',
+          color: 'var(--color-accent)',
           cursor: 'pointer',
-          "box-shadow": '0 2px 8px rgba(0, 0, 0, 0.3)',
-          transition: 'all 0.15s ease',
+          "box-shadow": '3px 3px 0px rgba(0, 0, 0, 0.4)',
           "z-index": '30',
         }}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>

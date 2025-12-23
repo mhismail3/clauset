@@ -193,12 +193,14 @@ textarea,
 }
 
 .scrollable::-webkit-scrollbar,
-.scrollable-x::-webkit-scrollbar {
+.scrollable-x::-webkit-scrollbar,
+main::-webkit-scrollbar {
   display: none;
 }
 
 .scrollable,
-.scrollable-x {
+.scrollable-x,
+main {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
