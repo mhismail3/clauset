@@ -352,9 +352,9 @@ impl InteractionProcessor {
         output_tokens: u64,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some((_, interaction_id)) = self.active_interactions.remove(&session_id) {
-            // Calculate deltas from stored starting costs
+            // Calculate deltas from stored starting costs (don't remove - keep for late updates)
             let (cost_delta, input_delta, output_delta) =
-                if let Some((_, snapshot)) = self.starting_costs.remove(&session_id) {
+                if let Some(snapshot) = self.starting_costs.get(&session_id) {
                     (
                         (cost_usd - snapshot.cost_usd).max(0.0),
                         input_tokens.saturating_sub(snapshot.input_tokens),
@@ -502,6 +502,47 @@ impl InteractionProcessor {
     /// Get a reference to the underlying store.
     pub fn store(&self) -> &Arc<InteractionStore> {
         &self.store
+    }
+
+    /// Update interaction costs when session costs change (from terminal parsing).
+    /// This handles the case where terminal output with final costs arrives after
+    /// the Stop hook has already fired.
+    pub fn update_costs_from_session(
+        &self,
+        session_id: Uuid,
+        cost_usd: f64,
+        input_tokens: u64,
+        output_tokens: u64,
+    ) {
+        // Only update if there's no active interaction (i.e., the interaction just completed)
+        if self.active_interactions.contains_key(&session_id) {
+            // Interaction is still active, costs will be captured on Stop
+            return;
+        }
+
+        // Check if we have a starting snapshot - if so, the interaction was recently completed
+        // and we can update its costs with the new values (don't remove - next prompt will replace)
+        if let Some(snapshot) = self.starting_costs.get(&session_id) {
+            let cost_delta = (cost_usd - snapshot.cost_usd).max(0.0);
+            let input_delta = input_tokens.saturating_sub(snapshot.input_tokens);
+            let output_delta = output_tokens.saturating_sub(snapshot.output_tokens);
+
+            if cost_delta > 0.0 || input_delta > 0 || output_delta > 0 {
+                if let Err(e) = self.store.update_latest_interaction_costs(
+                    session_id,
+                    cost_delta,
+                    input_delta,
+                    output_delta,
+                ) {
+                    warn!(target: "clauset::interactions",
+                        "Failed to update interaction costs from terminal: {}", e);
+                } else {
+                    debug!(target: "clauset::interactions",
+                        "Updated interaction costs for session {} from terminal (delta: ${:.4}, {}K/{}K)",
+                        session_id, cost_delta, input_delta/1000, output_delta/1000);
+                }
+            }
+        }
     }
 
     /// Get storage statistics.

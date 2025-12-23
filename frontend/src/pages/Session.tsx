@@ -1,7 +1,6 @@
 import { Show, createSignal, onMount, onCleanup, For } from 'solid-js';
 import { useParams, useNavigate } from '@solidjs/router';
 import { Button } from '../components/ui/Button';
-import { Badge } from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
 import { ConnectionStatus } from '../components/ui/ConnectionStatus';
 import { MessageBubble } from '../components/chat/MessageBubble';
@@ -20,7 +19,6 @@ import {
   addToolCall,
   updateToolCallResult,
 } from '../stores/messages';
-import { getStatusVariant, getStatusLabel } from '../stores/sessions';
 import { appendTerminalOutput, clearTerminalHistory } from '../stores/terminal';
 
 // Maximum chunks to queue when terminal is not yet ready (prevents OOM)
@@ -63,6 +61,43 @@ function parseStatusLine(text: string): StatusInfo | null {
     outputTokens: parseTokens(outputStr),
     contextPercent: parseInt(ctxStr, 10),
   };
+}
+
+// Get status dot color based on session status and activity
+// Green: active and ready, Orange: thinking/working, Gray: stopped
+function getStatusDotColor(status: Session['status'], currentStep?: string): string {
+  if (status === 'stopped' || status === 'error') {
+    return 'var(--color-text-muted)'; // Gray
+  }
+  if (status === 'active' || status === 'starting' || status === 'waiting_input') {
+    // Check if actively working (not just ready)
+    if (currentStep && currentStep !== 'Ready' && currentStep.length > 0) {
+      return '#c45b37'; // Orange - thinking/working
+    }
+    return '#2c8f7a'; // Green - ready
+  }
+  return 'var(--color-text-muted)'; // Gray default
+}
+
+// Status dot component
+function StatusDot(props: { status: Session['status']; currentStep?: string }) {
+  const color = () => getStatusDotColor(props.status, props.currentStep);
+  const isActive = () => props.status === 'active' || props.status === 'starting' || props.status === 'waiting_input';
+  const isWorking = () => isActive() && props.currentStep && props.currentStep !== 'Ready' && props.currentStep.length > 0;
+
+  return (
+    <span
+      style={{
+        width: '8px',
+        height: '8px',
+        'border-radius': '50%',
+        background: color(),
+        'flex-shrink': '0',
+        'box-shadow': isWorking() ? `0 0 6px ${color()}` : 'none',
+        animation: isWorking() ? 'pulse 1.5s ease-in-out infinite' : 'none',
+      }}
+    />
+  );
 }
 
 export default function SessionPage() {
@@ -560,10 +595,11 @@ export default function SessionPage() {
           </button>
 
           {/* Session info */}
-          <div style={{ flex: '1', "min-width": '0', display: 'flex', "align-items": 'center', gap: '10px' }}>
+          <div style={{ flex: '1', "min-width": '0', display: 'flex', "align-items": 'center', gap: '8px' }}>
             <Show when={session()} fallback={<Spinner size="sm" />}>
               {(s) => (
                 <>
+                  <StatusDot status={s().status} currentStep={s().current_step} />
                   <span
                     class="text-mono"
                     style={{
@@ -577,9 +613,6 @@ export default function SessionPage() {
                   >
                     {s().project_path.split('/').pop()}
                   </span>
-                  <Badge variant={getStatusVariant(s().status)}>
-                    {getStatusLabel(s().status)}
-                  </Badge>
                 </>
               )}
             </Show>

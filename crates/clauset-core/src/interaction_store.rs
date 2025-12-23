@@ -631,6 +631,36 @@ impl InteractionStore {
         Ok(())
     }
 
+    /// Update costs for the most recent interaction in a session.
+    /// Called when costs are updated after the interaction was marked complete.
+    pub fn update_latest_interaction_costs(
+        &self,
+        session_id: Uuid,
+        cost_usd_delta: f64,
+        input_tokens_delta: u64,
+        output_tokens_delta: u64,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        // Only update if the new values are greater (costs only increase)
+        let updated = conn.execute(
+            r#"UPDATE interactions
+               SET cost_usd_delta = MAX(cost_usd_delta, ?1),
+                   input_tokens_delta = MAX(input_tokens_delta, ?2),
+                   output_tokens_delta = MAX(output_tokens_delta, ?3)
+               WHERE session_id = ?4
+                 AND sequence_number = (
+                     SELECT MAX(sequence_number) FROM interactions WHERE session_id = ?4
+                 )"#,
+            params![
+                cost_usd_delta,
+                input_tokens_delta as i64,
+                output_tokens_delta as i64,
+                session_id.to_string()
+            ],
+        )?;
+        Ok(updated > 0)
+    }
+
     /// Mark an interaction as failed.
     pub fn fail_interaction(&self, id: Uuid, error: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();

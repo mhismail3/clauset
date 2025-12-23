@@ -59,6 +59,14 @@ async fn process_event(state: &AppState, event: ProcessEvent) {
             );
 
             if let Some(activity) = activity {
+                // Update interaction costs if they changed (handles late terminal output after Stop hook)
+                state.interaction_processor.update_costs_from_session(
+                    session_id,
+                    activity.cost,
+                    activity.input_tokens,
+                    activity.output_tokens,
+                );
+
                 // Broadcast activity update for dashboard real-time updates
                 let _ = state.session_manager.event_sender().send(
                     ProcessEvent::ActivityUpdate {
