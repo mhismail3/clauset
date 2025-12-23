@@ -68,6 +68,8 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             session_id, reason, ..
         } => {
             info!("Hook: Session {} ended (reason: {})", session_id, reason);
+            // Persist activity data before updating status
+            state.session_manager.persist_session_activity(session_id).await;
             let _ = state.session_manager.update_status(session_id, SessionStatus::Stopped);
         }
 

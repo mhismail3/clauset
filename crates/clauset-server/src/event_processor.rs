@@ -65,6 +65,8 @@ async fn process_event(state: &AppState, event: ProcessEvent) {
         }
         ProcessEvent::Exited { session_id, exit_code } => {
             info!("Session {} exited with code {:?}", session_id, exit_code);
+            // Persist activity data before updating status
+            state.session_manager.persist_session_activity(session_id).await;
             // Update session status to stopped
             let _ = state
                 .session_manager

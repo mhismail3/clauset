@@ -247,6 +247,9 @@ impl SessionManager {
         // Remove from active list
         self.active_sessions.write().await.retain(|&id| id != session_id);
 
+        // Persist activity data before updating status
+        self.persist_session_activity(session_id).await;
+
         // Update status
         self.db.update_status(session_id, SessionStatus::Stopped)?;
 
@@ -308,6 +311,32 @@ impl SessionManager {
     /// Update session status.
     pub fn update_status(&self, session_id: Uuid, status: SessionStatus) -> Result<()> {
         self.db.update_status(session_id, status)
+    }
+
+    /// Persist session activity data to database (call before stopping a session).
+    pub async fn persist_session_activity(&self, session_id: Uuid) {
+        if let Some(activity) = self.buffers.get_activity(session_id).await {
+            let recent_actions: Vec<clauset_types::RecentAction> = activity
+                .recent_actions
+                .iter()
+                .map(|a| clauset_types::RecentAction {
+                    action_type: a.action_type.clone(),
+                    summary: a.summary.clone(),
+                    detail: a.detail.clone(),
+                    timestamp: a.timestamp,
+                })
+                .collect();
+
+            if let Err(e) = self.db.update_activity(
+                session_id,
+                activity.current_step.as_deref(),
+                &recent_actions,
+            ) {
+                warn!("Failed to persist session {} activity: {}", session_id, e);
+            } else {
+                debug!("Persisted {} recent actions for session {}", recent_actions.len(), session_id);
+            }
+        }
     }
 
     /// Update session cost.

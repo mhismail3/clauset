@@ -171,6 +171,8 @@ pub async fn handle_websocket(
                             })
                         }
                         ProcessEvent::Exited { session_id: sid, .. } if *sid == session_id => {
+                            // Persist activity data before updating status
+                            state_clone.session_manager.persist_session_activity(session_id).await;
                             // Update session status
                             let _ = state_clone
                                 .session_manager

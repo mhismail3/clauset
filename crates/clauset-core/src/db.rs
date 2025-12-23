@@ -77,6 +77,24 @@ impl SessionStore {
             )?;
         }
 
+        // Check if recent_actions column exists
+        let has_recent_actions: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('sessions') WHERE name = 'recent_actions'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !has_recent_actions {
+            conn.execute_batch(
+                r#"
+                ALTER TABLE sessions ADD COLUMN recent_actions TEXT NOT NULL DEFAULT '[]';
+                ALTER TABLE sessions ADD COLUMN current_step TEXT;
+                "#,
+            )?;
+        }
+
         Ok(())
     }
 
@@ -129,9 +147,9 @@ impl SessionStore {
         let mut stmt =
             conn.prepare("SELECT * FROM sessions ORDER BY last_activity_at DESC")?;
         let sessions = stmt
-            .query_map([], |row| Self::row_to_session(row))?
+            .query_map([], |row| Self::row_to_session_summary(row))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(sessions.into_iter().map(SessionSummary::from).collect())
+        Ok(sessions)
     }
 
     /// List active sessions (not stopped/error).
@@ -228,6 +246,34 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Update recent actions and current step (for persisting on session stop).
+    pub fn update_activity(
+        &self,
+        id: Uuid,
+        current_step: Option<&str>,
+        recent_actions: &[clauset_types::RecentAction],
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let actions_json = serde_json::to_string(recent_actions)
+            .map_err(|e| ClausetError::ParseError(e.to_string()))?;
+        conn.execute(
+            r#"
+            UPDATE sessions SET
+                current_step = ?1,
+                recent_actions = ?2,
+                last_activity_at = ?3
+            WHERE id = ?4
+            "#,
+            params![
+                current_step,
+                actions_json,
+                chrono::Utc::now().to_rfc3339(),
+                id.to_string()
+            ],
+        )?;
+        Ok(())
+    }
+
     fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
         let id: String = row.get("id")?;
         let claude_session_id: String = row.get("claude_session_id")?;
@@ -261,6 +307,48 @@ impl SessionStore {
             output_tokens: output_tokens as u64,
             context_percent: context_percent as u8,
             preview,
+        })
+    }
+
+    fn row_to_session_summary(row: &rusqlite::Row) -> rusqlite::Result<SessionSummary> {
+        let id: String = row.get("id")?;
+        let claude_session_id: String = row.get("claude_session_id")?;
+        let project_path: String = row.get("project_path")?;
+        let model: String = row.get("model")?;
+        let status: String = row.get("status")?;
+        let mode: String = row.get("mode")?;
+        let created_at: String = row.get("created_at")?;
+        let last_activity_at: String = row.get("last_activity_at")?;
+        let total_cost_usd: f64 = row.get("total_cost_usd")?;
+        let input_tokens: i64 = row.get("input_tokens").unwrap_or(0);
+        let output_tokens: i64 = row.get("output_tokens").unwrap_or(0);
+        let context_percent: i32 = row.get("context_percent").unwrap_or(0);
+        let preview: String = row.get("preview")?;
+        let current_step: Option<String> = row.get("current_step").ok();
+        let recent_actions_json: String = row.get("recent_actions").unwrap_or_else(|_| "[]".to_string());
+        let recent_actions: Vec<clauset_types::RecentAction> =
+            serde_json::from_str(&recent_actions_json).unwrap_or_default();
+
+        Ok(SessionSummary {
+            id: Uuid::parse_str(&id).unwrap_or_default(),
+            claude_session_id: Uuid::parse_str(&claude_session_id).unwrap_or_default(),
+            project_path: project_path.into(),
+            model,
+            status: serde_json::from_str(&status).unwrap_or(SessionStatus::Error),
+            mode: serde_json::from_str(&mode).unwrap_or(SessionMode::StreamJson),
+            created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .unwrap_or_default(),
+            last_activity_at: chrono::DateTime::parse_from_rfc3339(&last_activity_at)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .unwrap_or_default(),
+            total_cost_usd,
+            input_tokens: input_tokens as u64,
+            output_tokens: output_tokens as u64,
+            context_percent: context_percent as u8,
+            preview,
+            current_step,
+            recent_actions,
         })
     }
 }

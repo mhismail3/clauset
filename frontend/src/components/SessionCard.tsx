@@ -96,7 +96,7 @@ function StatusIndicator(props: { status: Session['status']; preview?: string; c
       case 'waiting_input':
         return { icon: '▸', text: 'Waiting for your input', color: 'var(--color-accent)' };
       case 'stopped':
-        return { icon: '✓', text: 'Completed', color: '#2c8f7a' };
+        return { icon: '✓', text: 'Session ended', color: '#2c8f7a' };
       case 'created':
         return { icon: '○', text: 'Ready to start', color: 'var(--color-text-muted)' };
       case 'error':
@@ -190,8 +190,17 @@ export function SessionCard(props: SessionCardProps) {
   // Get the status color for the actions container border
   const getActionsBorderColor = createMemo(() => {
     const step = props.session.current_step?.toLowerCase();
+    const status = props.session.status;
 
-    // Orange for thinking/planning/tool execution
+    // Terminal states take precedence - always use their designated color
+    if (status === 'stopped') {
+      return '#2c8f7a'; // Green for ended sessions
+    }
+    if (status === 'error') {
+      return 'var(--color-accent)';
+    }
+
+    // Orange for thinking/planning/tool execution (only for active sessions)
     if (step === 'thinking' || step === 'planning') {
       return 'var(--color-warning, #d4a644)';
     }
@@ -207,17 +216,13 @@ export function SessionCard(props: SessionCardProps) {
       return '#2c8f7a';
     }
 
-    switch (props.session.status) {
+    switch (status) {
       case 'active':
       case 'starting':
         // If active with no specific step, default to ready (green)
         return '#2c8f7a';
-      case 'stopped':
-        return '#2c8f7a';
       case 'waiting_input':
         return '#2c8f7a';
-      case 'error':
-        return 'var(--color-accent)';
       default:
         return 'var(--color-text-muted)';
     }
@@ -337,7 +342,7 @@ export function SessionCard(props: SessionCardProps) {
                   'font-weight': '500',
                 }}
               >
-                {props.session.status === 'stopped' ? 'Completed' :
+                {props.session.status === 'stopped' ? 'Session ended' :
                  props.session.status === 'waiting_input' ? 'Waiting for input' :
                  props.session.status === 'error' ? 'Error' :
                  isActivelyWorking() ? (
