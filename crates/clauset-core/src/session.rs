@@ -280,6 +280,24 @@ impl SessionManager {
                             timestamp: a.timestamp,
                         })
                         .collect();
+
+                    // Also enrich stats from buffer if available
+                    // Buffer stats are more up-to-date than database (parsed from terminal in real-time)
+                    if !activity.model.is_empty() {
+                        session.model = activity.model;
+                    }
+                    if activity.cost > 0.0 {
+                        session.total_cost_usd = activity.cost;
+                    }
+                    if activity.input_tokens > 0 {
+                        session.input_tokens = activity.input_tokens;
+                    }
+                    if activity.output_tokens > 0 {
+                        session.output_tokens = activity.output_tokens;
+                    }
+                    if activity.context_percent > 0 {
+                        session.context_percent = activity.context_percent;
+                    }
                 }
             }
         }

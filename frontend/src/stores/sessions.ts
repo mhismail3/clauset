@@ -107,12 +107,20 @@ export function updateSessionFromActivity(update: ActivityUpdate) {
 
   // Use path-based update for fine-grained reactivity
   // This only invalidates the specific session, not the entire list
+  //
+  // Important: For stats (cost, tokens, context), only update if the new value
+  // is non-zero OR greater than current value. This prevents hook events from
+  // overwriting valid stats with 0 (hooks don't include stats, so they broadcast
+  // whatever the buffer has, which might be empty if status line hasn't been parsed).
   setSessionsStore('list', idx, {
     model: update.model || session.model,
-    total_cost_usd: update.cost,
-    input_tokens: update.input_tokens,
-    output_tokens: update.output_tokens,
-    context_percent: update.context_percent,
+    // Cost can only increase, never decrease
+    total_cost_usd: update.cost > 0 ? Math.max(update.cost, session.total_cost_usd) : session.total_cost_usd,
+    // Tokens can only increase (cumulative)
+    input_tokens: update.input_tokens > 0 ? Math.max(update.input_tokens, session.input_tokens) : session.input_tokens,
+    output_tokens: update.output_tokens > 0 ? Math.max(update.output_tokens, session.output_tokens) : session.output_tokens,
+    // Context can fluctuate, but don't overwrite with 0
+    context_percent: update.context_percent > 0 ? update.context_percent : session.context_percent,
     preview: update.current_activity || session.preview,
     current_step: update.current_step,
     recent_actions: newActions,

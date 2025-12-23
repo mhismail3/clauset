@@ -525,10 +525,10 @@ struct ParsedStatus {
 
 /// Pre-compiled regex for status line parsing
 static STATUS_LINE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    // Model must start with a letter, followed by alphanumeric, dots, and spaces
-    // Examples: "Opus 4.5", "Claude 3", "Sonnet 3.5"
+    // Model must start with a letter, followed by alphanumeric, dots, dashes, and spaces
+    // Examples: "Opus 4.5", "Claude 3", "Sonnet 3.5", "haiku", "opus-4-5", "claude-3-sonnet"
     Regex::new(
-        r"([A-Za-z][A-Za-z0-9. ]*?)\s*\|\s*\$([0-9.]+)\s*\|\s*([0-9.]+)K?/([0-9.]+)K?\s*\|\s*ctx:(\d+)%"
+        r"([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*\|\s*([0-9.]+)K?/([0-9.]+)K?\s*\|\s*ctx:(\d+)%"
     ).unwrap()
 });
 
@@ -566,8 +566,14 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// Parse current activity from terminal output.
-/// Returns (current_activity, current_step, list of new actions)
+/// Parse current activity and status from terminal output.
+/// Returns (current_activity, current_step, empty vec)
+///
+/// NOTE: This function NO LONGER creates actions from terminal parsing.
+/// Actions are now exclusively created from hook events (hooks.rs), which
+/// provide accurate, structured data. Terminal parsing is only used for:
+/// - Status line extraction (model, cost, tokens, context %) - done in parse_status_line
+/// - Ready/Thinking state detection (this function)
 ///
 /// KEY INSIGHT: Status is determined by RECENCY - whatever meaningful status
 /// indicator appeared MOST RECENTLY is the current state. We iterate from
@@ -771,59 +777,18 @@ fn parse_activity_and_action(text: &str) -> Option<(String, Option<String>, Vec<
         }
     }
 
-    // Second pass: Find ALL tool actions in the buffer (scan more lines)
-    // We collect multiple actions and return them all for deduplication by the caller
-    let mut found_actions: Vec<RecentAction> = Vec::new();
-    let mut seen_summaries: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // NOTE: Actions are NO LONGER created from terminal parsing.
+    // Hooks (hooks.rs) now provide the authoritative source for tool actions,
+    // which gives us accurate, structured data instead of parsing terminal output.
+    // This eliminates issues like "Write r," or "Read 535" from malformed parsing.
+    let found_actions: Vec<RecentAction> = Vec::new();
 
-    for line in lines.iter().rev().take(150) {
-        let clean_line = strip_ansi_codes(line.trim());
-        let clean_lower = clean_line.to_lowercase();
-
-        // Skip empty, status lines, and UI chrome
-        if clean_line.len() < 3 || clean_line.contains("ctx:") || clean_line.contains("| $") {
-            continue;
-        }
-        if is_ui_chrome(&clean_line) {
-            continue;
-        }
-
-        // Look for tool invocations to record as actions
-        if let Some((_, _, Some(action))) = parse_tool_activity_flexible(&clean_line, &clean_lower) {
-            // Deduplicate within this parse by summary
-            let key = format!("{}:{}", action.action_type, action.summary);
-            if !seen_summaries.contains(&key) {
-                seen_summaries.insert(key);
-                found_actions.push(action);
-
-                // Limit to 10 actions per parse to avoid excessive processing
-                if found_actions.len() >= 10 {
-                    break;
-                }
-            }
-        }
-    }
-
-    // Reverse so oldest is first (they'll be added in order)
-    found_actions.reverse();
-
-    // Combine results
+    // Return status with empty actions vec (actions come from hooks)
     if let Some((activity, step)) = current_status {
         return Some((activity, Some(step), found_actions));
     }
 
-    // Fallback: if we found actions but no explicit status, we're probably mid-execution
-    // Show "Processing" rather than the last action's summary to avoid confusion
-    if !found_actions.is_empty() {
-        return Some((
-            "Processing...".to_string(),
-            None,
-            found_actions,
-        ));
-    }
-
-    // No status and no actions found - return None to let the frontend handle it
-    // We explicitly do NOT pick up random terminal text as the status
+    // No status found - return None to let hooks/frontend handle it
     None
 }
 
@@ -1247,34 +1212,38 @@ mod tests {
 
     #[test]
     fn test_parse_tool_invocation() {
-        // Test Claude Code's tool invocation format
-        let (_, _, actions) = parse_activity_and_action("● Bash(git status)").unwrap();
-        assert!(!actions.is_empty());
-        assert_eq!(actions[0].action_type, "bash");
+        // Test that tool invocation patterns are detected for status tracking
+        // NOTE: Actions are no longer created from buffer parsing (they come from hooks)
+        // We still detect tool usage for activity status purposes
+        let result = parse_activity_and_action("● Bash(git status)").unwrap();
+        assert!(result.0.contains("Bash") || result.1.as_deref() == Some("Bash"));
+        assert!(result.2.is_empty()); // Actions now come from hooks
 
-        let (_, _, actions) = parse_activity_and_action("● Read(README.md)").unwrap();
-        assert!(!actions.is_empty());
-        assert_eq!(actions[0].action_type, "read");
+        let result = parse_activity_and_action("● Read(README.md)").unwrap();
+        assert!(result.0.contains("Read") || result.1.as_deref() == Some("Read"));
+        assert!(result.2.is_empty()); // Actions now come from hooks
     }
 
     #[test]
     fn test_parse_thinking_with_actions() {
-        // Test that thinking status is captured while also capturing tool actions
+        // Test that thinking status is captured
+        // NOTE: Actions are no longer created from buffer parsing (they come from hooks)
         let input = "● Bash(git status)\n● Read(file.txt)\n* Actualizing... (thinking)";
         let result = parse_activity_and_action(input).unwrap();
         assert_eq!(result.0, "Thinking..."); // activity
         assert_eq!(result.1.as_deref(), Some("Thinking")); // step
-        assert!(!result.2.is_empty()); // actions should be captured
+        assert!(result.2.is_empty()); // Actions now come from hooks
     }
 
     #[test]
     fn test_parse_ready_state() {
         // Test that user input prompt (> ) is detected as Ready state
+        // NOTE: Actions are no longer created from buffer parsing (they come from hooks)
         let input = "● Bash(git status)\n● Read(file.txt)\n> run the tests";
         let result = parse_activity_and_action(input).unwrap();
         assert_eq!(result.0, "Ready"); // activity
         assert_eq!(result.1.as_deref(), Some("Ready")); // step
-        assert!(!result.2.is_empty()); // actions should still be captured
+        assert!(result.2.is_empty()); // Actions now come from hooks
 
         // Test with prompt and suggestion
         let input2 = "● Read(file.txt)\n> what next?";

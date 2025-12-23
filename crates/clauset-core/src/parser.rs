@@ -63,10 +63,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_text_delta() {
+    fn test_parse_assistant_event() {
         let mut parser = OutputParser::new();
-        let line = r#"{"type":"content_block_delta","message_id":"msg_1","content_block_index":0,"delta":{"type":"text_delta","text":"Hello"}}"#;
+        // Test parsing a valid assistant event from Claude CLI stream-json format
+        let line = r#"{"type":"assistant","session_id":"00000000-0000-0000-0000-000000000001","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Hello"}]}}"#;
         let event = parser.parse_line(line).unwrap();
         assert!(event.is_some());
+
+        // Verify it parsed as an Assistant event
+        if let Some(ClaudeEvent::Assistant(assistant)) = event {
+            assert_eq!(assistant.message.id, "msg_1");
+            assert_eq!(assistant.message.role, "assistant");
+        } else {
+            panic!("Expected Assistant event");
+        }
+    }
+
+    #[test]
+    fn test_parse_invalid_json() {
+        let mut parser = OutputParser::new();
+        // Invalid JSON should return None, not error
+        let event = parser.parse_line("not json").unwrap();
+        assert!(event.is_none());
+    }
+
+    #[test]
+    fn test_parse_chunk() {
+        let mut parser = OutputParser::new();
+        // Test parsing chunked data with partial lines
+        let chunk1 = r#"{"type":"assistant","session_id":"00000000-0000-0000-0000-000000000001","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Hi"}]}}"#;
+        let chunk2 = "\n";
+
+        // First chunk has no newline, should return empty
+        let events = parser.parse_chunk(chunk1);
+        assert!(events.is_empty());
+
+        // Second chunk completes the line
+        let events = parser.parse_chunk(chunk2);
+        assert_eq!(events.len(), 1);
     }
 }
