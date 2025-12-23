@@ -70,73 +70,59 @@
 
 /* ============================================
    ROOT & VIEWPORT FIXES
+   iOS PWA safe area handling for notch/home indicator
    ============================================ */
 
 :root {
   color-scheme: dark;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-
-  /* Safe area insets as CSS custom properties for JavaScript access */
-  --sair: env(safe-area-inset-right, 0px);
-  --sail: env(safe-area-inset-left, 0px);
-  --sait: env(safe-area-inset-top, 0px);
-  --saib: env(safe-area-inset-bottom, 0px);
 }
 
 html {
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
-  scroll-behavior: smooth;
-  height: 100%;
-  height: -webkit-fill-available;
+  /* CRITICAL: Force background to extend past safe area on iOS PWA */
+  min-height: calc(100% + env(safe-area-inset-bottom, 0px) + env(safe-area-inset-top, 0px));
   width: 100%;
-  max-width: 100vw;
   overflow: hidden;
+  background-color: var(--color-bg-base);
 }
 
 body {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
   background-color: var(--color-bg-base);
   color: var(--color-text-primary);
   font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.5;
   letter-spacing: -0.01em;
-  margin: 0;
-  padding: 0;
   overscroll-behavior: none;
-  overscroll-behavior-y: none;
-  height: 100%;
-  height: 100dvh;
-  min-height: 100%;
-  min-height: 100dvh;
-  width: 100%;
-  max-width: 100vw;
   -webkit-user-select: none;
   user-select: none;
-  overflow: hidden;
-}
-
-@supports (-webkit-touch-callout: none) {
-  body {
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    width: 100%;
-    height: 100%;
-  }
 }
 
 #root {
-  height: 100%;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
+  /* Fill body, content handles its own safe area padding */
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* Ensure background extends to edges */
+  background-color: var(--color-bg-base);
 }
 
 .selectable,
@@ -152,15 +138,15 @@ textarea,
    ============================================ */
 
 .safe-top {
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: max(env(safe-area-inset-top, 0px), 14px) !important;
 }
 
 .safe-bottom {
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), 20px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .safe-bottom-extra {
-  padding-bottom: calc(max(env(safe-area-inset-bottom, 0px), 8px) + 12px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
 }
 
 .safe-left {
@@ -178,12 +164,12 @@ textarea,
 
 .safe-y {
   padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), 20px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .safe-all {
   padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), 20px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   padding-left: max(env(safe-area-inset-left, 0px), 8px);
   padding-right: max(env(safe-area-inset-right, 0px), 8px);
 }
