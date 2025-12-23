@@ -147,10 +147,10 @@ function StatusIndicator(props: { status: Session['status']; preview?: string; c
 }
 
 export function SessionCard(props: SessionCardProps) {
-  // Memoize recent actions to limit to 3 most recent
+  // Memoize recent actions to limit to 5 most recent
   const displayActions = createMemo(() => {
     const actions = props.session.recent_actions || [];
-    return actions.slice(-3).reverse(); // Most recent first, max 3
+    return actions.slice(-5).reverse(); // Most recent first, max 5
   });
 
   // Determine if we should show status indicator (without actions)
@@ -364,26 +364,32 @@ export function SessionCard(props: SessionCardProps) {
                     style={{
                       color: getActionsBorderColor(),
                       'flex-shrink': '0',
-                      'margin-top': '4px',
+                      display: 'inline-flex',
+                      'align-items': 'center',
+                      'justify-content': 'center',
+                      width: '12px',
+                      height: '17px', // Match line-height of 12px mono text
                     }}
                   >
                     <ActionIcon type={action.action_type} />
                   </span>
                   <div style={{ 'min-width': '0', flex: '1' }}>
-                    <span
+                    <div
                       class="text-mono"
                       style={{
                         'font-size': '12px',
+                        'line-height': '17px',
                         color: 'var(--color-text-secondary)',
                       }}
                     >
                       {action.summary}
-                    </span>
+                    </div>
                     <Show when={action.detail}>
                       <div
                         class="text-mono"
                         style={{
                           'font-size': '11px',
+                          'line-height': '15px',
                           color: 'var(--color-text-muted)',
                           overflow: 'hidden',
                           'text-overflow': 'ellipsis',
