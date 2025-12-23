@@ -111,6 +111,15 @@ Success criteria: All features from docs/FEATURE_PLAN.md implemented with no reg
   - Shows "Will create new project: {name}" indicator when typing new name
   - Frontend UI tested and working
 
+- New Session Modal Styling Revamp
+  - Custom combobox for both project and model dropdowns (replaced browser default)
+  - Project field starts empty (no auto-population)
+  - Retro card styling (border + offset shadow) matching site design
+  - Backdrop blur effect
+  - Escape key support for closing modal
+  - PWA safe area handling for mobile
+  - Monospace font (JetBrains Mono) for title and inputs matching session cards
+
 ### Now
 - All features complete
 
