@@ -272,6 +272,11 @@ impl ProcessManager {
             info!("Using model: {}", model);
         }
 
+        // Set environment variables for Clauset hooks integration
+        // These allow the hook script to identify which session and where to send events
+        cmd.env("CLAUSET_SESSION_ID", opts.session_id.to_string());
+        cmd.env("CLAUSET_URL", "http://localhost:8080");
+
         cmd.cwd(&opts.project_path);
 
         info!("Spawning Claude with session ID: {}", opts.claude_session_id);

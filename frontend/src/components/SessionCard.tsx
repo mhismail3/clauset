@@ -60,49 +60,6 @@ function ActionIcon(props: { type: string }) {
   return <Icon />;
 }
 
-// Step badge with appropriate styling
-function StepBadge(props: { step?: string }) {
-  const stepColors: Record<string, { bg: string; text: string }> = {
-    Read: { bg: 'rgba(91, 138, 154, 0.15)', text: '#5b8a9a' },
-    Write: { bg: 'rgba(44, 143, 122, 0.15)', text: '#2c8f7a' },
-    Edit: { bg: 'rgba(212, 166, 68, 0.15)', text: '#d4a644' },
-    Bash: { bg: 'rgba(196, 91, 55, 0.15)', text: '#c45b37' },
-    Grep: { bg: 'rgba(138, 107, 148, 0.15)', text: '#8a6b94' },
-    Glob: { bg: 'rgba(138, 107, 148, 0.15)', text: '#8a6b94' },
-    Task: { bg: 'rgba(91, 154, 138, 0.15)', text: '#5b9a8a' },
-    Web: { bg: 'rgba(91, 138, 154, 0.15)', text: '#5b8a9a' },
-    // Thinking/Planning states - orange/warning color to indicate active work
-    Thinking: { bg: 'rgba(212, 166, 68, 0.15)', text: '#d4a644' },
-    Planning: { bg: 'rgba(212, 166, 68, 0.15)', text: '#d4a644' },
-    Working: { bg: 'rgba(212, 166, 68, 0.15)', text: '#d4a644' },
-    // Ready state - green
-    Ready: { bg: 'rgba(44, 143, 122, 0.15)', text: '#2c8f7a' },
-  };
-
-  const colors = () => stepColors[props.step || ''] || { bg: 'rgba(240, 235, 227, 0.1)', text: 'var(--color-text-muted)' };
-
-  return (
-    <Show when={props.step}>
-      <span
-        class="text-mono"
-        style={{
-          display: 'inline-flex',
-          'align-items': 'center',
-          padding: '2px 6px',
-          'font-size': '10px',
-          'font-weight': '500',
-          'border-radius': '4px',
-          background: colors().bg,
-          color: colors().text,
-          'white-space': 'nowrap',
-        }}
-      >
-        {props.step}
-      </span>
-    </Show>
-  );
-}
-
 // Status indicator when there are no recent actions
 function StatusIndicator(props: { status: Session['status']; preview?: string; currentStep?: string }) {
   // Determine what to show based on session status
@@ -299,7 +256,6 @@ export function SessionCard(props: SessionCardProps) {
             <Badge variant={getStatusVariant(props.session.status)}>
               {getStatusLabel(props.session.status)}
             </Badge>
-            <StepBadge step={props.session.current_step} />
           </div>
           <button
             onClick={(e) => props.onMenuOpen(e, props.session)}

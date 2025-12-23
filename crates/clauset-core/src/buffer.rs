@@ -338,14 +338,12 @@ impl SessionBuffers {
                 }
             }
         } else {
-            // Not busy - use parsed activity directly
-            if let Some((activity, step, _)) = parsed {
-                new_step = step;
-                new_activity = activity;
-            } else {
-                new_step = Some("Ready".to_string());
-                new_activity = "Ready".to_string();
-            }
+            // Not busy - ALWAYS show Ready state.
+            // The regex parser should NOT override the Ready state with old buffer content.
+            // Hooks are the authoritative source for activity state transitions.
+            // Regex parsing is only used for cost/tokens/model (handled above).
+            new_step = Some("Ready".to_string());
+            new_activity = "Ready".to_string();
         }
 
         // Apply the determined status
@@ -401,6 +399,96 @@ impl SessionBuffers {
             buffer.activity.current_step = Some("Thinking".to_string());
             buffer.activity.current_activity = "Thinking...".to_string();
         }
+    }
+
+    /// Mark a session as ready (Claude finished responding).
+    pub async fn mark_ready(&self, session_id: Uuid) {
+        tracing::info!("[STATUS] mark_ready called for session {}", session_id);
+        let mut buffers = self.buffers.write().await;
+        if let Some(buffer) = buffers.get_mut(&session_id) {
+            buffer.activity.is_busy = false;
+            buffer.activity.busy_since = None;
+            buffer.activity.saw_activity_since_busy = false;
+            buffer.activity.current_step = Some("Ready".to_string());
+            buffer.activity.current_activity = "Ready".to_string();
+        }
+    }
+
+    /// Initialize a session buffer with Ready state.
+    /// Called when a new session starts to ensure it shows "Ready" immediately.
+    pub async fn initialize_session(&self, session_id: Uuid) -> SessionActivity {
+        tracing::info!("[STATUS] initialize_session called for session {}", session_id);
+        let mut buffers = self.buffers.write().await;
+        let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
+
+        // Set initial "Ready" state
+        buffer.activity.current_step = Some("Ready".to_string());
+        buffer.activity.current_activity = "Ready".to_string();
+        buffer.activity.is_busy = false;
+        buffer.activity.busy_since = None;
+        buffer.activity.last_update = std::time::Instant::now();
+
+        buffer.activity.clone()
+    }
+
+    /// Update activity from a hook event. This is the authoritative source for activity state.
+    /// Returns the updated activity if successful.
+    pub async fn update_from_hook(
+        &self,
+        session_id: Uuid,
+        current_activity: String,
+        current_step: Option<String>,
+        new_action: Option<RecentAction>,
+        is_busy: bool,
+    ) -> Option<SessionActivity> {
+        let mut buffers = self.buffers.write().await;
+        let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
+
+        // Update activity state
+        buffer.activity.current_activity = current_activity;
+        buffer.activity.current_step = current_step.clone();
+        buffer.activity.is_busy = is_busy;
+        buffer.activity.last_update = std::time::Instant::now();
+
+        // Track that we've seen activity if we're busy and this is a tool use
+        if is_busy && current_step.as_ref().map(|s| s != "Thinking" && s != "Ready").unwrap_or(false) {
+            buffer.activity.saw_activity_since_busy = true;
+            buffer.activity.last_activity_indicator = std::time::Instant::now();
+            buffer.activity.bytes_since_activity = 0;
+        }
+
+        // Update busy tracking
+        if is_busy && buffer.activity.busy_since.is_none() {
+            buffer.activity.busy_since = Some(std::time::Instant::now());
+        } else if !is_busy {
+            buffer.activity.busy_since = None;
+            buffer.activity.saw_activity_since_busy = false;
+        }
+
+        // Add new action if provided
+        if let Some(action) = new_action {
+            // Deduplicate - don't add if we already have this exact action recently
+            let already_exists = buffer.activity.recent_actions.iter().any(|a| {
+                a.action_type == action.action_type && a.summary == action.summary
+            });
+
+            if !already_exists {
+                buffer.activity.recent_actions.push(action);
+                while buffer.activity.recent_actions.len() > MAX_RECENT_ACTIONS {
+                    buffer.activity.recent_actions.remove(0);
+                }
+            }
+        }
+
+        tracing::debug!(
+            "[HOOK] Updated activity for session {}: step={:?}, busy={}, actions={}",
+            session_id,
+            buffer.activity.current_step,
+            buffer.activity.is_busy,
+            buffer.activity.recent_actions.len()
+        );
+
+        Some(buffer.activity.clone())
     }
 }
 

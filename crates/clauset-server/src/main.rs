@@ -79,6 +79,7 @@ async fn main() -> Result<()> {
         .route("/sessions/{id}/input", post(routes::sessions::send_input))
         .route("/history", get(routes::history::list))
         .route("/projects", get(routes::projects::list))
+        .route("/hooks", post(routes::hooks::receive))
         .route("/health", get(routes::health));
 
     let ws_routes = Router::new()

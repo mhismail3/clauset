@@ -1,0 +1,431 @@
+//! Types for Claude Code hook events.
+//!
+//! These types represent the structured data sent by Claude Code hooks
+//! to the Clauset dashboard for real-time activity tracking.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
+
+/// Payload received from Claude Code hooks via HTTP POST.
+///
+/// The hook script adds `clauset_session_id` to the original Claude payload.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct HookEventPayload {
+    /// Clauset's internal session UUID (added by hook script)
+    pub clauset_session_id: Uuid,
+
+    /// Claude's session ID (from the hook event)
+    pub session_id: String,
+
+    /// The type of hook event
+    pub hook_event_name: String,
+
+    /// Current working directory
+    #[serde(default)]
+    pub cwd: Option<String>,
+
+    /// Path to the transcript file
+    #[serde(default)]
+    pub transcript_path: Option<String>,
+
+    /// Permission mode (default, plan, acceptEdits, bypassPermissions)
+    #[serde(default)]
+    pub permission_mode: Option<String>,
+
+    // Tool-related fields (PreToolUse, PostToolUse)
+
+    /// Name of the tool being used (Read, Write, Bash, etc.)
+    #[serde(default)]
+    pub tool_name: Option<String>,
+
+    /// Tool input parameters (file_path, command, etc.)
+    #[serde(default)]
+    pub tool_input: Option<Value>,
+
+    /// Tool response/output (PostToolUse only)
+    #[serde(default)]
+    pub tool_response: Option<Value>,
+
+    /// Unique identifier for this tool use
+    #[serde(default)]
+    pub tool_use_id: Option<String>,
+
+    // UserPromptSubmit fields
+
+    /// The user's prompt text
+    #[serde(default)]
+    pub prompt: Option<String>,
+
+    // SessionStart fields
+
+    /// Session start source (startup, resume, clear, compact)
+    #[serde(default)]
+    pub source: Option<String>,
+
+    // SessionEnd fields
+
+    /// Session end reason (clear, logout, prompt_input_exit, other)
+    #[serde(default)]
+    pub reason: Option<String>,
+
+    // Stop/SubagentStop fields
+
+    /// Whether the stop hook is continuing (for chained hooks)
+    #[serde(default)]
+    pub stop_hook_active: Option<bool>,
+
+    // Notification fields
+
+    /// Notification message content
+    #[serde(default)]
+    pub message: Option<String>,
+
+    /// Type of notification
+    #[serde(default)]
+    pub notification_type: Option<String>,
+}
+
+/// Enumeration of Claude Code hook event types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum HookEventType {
+    /// Session started (new or resumed)
+    SessionStart,
+    /// Session ended
+    SessionEnd,
+    /// User submitted a prompt
+    UserPromptSubmit,
+    /// Before a tool is executed
+    PreToolUse,
+    /// After a tool completes
+    PostToolUse,
+    /// Claude finished responding
+    Stop,
+    /// Subagent (Task tool) finished
+    SubagentStop,
+    /// System notification
+    Notification,
+    /// Before context compaction
+    PreCompact,
+    /// Permission dialog shown
+    PermissionRequest,
+}
+
+impl HookEventType {
+    /// Parse event type from string.
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "SessionStart" => Some(Self::SessionStart),
+            "SessionEnd" => Some(Self::SessionEnd),
+            "UserPromptSubmit" => Some(Self::UserPromptSubmit),
+            "PreToolUse" => Some(Self::PreToolUse),
+            "PostToolUse" => Some(Self::PostToolUse),
+            "Stop" => Some(Self::Stop),
+            "SubagentStop" => Some(Self::SubagentStop),
+            "Notification" => Some(Self::Notification),
+            "PreCompact" => Some(Self::PreCompact),
+            "PermissionRequest" => Some(Self::PermissionRequest),
+            _ => None,
+        }
+    }
+}
+
+/// Processed hook event for internal use.
+///
+/// This is a more structured representation after parsing the raw payload.
+#[derive(Debug, Clone)]
+pub enum HookEvent {
+    /// Session started
+    SessionStart {
+        session_id: Uuid,
+        claude_session_id: String,
+        source: String,
+        cwd: Option<String>,
+    },
+
+    /// Session ended
+    SessionEnd {
+        session_id: Uuid,
+        claude_session_id: String,
+        reason: String,
+    },
+
+    /// User submitted a prompt
+    UserPromptSubmit {
+        session_id: Uuid,
+        claude_session_id: String,
+        prompt: String,
+    },
+
+    /// Tool is about to execute
+    PreToolUse {
+        session_id: Uuid,
+        claude_session_id: String,
+        tool_name: String,
+        tool_input: Value,
+        tool_use_id: String,
+    },
+
+    /// Tool finished executing
+    PostToolUse {
+        session_id: Uuid,
+        claude_session_id: String,
+        tool_name: String,
+        tool_input: Value,
+        tool_response: Value,
+        tool_use_id: String,
+    },
+
+    /// Claude finished responding
+    Stop {
+        session_id: Uuid,
+        claude_session_id: String,
+        stop_hook_active: bool,
+    },
+
+    /// Subagent finished
+    SubagentStop {
+        session_id: Uuid,
+        claude_session_id: String,
+        stop_hook_active: bool,
+    },
+
+    /// System notification
+    Notification {
+        session_id: Uuid,
+        claude_session_id: String,
+        message: String,
+        notification_type: String,
+    },
+
+    /// Context compaction starting
+    PreCompact {
+        session_id: Uuid,
+        claude_session_id: String,
+    },
+}
+
+impl TryFrom<HookEventPayload> for HookEvent {
+    type Error = &'static str;
+
+    fn try_from(p: HookEventPayload) -> Result<Self, Self::Error> {
+        let session_id = p.clauset_session_id;
+        let claude_session_id = p.session_id;
+
+        match p.hook_event_name.as_str() {
+            "SessionStart" => Ok(HookEvent::SessionStart {
+                session_id,
+                claude_session_id,
+                source: p.source.unwrap_or_else(|| "startup".to_string()),
+                cwd: p.cwd,
+            }),
+
+            "SessionEnd" => Ok(HookEvent::SessionEnd {
+                session_id,
+                claude_session_id,
+                reason: p.reason.unwrap_or_else(|| "unknown".to_string()),
+            }),
+
+            "UserPromptSubmit" => Ok(HookEvent::UserPromptSubmit {
+                session_id,
+                claude_session_id,
+                prompt: p.prompt.unwrap_or_default(),
+            }),
+
+            "PreToolUse" => Ok(HookEvent::PreToolUse {
+                session_id,
+                claude_session_id,
+                tool_name: p.tool_name.ok_or("missing tool_name")?,
+                tool_input: p.tool_input.unwrap_or(Value::Null),
+                tool_use_id: p.tool_use_id.unwrap_or_default(),
+            }),
+
+            "PostToolUse" => Ok(HookEvent::PostToolUse {
+                session_id,
+                claude_session_id,
+                tool_name: p.tool_name.ok_or("missing tool_name")?,
+                tool_input: p.tool_input.unwrap_or(Value::Null),
+                tool_response: p.tool_response.unwrap_or(Value::Null),
+                tool_use_id: p.tool_use_id.unwrap_or_default(),
+            }),
+
+            "Stop" => Ok(HookEvent::Stop {
+                session_id,
+                claude_session_id,
+                stop_hook_active: p.stop_hook_active.unwrap_or(false),
+            }),
+
+            "SubagentStop" => Ok(HookEvent::SubagentStop {
+                session_id,
+                claude_session_id,
+                stop_hook_active: p.stop_hook_active.unwrap_or(false),
+            }),
+
+            "Notification" => Ok(HookEvent::Notification {
+                session_id,
+                claude_session_id,
+                message: p.message.unwrap_or_default(),
+                notification_type: p.notification_type.unwrap_or_default(),
+            }),
+
+            "PreCompact" => Ok(HookEvent::PreCompact {
+                session_id,
+                claude_session_id,
+            }),
+
+            _ => Err("unknown hook event type"),
+        }
+    }
+}
+
+/// Activity update derived from a hook event.
+///
+/// This is what gets passed to the session buffer for updating activity state.
+#[derive(Debug, Clone)]
+pub struct HookActivityUpdate {
+    /// The type of event
+    pub event_type: HookEventType,
+    /// Tool name (for PreToolUse/PostToolUse)
+    pub tool_name: Option<String>,
+    /// Tool input (for PreToolUse/PostToolUse)
+    pub tool_input: Option<Value>,
+    /// Tool response (for PostToolUse)
+    pub tool_response: Option<Value>,
+    /// Whether this is an error (from tool_response)
+    pub is_error: bool,
+}
+
+impl HookActivityUpdate {
+    /// Create an update from a PreToolUse event.
+    pub fn pre_tool_use(tool_name: String, tool_input: Value) -> Self {
+        Self {
+            event_type: HookEventType::PreToolUse,
+            tool_name: Some(tool_name),
+            tool_input: Some(tool_input),
+            tool_response: None,
+            is_error: false,
+        }
+    }
+
+    /// Create an update from a PostToolUse event.
+    pub fn post_tool_use(tool_name: String, tool_input: Value, tool_response: Value) -> Self {
+        // Check if response indicates an error
+        let is_error = tool_response.get("error").is_some()
+            || tool_response
+                .get("is_error")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+        Self {
+            event_type: HookEventType::PostToolUse,
+            tool_name: Some(tool_name),
+            tool_input: Some(tool_input),
+            tool_response: Some(tool_response),
+            is_error,
+        }
+    }
+
+    /// Create an update for UserPromptSubmit (user sent input, Claude thinking).
+    pub fn user_prompt_submit() -> Self {
+        Self {
+            event_type: HookEventType::UserPromptSubmit,
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            is_error: false,
+        }
+    }
+
+    /// Create an update for Stop (Claude finished responding).
+    pub fn stop() -> Self {
+        Self {
+            event_type: HookEventType::Stop,
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            is_error: false,
+        }
+    }
+
+    /// Create an update for SessionEnd.
+    pub fn session_end() -> Self {
+        Self {
+            event_type: HookEventType::SessionEnd,
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            is_error: false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_pre_tool_use() {
+        let payload = HookEventPayload {
+            clauset_session_id: Uuid::new_v4(),
+            session_id: "test-session".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: Some("Read".to_string()),
+            tool_input: Some(serde_json::json!({"file_path": "/test/file.rs"})),
+            tool_use_id: Some("toolu_123".to_string()),
+            ..Default::default()
+        };
+
+        let event = HookEvent::try_from(payload).unwrap();
+        match event {
+            HookEvent::PreToolUse { tool_name, .. } => {
+                assert_eq!(tool_name, "Read");
+            }
+            _ => panic!("Expected PreToolUse event"),
+        }
+    }
+
+    #[test]
+    fn test_parse_stop() {
+        let payload = HookEventPayload {
+            clauset_session_id: Uuid::new_v4(),
+            session_id: "test-session".to_string(),
+            hook_event_name: "Stop".to_string(),
+            stop_hook_active: Some(false),
+            ..Default::default()
+        };
+
+        let event = HookEvent::try_from(payload).unwrap();
+        match event {
+            HookEvent::Stop {
+                stop_hook_active, ..
+            } => {
+                assert!(!stop_hook_active);
+            }
+            _ => panic!("Expected Stop event"),
+        }
+    }
+}
+
+impl Default for HookEventPayload {
+    fn default() -> Self {
+        Self {
+            clauset_session_id: Uuid::nil(),
+            session_id: String::new(),
+            hook_event_name: String::new(),
+            cwd: None,
+            transcript_path: None,
+            permission_mode: None,
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            tool_use_id: None,
+            prompt: None,
+            source: None,
+            reason: None,
+            stop_hook_active: None,
+            message: None,
+            notification_type: None,
+        }
+    }
+}

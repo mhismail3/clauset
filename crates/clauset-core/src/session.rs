@@ -180,6 +180,9 @@ impl SessionManager {
         // Update status to active
         self.db.update_status(session_id, SessionStatus::Active)?;
 
+        // Initialize activity buffer with "Ready" state and broadcast
+        self.initialize_session_activity(session_id).await;
+
         info!("Session {} started successfully", session_id);
         Ok(())
     }
@@ -215,6 +218,9 @@ impl SessionManager {
 
         // Update status to active
         self.db.update_status(session_id, SessionStatus::Active)?;
+
+        // Initialize activity buffer with "Ready" state and broadcast
+        self.initialize_session_activity(session_id).await;
 
         Ok(())
     }
@@ -408,6 +414,62 @@ impl SessionManager {
 
         // Broadcast activity update so dashboard shows "Thinking" immediately
         if let Some(activity) = self.buffers.get_activity(session_id).await {
+            let _ = self.event_tx.send(ProcessEvent::ActivityUpdate {
+                session_id,
+                model: activity.model,
+                cost: activity.cost,
+                input_tokens: activity.input_tokens,
+                output_tokens: activity.output_tokens,
+                context_percent: activity.context_percent,
+                current_activity: activity.current_activity,
+                current_step: activity.current_step,
+                recent_actions: activity.recent_actions,
+            });
+        }
+    }
+
+    /// Mark a session as ready (Claude finished responding).
+    pub async fn mark_session_ready(&self, session_id: Uuid) {
+        self.buffers.mark_ready(session_id).await;
+    }
+
+    /// Initialize a session's activity buffer and broadcast initial "Ready" state.
+    /// Should be called when a session starts to ensure the dashboard shows "Ready".
+    pub async fn initialize_session_activity(&self, session_id: Uuid) {
+        let activity = self.buffers.initialize_session(session_id).await;
+
+        // Broadcast initial activity so dashboard shows "Ready" immediately
+        let _ = self.event_tx.send(ProcessEvent::ActivityUpdate {
+            session_id,
+            model: activity.model,
+            cost: activity.cost,
+            input_tokens: activity.input_tokens,
+            output_tokens: activity.output_tokens,
+            context_percent: activity.context_percent,
+            current_activity: activity.current_activity,
+            current_step: activity.current_step,
+            recent_actions: activity.recent_actions,
+        });
+    }
+
+    /// Update session activity from hook event data.
+    /// This updates the internal state and broadcasts to WebSocket clients.
+    pub async fn update_activity_from_hook(
+        &self,
+        session_id: Uuid,
+        current_activity: String,
+        current_step: Option<String>,
+        new_action: Option<crate::RecentAction>,
+        is_busy: bool,
+    ) {
+        if let Some(activity) = self.buffers.update_from_hook(
+            session_id,
+            current_activity,
+            current_step,
+            new_action,
+            is_busy,
+        ).await {
+            // Broadcast the updated activity
             let _ = self.event_tx.send(ProcessEvent::ActivityUpdate {
                 session_id,
                 model: activity.model,
