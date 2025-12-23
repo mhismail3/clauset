@@ -7,7 +7,7 @@ import { MessageBubble } from '../components/chat/MessageBubble';
 import { InputBar } from '../components/chat/InputBar';
 import { TerminalView } from '../components/terminal/TerminalView';
 import { api, Session } from '../lib/api';
-import { createWebSocketManager, WsMessage } from '../lib/ws';
+import { createWebSocketManager, WsMessage, SyncResponse } from '../lib/ws';
 import {
   getMessagesForSession,
   addMessage,
@@ -81,7 +81,7 @@ export default function SessionPage() {
   let outputBuffer = '';
   let lastStatus: StatusInfo | null = null;
   let statusUpdateTimer: number | null = null;
-  let bufferRequested = false; // Track if we've requested terminal buffer after resize
+  let terminalDimensions: { cols: number; rows: number } | null = null;
 
   function scrollToBottom() {
     messagesEndRef?.scrollIntoView({ behavior: 'smooth' });
@@ -95,6 +95,106 @@ export default function SessionPage() {
       setError(e instanceof Error ? e.message : 'Failed to load session');
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Handle terminal data from reliable streaming protocol
+  function handleTerminalData(bytes: Uint8Array) {
+    const sessionId = params.id;
+    appendTerminalOutput(sessionId, bytes);
+
+    if (terminalWriteFn) {
+      terminalWriteFn(bytes);
+    } else {
+      // Queue data (capped to prevent OOM if terminal takes too long to mount)
+      setTerminalData((prev) => {
+        if (prev.length >= MAX_TERMINAL_QUEUE_CHUNKS) {
+          return [...prev.slice(-MAX_TERMINAL_QUEUE_CHUNKS + 1), bytes];
+        }
+        return [...prev, bytes];
+      });
+    }
+
+    // Try to parse status line from output
+    const text = new TextDecoder().decode(bytes);
+    outputBuffer += text;
+    // Keep buffer size manageable (last 2KB)
+    if (outputBuffer.length > 2000) {
+      outputBuffer = outputBuffer.slice(-1500);
+    }
+
+    const status = parseStatusLine(outputBuffer);
+    if (status) {
+      // Check if status changed significantly
+      const changed = !lastStatus ||
+        lastStatus.model !== status.model ||
+        Math.abs(lastStatus.cost - status.cost) > 0.001 ||
+        lastStatus.inputTokens !== status.inputTokens ||
+        lastStatus.outputTokens !== status.outputTokens ||
+        lastStatus.contextPercent !== status.contextPercent;
+
+      if (changed) {
+        lastStatus = status;
+
+        // Immediately update local session state for responsive UI
+        const currentSession = session();
+        if (currentSession) {
+          setSession({
+            ...currentSession,
+            model: status.model,
+            total_cost_usd: status.cost,
+            input_tokens: status.inputTokens,
+            output_tokens: status.outputTokens,
+            context_percent: status.contextPercent,
+          });
+        }
+
+        // Debounce backend updates (send at most every 2 seconds)
+        if (statusUpdateTimer) {
+          clearTimeout(statusUpdateTimer);
+        }
+        statusUpdateTimer = window.setTimeout(() => {
+          if (wsManager && wsState() === 'connected') {
+            wsManager.send({
+              type: 'status_update',
+              model: status.model,
+              cost: status.cost,
+              input_tokens: status.inputTokens,
+              output_tokens: status.outputTokens,
+              context_percent: status.contextPercent,
+            });
+          }
+          statusUpdateTimer = null;
+        }, 2000);
+      }
+    }
+  }
+
+  // Handle sync response from reliable streaming protocol
+  function handleSyncResponse(response: SyncResponse) {
+    // Clear localStorage for this session since server buffer is source of truth
+    clearTerminalHistory(params.id);
+
+    // The terminal data is already written by the ws manager's onTerminalData callback
+    // Just update the output buffer for status parsing
+    if (response.full_buffer && response.full_buffer.length > 0) {
+      const text = new TextDecoder().decode(new Uint8Array(response.full_buffer));
+      outputBuffer = text.slice(-2000); // Keep last 2KB for status parsing
+      const status = parseStatusLine(outputBuffer);
+      if (status) {
+        lastStatus = status;
+        const currentSession = session();
+        if (currentSession) {
+          setSession({
+            ...currentSession,
+            model: status.model,
+            total_cost_usd: status.cost,
+            input_tokens: status.inputTokens,
+            output_tokens: status.outputTokens,
+            context_percent: status.contextPercent,
+          });
+        }
+      }
     }
   }
 
@@ -153,8 +253,8 @@ export default function SessionPage() {
         break;
       }
       case 'terminal_buffer': {
-        // Server sends buffered terminal output on reconnect for replay
-        // This is the source of truth - replaces any localStorage data
+        // DEPRECATED: Legacy message type. Server now uses sync_response via reliable streaming.
+        // Kept for backward compatibility during transition.
         const { data } = msg as { data: number[] };
         const bytes = new Uint8Array(data);
 
@@ -196,6 +296,8 @@ export default function SessionPage() {
         break;
       }
       case 'terminal_output': {
+        // DEPRECATED: Legacy message type. Server now uses terminal_chunk via reliable streaming.
+        // Kept for backward compatibility during transition.
         const { data } = msg as { data: number[] };
         const bytes = new Uint8Array(data);
         appendTerminalOutput(sessionId, bytes);
@@ -336,20 +438,18 @@ export default function SessionPage() {
   }
 
   function handleTerminalResize(cols: number, rows: number) {
-    if (wsManager && wsState() === 'connected') {
-      wsManager.send({ type: 'resize', cols, rows });
+    // Store dimensions for sync requests
+    terminalDimensions = { cols, rows };
 
-      // After the first resize, request the terminal buffer
-      // The server will send the buffer formatted for the correct terminal size
-      if (!bufferRequested) {
-        bufferRequested = true;
-        // Small delay to let server process resize first
-        setTimeout(() => {
-          if (wsManager && wsState() === 'connected') {
-            wsManager.send({ type: 'request_buffer' });
-          }
-        }, 50);
-      }
+    // Update ws manager's terminal dimensions
+    if (wsManager) {
+      wsManager.setTerminalDimensions(cols, rows);
+    }
+
+    // If connected, request resync with new dimensions
+    // The reliable streaming protocol handles buffer replay via SyncRequest
+    if (wsManager && wsState() === 'connected') {
+      wsManager.requestResync();
     }
   }
 
@@ -378,7 +478,16 @@ export default function SessionPage() {
       url: `/ws/sessions/${params.id}`,
       onMessage: handleWsMessage,
       onStateChange: setWsState,
+      // Reliable streaming protocol callbacks
+      onTerminalData: handleTerminalData,
+      onSyncResponse: handleSyncResponse,
     });
+
+    // Set initial terminal dimensions if known
+    if (terminalDimensions) {
+      wsManager.setTerminalDimensions(terminalDimensions.cols, terminalDimensions.rows);
+    }
+
     wsManager.connect();
   });
 

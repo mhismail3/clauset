@@ -8,7 +8,7 @@ mod parser;
 mod process;
 mod session;
 
-pub use buffer::{RecentAction, SessionActivity, SessionBuffers};
+pub use buffer::{AppendResult, RecentAction, SequencedChunk, SessionActivity, SessionBuffers};
 pub use db::SessionStore;
 pub use error::ClausetError;
 pub use history::HistoryWatcher;

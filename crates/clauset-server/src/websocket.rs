@@ -26,8 +26,11 @@ pub async fn handle_websocket(
     // Subscribe to session events
     let mut event_rx = state.session_manager.subscribe();
 
-    // Channel for recv_task to request buffer sends
+    // Channel for recv_task to request buffer sends (legacy)
     let (buffer_tx, mut buffer_rx) = tokio::sync::mpsc::channel::<()>(1);
+
+    // Channel for recv_task to send outgoing messages (for sync responses, chunk batches, etc.)
+    let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel::<WsServerMessage>(32);
 
     // Get initial session state and send init message
     if let Ok(Some(session)) = state.session_manager.get_session(session_id) {
@@ -52,7 +55,16 @@ pub async fn handle_websocket(
     let mut send_task = tokio::spawn(async move {
         loop {
             tokio::select! {
-                // Handle buffer request from recv_task
+                // Handle outgoing messages from recv_task (sync responses, chunk batches, etc.)
+                Some(msg) = outgoing_rx.recv() => {
+                    if let Ok(json) = serde_json::to_string(&msg) {
+                        if let Err(e) = ws_tx.send(Message::Text(json.into())).await {
+                            debug!(target: "clauset::ws", "WebSocket send failed for session {}: {}", session_id, e);
+                            break;
+                        }
+                    }
+                }
+                // Handle buffer request from recv_task (legacy)
                 Some(()) = buffer_rx.recv() => {
                     // Send terminal buffer if available
                     if let Some(buffer) = state_clone.session_manager.get_terminal_buffer(session_id).await {
@@ -138,9 +150,18 @@ pub async fn handle_websocket(
                                 clauset_types::ClaudeEvent::User(_) => None,
                             }
                         }
-                        ProcessEvent::TerminalOutput { session_id: sid, data } if *sid == session_id => {
-                            // Just forward to client - buffering is done by background event processor
-                            Some(WsServerMessage::TerminalOutput { data: data.clone() })
+                        ProcessEvent::TerminalOutput { .. } => {
+                            // DEPRECATED: Raw TerminalOutput events are converted to SequencedTerminalOutput
+                            // by the event processor. We handle SequencedTerminalOutput instead.
+                            None
+                        }
+                        ProcessEvent::SequencedTerminalOutput { session_id: sid, seq, data, timestamp } if *sid == session_id => {
+                            // Send sequenced chunk for reliable streaming protocol
+                            Some(WsServerMessage::TerminalChunk {
+                                seq: *seq,
+                                data: data.clone(),
+                                timestamp: *timestamp,
+                            })
                         }
                         ProcessEvent::ActivityUpdate {
                             session_id: sid,
@@ -216,6 +237,7 @@ pub async fn handle_websocket(
 
     // Handle incoming messages
     let state_clone = state.clone();
+    let outgoing_tx_clone = outgoing_tx;
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = ws_rx.next().await {
             if let Message::Text(text) = msg {
@@ -302,6 +324,86 @@ pub async fn handle_websocket(
                                 output_tokens,
                                 context_percent,
                             );
+                        }
+
+                        // === Reliable Streaming Protocol (Phase 1.3) ===
+                        WsClientMessage::SyncRequest { last_seq, cols, rows } => {
+                            debug!(target: "clauset::ws", "SyncRequest: session={}, last_seq={}, cols={}, rows={}", session_id, last_seq, cols, rows);
+
+                            // Resize terminal to match client dimensions
+                            let _ = state_clone
+                                .session_manager
+                                .resize_terminal(session_id, rows, cols)
+                                .await;
+
+                            // Get buffer info to determine what the client needs
+                            let buffers = state_clone.session_manager.buffers();
+                            let (buffer_start_seq, buffer_end_seq, full_buffer) = if let Some((start, end, data)) = buffers.get_full_buffer(session_id).await {
+                                // Client needs full buffer if:
+                                // - Fresh connection (last_seq == 0)
+                                // - Client is behind the buffer start (missed too many chunks)
+                                let needs_full = last_seq == 0 || last_seq < start;
+                                if needs_full {
+                                    debug!(target: "clauset::ws", "SyncResponse: sending full buffer ({} bytes, seq {}..{})", data.len(), start, end);
+                                    (start, end, Some(data))
+                                } else {
+                                    debug!(target: "clauset::ws", "SyncResponse: client up to date (last_seq={}, buffer {}..{})", last_seq, start, end);
+                                    (start, end, None)
+                                }
+                            } else {
+                                // No buffer yet - fresh session
+                                debug!(target: "clauset::ws", "SyncResponse: no buffer yet for session {}", session_id);
+                                (0, 0, None)
+                            };
+
+                            // Send SyncResponse
+                            let response = WsServerMessage::SyncResponse {
+                                buffer_start_seq,
+                                buffer_end_seq,
+                                cols,
+                                rows,
+                                full_buffer,
+                                full_buffer_start_seq: if buffer_start_seq > 0 { Some(buffer_start_seq) } else { None },
+                            };
+                            let _ = outgoing_tx_clone.send(response).await;
+                        }
+                        WsClientMessage::Ack { ack_seq } => {
+                            // Track client acknowledgment for flow control
+                            // Future: pause sending if client falls too far behind
+                            tracing::trace!(target: "clauset::ws", "Ack: session={}, seq={}", session_id, ack_seq);
+                        }
+                        WsClientMessage::RangeRequest { start_seq, end_seq } => {
+                            debug!(target: "clauset::ws", "RangeRequest: session={}, range={}..{}", session_id, start_seq, end_seq);
+
+                            // Fetch requested chunks from buffer
+                            let buffers = state_clone.session_manager.buffers();
+                            if let Some(chunks) = buffers.get_chunk_range(session_id, start_seq, end_seq).await {
+                                if !chunks.is_empty() {
+                                    // Concatenate chunk data for batch response
+                                    let data: Vec<u8> = chunks.iter().flat_map(|c| c.data.clone()).collect();
+                                    let chunk_count = chunks.len() as u32;
+                                    debug!(target: "clauset::ws", "ChunkBatch: sending {} chunks ({} bytes)", chunk_count, data.len());
+
+                                    let batch = WsServerMessage::ChunkBatch {
+                                        start_seq,
+                                        data,
+                                        chunk_count,
+                                        is_complete: true,
+                                    };
+                                    let _ = outgoing_tx_clone.send(batch).await;
+                                } else {
+                                    // Requested range not available (buffer may have overflowed)
+                                    debug!(target: "clauset::ws", "RangeRequest: no chunks in range {}..{}", start_seq, end_seq);
+                                    // Notify client they need to resync
+                                    if let Some((new_start, _)) = buffers.get_buffer_info(session_id).await {
+                                        let overflow = WsServerMessage::BufferOverflow {
+                                            new_start_seq: new_start,
+                                            requires_resync: true,
+                                        };
+                                        let _ = outgoing_tx_clone.send(overflow).await;
+                                    }
+                                }
+                            }
                         }
                     }
                 }

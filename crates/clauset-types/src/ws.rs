@@ -23,6 +23,7 @@ pub enum WsClientMessage {
     /// Request current session state.
     GetState,
     /// Request terminal buffer (after resize).
+    /// DEPRECATED: Use SyncRequest instead for reliable streaming.
     RequestBuffer,
     /// Update session stats from parsed status line.
     StatusUpdate {
@@ -31,6 +32,32 @@ pub enum WsClientMessage {
         input_tokens: u64,
         output_tokens: u64,
         context_percent: u8,
+    },
+
+    // === Reliable Streaming Protocol Messages ===
+
+    /// Request synchronization on connect/reconnect.
+    /// Client sends this after connection to sync state and request missed data.
+    SyncRequest {
+        /// Last sequence number the client received (0 if fresh connection)
+        last_seq: u64,
+        /// Current terminal dimensions
+        cols: u16,
+        rows: u16,
+    },
+    /// Acknowledge receipt of terminal chunks.
+    /// Client sends this to confirm it has received all data up to ack_seq.
+    Ack {
+        /// Highest contiguous sequence number received
+        ack_seq: u64,
+    },
+    /// Request a specific range of chunks (for gap recovery).
+    /// Client sends this when it detects missing sequence numbers.
+    RangeRequest {
+        /// First sequence number needed (inclusive)
+        start_seq: u64,
+        /// Last sequence number needed (inclusive)
+        end_seq: u64,
     },
 }
 
@@ -77,9 +104,59 @@ pub enum WsServerMessage {
         usage: Option<ResultUsage>,
     },
     /// Raw terminal output (PTY mode).
+    /// DEPRECATED: Use TerminalChunk instead for reliable streaming.
     TerminalOutput { data: Vec<u8> },
     /// Terminal buffer for replay on reconnect.
+    /// DEPRECATED: Use SyncResponse instead for reliable streaming.
     TerminalBuffer { data: Vec<u8> },
+
+    // === Reliable Streaming Protocol Messages ===
+
+    /// Sequenced terminal output chunk.
+    /// Each chunk has a monotonically increasing sequence number for ordering and gap detection.
+    TerminalChunk {
+        /// Monotonically increasing sequence number (per session)
+        seq: u64,
+        /// Terminal data (raw bytes including ANSI codes)
+        data: Vec<u8>,
+        /// Timestamp when chunk was captured (ms since Unix epoch)
+        timestamp: u64,
+    },
+    /// Response to client's SyncRequest on connect/reconnect.
+    /// Tells client the server's buffer state and optionally includes full buffer.
+    SyncResponse {
+        /// Sequence number of oldest available chunk in server buffer
+        buffer_start_seq: u64,
+        /// Sequence number of most recent chunk
+        buffer_end_seq: u64,
+        /// Current terminal dimensions (confirmed after resize)
+        cols: u16,
+        rows: u16,
+        /// If client is too far behind or fresh connect, contains full buffer data
+        full_buffer: Option<Vec<u8>>,
+        /// Starting sequence number of full_buffer (if provided)
+        full_buffer_start_seq: Option<u64>,
+    },
+    /// Batch of chunks sent in response to RangeRequest (gap recovery).
+    ChunkBatch {
+        /// Starting sequence number of this batch
+        start_seq: u64,
+        /// Concatenated chunk data
+        data: Vec<u8>,
+        /// Number of chunks in this batch
+        chunk_count: u32,
+        /// True if this is the last batch for the RangeRequest
+        is_complete: bool,
+    },
+    /// Notification that server buffer has overflowed.
+    /// Client should request full resync if their state is too far behind.
+    BufferOverflow {
+        /// New oldest available sequence number
+        new_start_seq: u64,
+        /// True if client needs to resync (their ack_seq < new_start_seq)
+        requires_resync: bool,
+    },
+
     /// Session status changed.
     StatusChange {
         session_id: Uuid,

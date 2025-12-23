@@ -20,7 +20,19 @@ pub enum ProcessEvent {
     /// Claude event from stream-json mode.
     Claude(ClaudeEvent),
     /// Raw terminal output from PTY mode.
+    /// DEPRECATED: Use SequencedTerminalOutput for reliable streaming.
     TerminalOutput { session_id: Uuid, data: Vec<u8> },
+    /// Sequenced terminal output for reliable streaming protocol.
+    /// Each chunk has a monotonically increasing sequence number for ordering and gap detection.
+    SequencedTerminalOutput {
+        session_id: Uuid,
+        /// Monotonically increasing sequence number (per session)
+        seq: u64,
+        /// Terminal data (raw bytes including ANSI codes)
+        data: Vec<u8>,
+        /// Timestamp when chunk was captured (ms since Unix epoch)
+        timestamp: u64,
+    },
     /// Process has exited.
     Exited { session_id: Uuid, exit_code: Option<i32> },
     /// Error occurred.

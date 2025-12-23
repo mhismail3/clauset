@@ -1,6 +1,6 @@
 //! Session manager orchestrating processes and persistence.
 
-use crate::{ClausetError, ProcessEvent, ProcessManager, Result, SessionActivity, SessionBuffers, SessionStore, SpawnOptions};
+use crate::{AppendResult, ClausetError, ProcessEvent, ProcessManager, Result, SessionActivity, SessionBuffers, SessionStore, SpawnOptions};
 use clauset_types::{Session, SessionMode, SessionStatus, SessionSummary};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -405,9 +405,9 @@ impl SessionManager {
     }
 
     /// Append terminal output to session buffer and parse for activity.
-    /// Returns Some(activity) if the activity changed.
-    pub async fn append_terminal_output(&self, session_id: Uuid, data: &[u8]) -> Option<SessionActivity> {
-        let activity = self.buffers.append(session_id, data).await;
+    /// Returns (AppendResult, Option<SessionActivity>) where activity is Some if it changed.
+    pub async fn append_terminal_output(&self, session_id: Uuid, data: &[u8]) -> (AppendResult, Option<SessionActivity>) {
+        let (append_result, activity) = self.buffers.append(session_id, data).await;
 
         // If activity changed, update the database with new stats
         if let Some(ref act) = activity {
@@ -431,7 +431,7 @@ impl SessionManager {
             }
         }
 
-        activity
+        (append_result, activity)
     }
 
     /// Get the terminal buffer for a session (for replay on reconnect).

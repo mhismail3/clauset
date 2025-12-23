@@ -1,7 +1,13 @@
 //! Terminal output buffering and activity tracking.
+//!
+//! This module provides reliable terminal streaming with:
+//! - Sequenced chunks for ordered delivery and gap detection
+//! - Ring buffer eviction with sequence tracking
+//! - Activity parsing from terminal output
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use tokio::sync::RwLock;
@@ -12,6 +18,172 @@ const MAX_BUFFER_SIZE: usize = 500 * 1024;
 
 /// Maximum number of recent actions to track
 const MAX_RECENT_ACTIONS: usize = 5;
+
+// ============================================================================
+// Reliable Streaming Types
+// ============================================================================
+
+/// A single sequenced chunk of terminal output.
+#[derive(Debug, Clone)]
+pub struct SequencedChunk {
+    /// Monotonically increasing sequence number
+    pub seq: u64,
+    /// Terminal data (raw bytes including ANSI codes)
+    pub data: Vec<u8>,
+    /// Timestamp when chunk was captured (ms since Unix epoch)
+    pub timestamp: u64,
+}
+
+/// Ring buffer that maintains sequence numbers for reliable streaming.
+///
+/// Features:
+/// - Automatic sequence number assignment
+/// - Bounded memory with oldest chunk eviction
+/// - Range queries for gap recovery
+/// - Full buffer retrieval for reconnection
+#[derive(Debug)]
+pub struct SequencedRingBuffer {
+    /// Queue of sequenced chunks (oldest at front)
+    pub(crate) chunks: VecDeque<SequencedChunk>,
+    /// Sequence number of oldest chunk (or next_seq if empty)
+    start_seq: u64,
+    /// Next sequence number to assign
+    next_seq: u64,
+    /// Total bytes currently in buffer
+    total_bytes: usize,
+    /// Maximum buffer size in bytes
+    max_bytes: usize,
+}
+
+impl SequencedRingBuffer {
+    /// Create a new buffer with the specified max size in bytes.
+    pub fn new(max_bytes: usize) -> Self {
+        Self {
+            chunks: VecDeque::new(),
+            start_seq: 0,
+            next_seq: 0,
+            total_bytes: 0,
+            max_bytes,
+        }
+    }
+
+    /// Append data to the buffer, assigning a sequence number.
+    /// Returns (assigned sequence, number of chunks evicted).
+    pub fn push(&mut self, data: Vec<u8>) -> (u64, u32) {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let chunk_size = data.len();
+        self.total_bytes += chunk_size;
+
+        self.chunks.push_back(SequencedChunk {
+            seq,
+            data,
+            timestamp,
+        });
+
+        // Evict oldest chunks if over capacity
+        let mut evicted = 0u32;
+        while self.total_bytes > self.max_bytes && self.chunks.len() > 1 {
+            if let Some(old) = self.chunks.pop_front() {
+                self.total_bytes -= old.data.len();
+                self.start_seq = self.chunks.front().map(|c| c.seq).unwrap_or(self.next_seq);
+                evicted += 1;
+            }
+        }
+
+        (seq, evicted)
+    }
+
+    /// Get chunks in a sequence range (inclusive).
+    /// Returns chunks where start_seq <= chunk.seq <= end_seq.
+    pub fn get_range(&self, start: u64, end: u64) -> Vec<&SequencedChunk> {
+        self.chunks
+            .iter()
+            .filter(|c| c.seq >= start && c.seq <= end)
+            .collect()
+    }
+
+    /// Get all chunk data concatenated as a single buffer.
+    /// Returns (start_seq, end_seq, concatenated data).
+    pub fn get_all(&self) -> (u64, u64, Vec<u8>) {
+        let start = self.start_seq;
+        let end = self.next_seq.saturating_sub(1);
+        let data: Vec<u8> = self.chunks.iter().flat_map(|c| c.data.iter().copied()).collect();
+        (start, end, data)
+    }
+
+    /// Get raw data without sequence info (for legacy compatibility).
+    pub fn get_raw_data(&self) -> Vec<u8> {
+        self.chunks.iter().flat_map(|c| c.data.iter().copied()).collect()
+    }
+
+    /// Get the oldest available sequence number.
+    pub fn start_seq(&self) -> u64 {
+        self.start_seq
+    }
+
+    /// Get the most recent sequence number (next_seq - 1), or 0 if empty.
+    pub fn end_seq(&self) -> u64 {
+        if self.next_seq == 0 {
+            0
+        } else {
+            self.next_seq - 1
+        }
+    }
+
+    /// Get the next sequence number that will be assigned.
+    pub fn next_seq(&self) -> u64 {
+        self.next_seq
+    }
+
+    /// Check if a sequence number is still available in the buffer.
+    pub fn has_seq(&self, seq: u64) -> bool {
+        seq >= self.start_seq && seq < self.next_seq
+    }
+
+    /// Get total bytes in buffer.
+    pub fn total_bytes(&self) -> usize {
+        self.total_bytes
+    }
+
+    /// Get number of chunks in buffer.
+    pub fn chunk_count(&self) -> usize {
+        self.chunks.len()
+    }
+
+    /// Clear all data and reset sequences.
+    pub fn clear(&mut self) {
+        self.chunks.clear();
+        self.total_bytes = 0;
+        // Note: We don't reset start_seq/next_seq to maintain monotonicity
+        self.start_seq = self.next_seq;
+    }
+}
+
+impl Default for SequencedRingBuffer {
+    fn default() -> Self {
+        Self::new(MAX_BUFFER_SIZE)
+    }
+}
+
+/// Result of appending data to the sequenced buffer.
+#[derive(Debug, Clone)]
+pub struct AppendResult {
+    /// Sequence number assigned to this chunk
+    pub seq: u64,
+    /// Timestamp when chunk was captured
+    pub timestamp: u64,
+    /// Number of old chunks evicted (if any)
+    pub evicted_count: u32,
+    /// New start_seq after eviction (if changed)
+    pub new_start_seq: Option<u64>,
+}
 
 /// A single action/step performed by Claude
 #[derive(Debug, Clone, serde::Serialize)]
@@ -77,33 +249,67 @@ impl Default for SessionActivity {
     }
 }
 
-/// Ring buffer for terminal output.
+/// Ring buffer for terminal output with sequence tracking.
 #[derive(Debug)]
 struct TerminalBuffer {
-    data: Vec<u8>,
+    /// Sequenced ring buffer for reliable streaming
+    sequenced: SequencedRingBuffer,
+    /// Activity tracking state
     activity: SessionActivity,
 }
 
 impl TerminalBuffer {
     fn new() -> Self {
         Self {
-            data: Vec::with_capacity(MAX_BUFFER_SIZE),
+            sequenced: SequencedRingBuffer::new(MAX_BUFFER_SIZE),
             activity: SessionActivity::default(),
         }
     }
 
-    fn append(&mut self, chunk: &[u8]) {
-        // If adding this chunk would exceed max size, trim from the beginning
-        let new_len = self.data.len() + chunk.len();
-        if new_len > MAX_BUFFER_SIZE {
-            let to_remove = new_len - MAX_BUFFER_SIZE;
-            self.data.drain(0..to_remove.min(self.data.len()));
+    /// Append data to the buffer.
+    /// Returns (sequence number, timestamp, evicted count, new_start_seq if changed).
+    fn append(&mut self, chunk: &[u8]) -> AppendResult {
+        let old_start = self.sequenced.start_seq();
+        let (seq, evicted) = self.sequenced.push(chunk.to_vec());
+        let new_start = self.sequenced.start_seq();
+        let timestamp = self.sequenced.chunks.back().map(|c| c.timestamp).unwrap_or(0);
+
+        AppendResult {
+            seq,
+            timestamp,
+            evicted_count: evicted,
+            new_start_seq: if new_start != old_start { Some(new_start) } else { None },
         }
-        self.data.extend_from_slice(chunk);
     }
 
-    fn get_data(&self) -> &[u8] {
-        &self.data
+    /// Get raw data for activity parsing (legacy compatibility).
+    fn get_data(&self) -> Vec<u8> {
+        self.sequenced.get_raw_data()
+    }
+
+    /// Get sequenced buffer info for sync response.
+    fn get_buffer_info(&self) -> (u64, u64) {
+        (self.sequenced.start_seq(), self.sequenced.end_seq())
+    }
+
+    /// Get chunks in a range for gap recovery.
+    fn get_range(&self, start: u64, end: u64) -> Vec<&SequencedChunk> {
+        self.sequenced.get_range(start, end)
+    }
+
+    /// Get full buffer with sequence info.
+    fn get_all(&self) -> (u64, u64, Vec<u8>) {
+        self.sequenced.get_all()
+    }
+
+    /// Check if sequence is available.
+    fn has_seq(&self, seq: u64) -> bool {
+        self.sequenced.has_seq(seq)
+    }
+
+    /// Clear buffer data (but maintain sequence monotonicity).
+    fn clear_data(&mut self) {
+        self.sequenced.clear();
     }
 }
 
@@ -126,10 +332,11 @@ impl SessionBuffers {
     }
 
     /// Append terminal output to a session's buffer and parse for activity.
-    pub async fn append(&self, session_id: Uuid, data: &[u8]) -> Option<SessionActivity> {
+    /// Returns (AppendResult, Option<SessionActivity>) where activity is Some if it changed.
+    pub async fn append(&self, session_id: Uuid, data: &[u8]) -> (AppendResult, Option<SessionActivity>) {
         let mut buffers = self.buffers.write().await;
         let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
-        buffer.append(data);
+        let append_result = buffer.append(data);
 
         // Track bytes received since last activity indicator
         buffer.activity.bytes_since_activity += data.len();
@@ -148,11 +355,49 @@ impl SessionBuffers {
 
         let activity_changed = self.parse_and_update_activity(buffer, &new_chunk_text, &full_buffer_text);
 
-        if activity_changed {
+        let activity = if activity_changed {
             Some(buffer.activity.clone())
         } else {
             None
-        }
+        };
+
+        (append_result, activity)
+    }
+
+    // ========================================================================
+    // Reliable Streaming Methods
+    // ========================================================================
+
+    /// Get buffer sequence info for a session (start_seq, end_seq).
+    /// Returns None if session doesn't exist.
+    pub async fn get_buffer_info(&self, session_id: Uuid) -> Option<(u64, u64)> {
+        let buffers = self.buffers.read().await;
+        buffers.get(&session_id).map(|b| b.get_buffer_info())
+    }
+
+    /// Get full buffer with sequence info for sync response.
+    /// Returns (start_seq, end_seq, data).
+    pub async fn get_full_buffer(&self, session_id: Uuid) -> Option<(u64, u64, Vec<u8>)> {
+        let buffers = self.buffers.read().await;
+        buffers.get(&session_id).map(|b| b.get_all())
+    }
+
+    /// Get chunks in a sequence range for gap recovery.
+    /// Returns cloned chunks to avoid holding lock.
+    pub async fn get_chunk_range(&self, session_id: Uuid, start: u64, end: u64) -> Option<Vec<SequencedChunk>> {
+        let buffers = self.buffers.read().await;
+        buffers.get(&session_id).map(|b| {
+            b.get_range(start, end)
+                .into_iter()
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// Check if a sequence is still available in the buffer.
+    pub async fn has_seq(&self, session_id: Uuid, seq: u64) -> bool {
+        let buffers = self.buffers.read().await;
+        buffers.get(&session_id).map(|b| b.has_seq(seq)).unwrap_or(false)
     }
 
     /// Parse terminal output for status line and current activity.
@@ -372,9 +617,10 @@ impl SessionBuffers {
     }
 
     /// Get the full terminal buffer for a session (for replay on reconnect).
+    /// DEPRECATED: Use get_full_buffer() for sequence-aware retrieval.
     pub async fn get_buffer(&self, session_id: Uuid) -> Option<Vec<u8>> {
         let buffers = self.buffers.read().await;
-        buffers.get(&session_id).map(|b| b.get_data().to_vec())
+        buffers.get(&session_id).map(|b| b.get_data())
     }
 
     /// Get current activity for a session.
@@ -389,10 +635,11 @@ impl SessionBuffers {
     }
 
     /// Clear a session's buffer but keep the entry.
+    /// Note: This maintains sequence monotonicity - next seq will continue from where it was.
     pub async fn clear(&self, session_id: Uuid) {
         let mut buffers = self.buffers.write().await;
         if let Some(buffer) = buffers.get_mut(&session_id) {
-            buffer.data.clear();
+            buffer.clear_data();
         }
     }
 
