@@ -3,11 +3,12 @@ import { useParams, useNavigate } from '@solidjs/router';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
+import { ConnectionStatus } from '../components/ui/ConnectionStatus';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import { InputBar } from '../components/chat/InputBar';
 import { TerminalView } from '../components/terminal/TerminalView';
 import { api, Session } from '../lib/api';
-import { createWebSocketManager, WsMessage, SyncResponse } from '../lib/ws';
+import { createWebSocketManager, WsMessage, SyncResponse, ConnectionState } from '../lib/ws';
 import {
   getMessagesForSession,
   addMessage,
@@ -69,7 +70,8 @@ export default function SessionPage() {
   const [session, setSession] = createSignal<Session | null>(null);
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
-  const [wsState, setWsState] = createSignal<'connecting' | 'connected' | 'disconnected' | 'reconnecting'>('disconnected');
+  const [wsState, setWsState] = createSignal<ConnectionState>('initial');
+  const [connectionInfo, setConnectionInfo] = createSignal({ reconnectAttempt: 0, maxReconnectAttempts: 5, queuedMessageCount: 0 });
   const [showTerminal, setShowTerminal] = createSignal(true);
   const [currentStreamingId, setCurrentStreamingId] = createSignal<string | null>(null);
   const [terminalData, setTerminalData] = createSignal<Uint8Array[]>([]);
@@ -471,13 +473,23 @@ export default function SessionPage() {
     return s && (s.status === 'stopped' || s.status === 'error');
   };
 
+  function handleConnectionRetry() {
+    wsManager?.retry();
+  }
+
   onMount(() => {
     loadSession();
 
     wsManager = createWebSocketManager({
       url: `/ws/sessions/${params.id}`,
       onMessage: handleWsMessage,
-      onStateChange: setWsState,
+      onStateChange: (state) => {
+        setWsState(state);
+        // Update connection info when state changes
+        if (wsManager) {
+          setConnectionInfo(wsManager.getConnectionInfo());
+        }
+      },
       // Reliable streaming protocol callbacks
       onTerminalData: handleTerminalData,
       onSyncResponse: handleSyncResponse,
@@ -503,6 +515,15 @@ export default function SessionPage() {
 
   return (
     <div class="flex flex-col h-full" style={{ width: "100%", "max-width": "100%", "min-width": "0", overflow: "hidden" }}>
+      {/* Connection status banner */}
+      <ConnectionStatus
+        state={wsState()}
+        reconnectAttempt={connectionInfo().reconnectAttempt}
+        maxReconnectAttempts={connectionInfo().maxReconnectAttempts}
+        queuedMessageCount={connectionInfo().queuedMessageCount}
+        onRetry={handleConnectionRetry}
+      />
+
       {/* Header */}
       <header class="flex-none glass safe-top" style={{ padding: '12px 16px' }}>
         <div

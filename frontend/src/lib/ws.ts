@@ -1,6 +1,16 @@
 // WebSocket connection manager with reliable streaming protocol
+// Phase 1: Sequence numbers, ACKs, gap recovery
+// Phase 2: Extended states, heartbeat, iOS lifecycle
 
-export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
+export type ConnectionState =
+  | 'initial'      // Never connected
+  | 'connecting'   // Active connection attempt
+  | 'connected'    // Healthy (recent pong received)
+  | 'stale'        // Connected but no pong in STALE_THRESHOLD_MS
+  | 'reconnecting' // Triggered reconnect
+  | 'backoff'      // Waiting before retry
+  | 'failed'       // Max retries exceeded
+  | 'suspended';   // iOS background (intentional pause)
 
 export interface WsMessage {
   type: string;
@@ -42,10 +52,12 @@ export interface WebSocketManagerOptions {
   url: string;
   onMessage?: (data: WsMessage) => void;
   onStateChange?: (state: ConnectionState) => void;
-  // New: callback for processed terminal data (after reordering)
+  // Callback for processed terminal data (after reordering)
   onTerminalData?: (data: Uint8Array) => void;
-  // New: callback for sync response
+  // Callback for sync response
   onSyncResponse?: (response: SyncResponse) => void;
+  // Callback for stale connection detection
+  onStale?: () => void;
   reconnectAttempts?: number;
   reconnectDelay?: number;
 }
@@ -67,6 +79,20 @@ interface StreamState {
   terminalRows: number;
 }
 
+// Heartbeat state for stale detection
+interface HeartbeatState {
+  // Timer for sending pings
+  pingTimer: number | null;
+  // Timer for expecting pong
+  pongTimeoutTimer: number | null;
+  // Timestamp of last pong received
+  lastPongTime: number;
+  // Count of missed pongs
+  missedPongs: number;
+}
+
+// === Constants ===
+
 // Maximum number of messages to queue when disconnected
 const MAX_QUEUE_SIZE = 50;
 // Maximum pending out-of-order chunks before forcing resync
@@ -76,12 +102,24 @@ const ACK_INTERVAL_MS = 100;
 // Gap recovery timeout (ms) - wait this long for missing chunk before requesting
 const GAP_RECOVERY_TIMEOUT_MS = 500;
 
+// Heartbeat constants
+const PING_INTERVAL_MS = 15000;     // Send ping every 15s
+const PONG_TIMEOUT_MS = 5000;       // Expect pong within 5s
+const STALE_THRESHOLD_MS = 25000;   // Mark stale if no pong in 25s
+const MAX_MISSED_PONGS = 2;         // Force reconnect after 2 missed pongs
+
+// LocalStorage key for persisting message queue
+const QUEUE_STORAGE_KEY = 'clauset_message_queue';
+// Maximum age for queued messages (5 minutes)
+const MAX_QUEUE_AGE_MS = 5 * 60 * 1000;
+
 export function createWebSocketManager(options: WebSocketManagerOptions) {
   let ws: WebSocket | null = null;
   let reconnectCount = 0;
   let reconnectTimer: number | null = null;
-  let state: ConnectionState = 'disconnected';
-  let messageQueue: unknown[] = [];
+  let state: ConnectionState = 'initial';
+  let messageQueue: Array<{ data: unknown; timestamp: number }> = [];
+  let isSuspended = false;
 
   // Stream state for reliable delivery
   const streamState: StreamState = {
@@ -94,16 +132,137 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     terminalRows: 24,
   };
 
+  // Heartbeat state
+  const heartbeatState: HeartbeatState = {
+    pingTimer: null,
+    pongTimeoutTimer: null,
+    lastPongTime: Date.now(),
+    missedPongs: 0,
+  };
+
   const maxReconnectAttempts = options.reconnectAttempts ?? 10;
   const baseReconnectDelay = options.reconnectDelay ?? 1000;
 
+  // Load persisted message queue from localStorage
+  function loadPersistedQueue() {
+    try {
+      const stored = localStorage.getItem(QUEUE_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Array<{ data: unknown; timestamp: number }>;
+        const now = Date.now();
+        // Filter out expired messages
+        messageQueue = parsed.filter(msg => now - msg.timestamp < MAX_QUEUE_AGE_MS);
+        localStorage.removeItem(QUEUE_STORAGE_KEY);
+        if (messageQueue.length > 0) {
+          console.log(`Loaded ${messageQueue.length} persisted messages from storage`);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load persisted message queue:', e);
+    }
+  }
+
+  // Persist message queue to localStorage
+  function persistQueue() {
+    try {
+      if (messageQueue.length > 0) {
+        localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(messageQueue));
+        console.log(`Persisted ${messageQueue.length} messages to storage`);
+      }
+    } catch (e) {
+      console.warn('Failed to persist message queue:', e);
+    }
+  }
+
   function setState(newState: ConnectionState) {
-    state = newState;
-    options.onStateChange?.(newState);
+    if (state !== newState) {
+      console.debug(`WS state: ${state} -> ${newState}`);
+      state = newState;
+      options.onStateChange?.(newState);
+    }
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatState.lastPongTime = Date.now();
+    heartbeatState.missedPongs = 0;
+
+    // Send ping periodically
+    heartbeatState.pingTimer = window.setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        sendPing();
+      }
+    }, PING_INTERVAL_MS);
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatState.pingTimer) {
+      clearInterval(heartbeatState.pingTimer);
+      heartbeatState.pingTimer = null;
+    }
+    if (heartbeatState.pongTimeoutTimer) {
+      clearTimeout(heartbeatState.pongTimeoutTimer);
+      heartbeatState.pongTimeoutTimer = null;
+    }
+  }
+
+  function sendPing() {
+    if (ws?.readyState !== WebSocket.OPEN) return;
+
+    const timestamp = Date.now();
+    ws.send(JSON.stringify({ type: 'ping', timestamp }));
+
+    // Set timeout for pong response
+    heartbeatState.pongTimeoutTimer = window.setTimeout(() => {
+      heartbeatState.missedPongs++;
+      console.warn(`Missed pong (${heartbeatState.missedPongs}/${MAX_MISSED_PONGS})`);
+
+      // Check if connection is stale
+      const timeSinceLastPong = Date.now() - heartbeatState.lastPongTime;
+      if (timeSinceLastPong > STALE_THRESHOLD_MS && state === 'connected') {
+        setState('stale');
+        options.onStale?.();
+      }
+
+      // Force reconnect after too many missed pongs
+      if (heartbeatState.missedPongs >= MAX_MISSED_PONGS) {
+        console.warn('Too many missed pongs, forcing reconnect');
+        forceReconnect();
+      }
+    }, PONG_TIMEOUT_MS);
+  }
+
+  function handlePong(_timestamp: number) {
+    // Clear pong timeout
+    if (heartbeatState.pongTimeoutTimer) {
+      clearTimeout(heartbeatState.pongTimeoutTimer);
+      heartbeatState.pongTimeoutTimer = null;
+    }
+
+    heartbeatState.lastPongTime = Date.now();
+    heartbeatState.missedPongs = 0;
+
+    // If we were stale, we're now healthy again
+    if (state === 'stale') {
+      setState('connected');
+    }
+  }
+
+  function forceReconnect() {
+    stopHeartbeat();
+    if (ws) {
+      ws.close(4000, 'Stale connection');
+      ws = null;
+    }
+    scheduleReconnect();
   }
 
   function connect() {
     if (ws?.readyState === WebSocket.OPEN) return;
+    if (isSuspended) return;
+
+    // Load any persisted messages from previous session
+    loadPersistedQueue();
 
     setState('connecting');
 
@@ -116,6 +275,9 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
         setState('connected');
         reconnectCount = 0;
 
+        // Start heartbeat
+        startHeartbeat();
+
         // Send SyncRequest to get current state and any missed chunks
         sendSyncRequest();
 
@@ -125,7 +287,7 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
           const queue = messageQueue;
           messageQueue = [];
           for (const msg of queue) {
-            ws!.send(JSON.stringify(msg));
+            ws!.send(JSON.stringify(msg.data));
           }
         }
       };
@@ -141,11 +303,16 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
 
       ws.onclose = (event) => {
         ws = null;
-        clearTimers();
-        if (!event.wasClean) {
+        stopHeartbeat();
+        clearStreamTimers();
+
+        if (isSuspended) {
+          // Don't reconnect if suspended
+          setState('suspended');
+        } else if (!event.wasClean) {
           scheduleReconnect();
         } else {
-          setState('disconnected');
+          setState('initial');
         }
       };
 
@@ -160,6 +327,9 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
 
   function handleMessage(data: WsMessage) {
     switch (data.type) {
+      case 'pong':
+        handlePong(data.timestamp as number);
+        break;
       case 'terminal_chunk':
         handleTerminalChunk(data as unknown as { type: string } & TerminalChunk);
         break;
@@ -227,7 +397,7 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
 
     // Clear any pending state
     streamState.pendingChunks.clear();
-    clearTimers();
+    clearStreamTimers();
 
     if (response.full_buffer && response.full_buffer.length > 0) {
       // Server sent full buffer - apply it
@@ -246,15 +416,12 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
   function handleChunkBatch(batch: { type: string } & ChunkBatch) {
     console.debug(`ChunkBatch: ${batch.chunk_count} chunks from seq ${batch.start_seq}`);
 
-    // Process the batch data - it's a concatenation of the requested chunks
-    // Note: we treat the batch as a single blob since individual chunk boundaries
-    // aren't preserved in the batch response
+    // Process the batch data
     const bytes = new Uint8Array(batch.data);
     options.onTerminalData?.(bytes);
 
     // Update our sequence position if this fills the gap
     if (batch.start_seq === streamState.lastContiguousSeq + 1) {
-      // This batch fills our gap - estimate end sequence from start + count
       streamState.lastContiguousSeq = batch.start_seq + batch.chunk_count - 1;
       processPendingChunks();
     }
@@ -270,7 +437,6 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     console.warn(`Buffer overflow: new start seq ${overflow.new_start_seq}, resync required: ${overflow.requires_resync}`);
 
     if (overflow.requires_resync) {
-      // Server told us we're too far behind - request full resync
       streamState.pendingChunks.clear();
       streamState.lastContiguousSeq = 0;
       sendSyncRequest();
@@ -291,7 +457,6 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
   }
 
   function scheduleAck() {
-    // Batch acks to reduce message overhead
     if (streamState.ackTimer) return;
 
     streamState.ackTimer = window.setTimeout(() => {
@@ -312,13 +477,11 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
   }
 
   function scheduleGapRecovery(startSeq: number, endSeq: number) {
-    // Only schedule if not already pending
     if (streamState.gapRecoveryTimer) return;
 
     streamState.gapRecoveryTimer = window.setTimeout(() => {
       streamState.gapRecoveryTimer = null;
 
-      // Check if we still have the gap
       if (streamState.lastContiguousSeq < startSeq - 1) {
         sendRangeRequest(streamState.lastContiguousSeq + 1, endSeq);
       }
@@ -337,7 +500,7 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     }
   }
 
-  function clearTimers() {
+  function clearStreamTimers() {
     if (streamState.ackTimer) {
       clearTimeout(streamState.ackTimer);
       streamState.ackTimer = null;
@@ -350,11 +513,11 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
 
   function scheduleReconnect() {
     if (reconnectCount >= maxReconnectAttempts) {
-      setState('disconnected');
+      setState('failed');
       return;
     }
 
-    setState('reconnecting');
+    setState('backoff');
     reconnectCount++;
 
     // Exponential backoff with jitter
@@ -363,7 +526,12 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
       30000
     );
 
-    reconnectTimer = window.setTimeout(connect, delay);
+    console.log(`Reconnecting in ${Math.round(delay)}ms (attempt ${reconnectCount}/${maxReconnectAttempts})`);
+
+    reconnectTimer = window.setTimeout(() => {
+      setState('reconnecting');
+      connect();
+    }, delay);
   }
 
   function disconnect() {
@@ -371,12 +539,12 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
-    clearTimers();
-    // Clear queued messages on intentional disconnect
+    stopHeartbeat();
+    clearStreamTimers();
     messageQueue = [];
     ws?.close(1000, 'Client disconnect');
     ws = null;
-    setState('disconnected');
+    setState('initial');
   }
 
   function send(data: unknown): boolean {
@@ -387,7 +555,7 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
 
     // Queue message for later delivery (with cap to prevent unbounded growth)
     if (messageQueue.length < MAX_QUEUE_SIZE) {
-      messageQueue.push(data);
+      messageQueue.push({ data, timestamp: Date.now() });
       console.debug(`Queued message (${messageQueue.length}/${MAX_QUEUE_SIZE}), will send on reconnect`);
     } else {
       console.warn(`Message queue full (${MAX_QUEUE_SIZE}), dropping message`);
@@ -399,13 +567,11 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     return state;
   }
 
-  // Update terminal dimensions (call before connect or when resizing)
   function setTerminalDimensions(cols: number, rows: number) {
     streamState.terminalCols = cols;
     streamState.terminalRows = rows;
   }
 
-  // Get current stream state for debugging
   function getStreamState() {
     return {
       lastContiguousSeq: streamState.lastContiguousSeq,
@@ -414,11 +580,100 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     };
   }
 
-  // Force a resync (useful after terminal resize)
+  function getConnectionInfo() {
+    return {
+      reconnectAttempt: reconnectCount,
+      maxReconnectAttempts: maxReconnectAttempts,
+      queuedMessageCount: messageQueue.length,
+    };
+  }
+
+  function retry() {
+    if (state === 'failed' || state === 'stale') {
+      reconnectCount = 0;
+      connect();
+    }
+  }
+
   function requestResync() {
     streamState.pendingChunks.clear();
     sendSyncRequest();
   }
+
+  // === iOS PWA Lifecycle Handling ===
+
+  function suspend() {
+    if (isSuspended) return;
+    isSuspended = true;
+    console.log('WebSocket suspended (iOS background)');
+
+    // Persist queue before suspension
+    persistQueue();
+
+    // Close connection gracefully
+    stopHeartbeat();
+    clearStreamTimers();
+    ws?.close(1000, 'iOS suspend');
+    ws = null;
+    setState('suspended');
+  }
+
+  function resume() {
+    if (!isSuspended) return;
+    isSuspended = false;
+    console.log('WebSocket resumed (iOS foreground)');
+
+    // Reconnect
+    connect();
+  }
+
+  // Set up visibility change listener for iOS PWA
+  function setupVisibilityHandler() {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        // Page going to background - persist state
+        persistQueue();
+      } else if (document.visibilityState === 'visible') {
+        // Page coming to foreground
+        if (isSuspended) {
+          resume();
+        } else if (state === 'stale' || state === 'failed') {
+          // Try to reconnect if we were in a bad state
+          reconnectCount = 0;
+          connect();
+        }
+      }
+    });
+
+    // Handle iOS-specific page lifecycle events
+    // These may fire in addition to visibilitychange
+    document.addEventListener('freeze', () => {
+      console.log('Page freeze event');
+      suspend();
+    });
+
+    document.addEventListener('resume', () => {
+      console.log('Page resume event');
+      resume();
+    });
+
+    // Handle network changes
+    window.addEventListener('online', () => {
+      console.log('Network online');
+      if (state === 'failed' || state === 'suspended') {
+        reconnectCount = 0;
+        connect();
+      }
+    });
+
+    window.addEventListener('offline', () => {
+      console.log('Network offline');
+      // Don't immediately disconnect - let heartbeat detect the issue
+    });
+  }
+
+  // Initialize visibility handler
+  setupVisibilityHandler();
 
   return {
     connect,
@@ -427,6 +682,10 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     getState,
     setTerminalDimensions,
     getStreamState,
+    getConnectionInfo,
     requestResync,
+    retry,
+    suspend,
+    resume,
   };
 }
