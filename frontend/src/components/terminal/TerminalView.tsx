@@ -2,12 +2,23 @@ import { onMount, onCleanup, createSignal, createEffect, For } from 'solid-js';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import { loadTerminalFont, getRecommendedFontSize } from '../../lib/fonts';
+import { calculateDimensions, getDeviceHint, type ConfidenceLevel } from '../../lib/terminalSizing';
 
 interface TerminalViewProps {
   onInput: (data: Uint8Array) => void;
   onResize: (cols: number, rows: number) => void;
   onClose: () => void;
   onReady?: (write: (data: Uint8Array) => void) => void;
+  onNegotiateDimensions?: (params: {
+    cols: number;
+    rows: number;
+    confidence: ConfidenceLevel;
+    source: 'fitaddon' | 'container' | 'estimation' | 'defaults';
+    cellWidth?: number;
+    fontLoaded: boolean;
+    deviceHint: 'iphone' | 'ipad' | 'desktop';
+  }) => void;
   isConnected?: boolean;
 }
 
@@ -333,7 +344,12 @@ export function TerminalView(props: TerminalViewProps) {
   let resizeTimeout: number | undefined;
   let touchScrollerCleanup: (() => void) | undefined;
 
-  const [fontSize, setFontSize] = createSignal(13);
+  // Font loading state
+  let fontLoaded = false;
+  let charWidth: number | null = null;
+  let charHeight: number | null = null;
+
+  const [fontSize, setFontSize] = createSignal(getRecommendedFontSize());
   const [ctrlActive, setCtrlActive] = createSignal(false);
   const [dimensions, setDimensions] = createSignal({ cols: 80, rows: 24 });
 
@@ -481,31 +497,85 @@ export function TerminalView(props: TerminalViewProps) {
     // Also listen to window resize for orientation changes
     window.addEventListener('resize', handleResize);
 
-    // CRITICAL: Wait for fonts to load and resize BEFORE signaling ready
+    // CRITICAL: Wait for fonts to load and calculate dimensions BEFORE signaling ready
     // This ensures the terminal is properly sized before any data is written
-    const initializeTerminal = () => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          // Do initial resize
-          doFitAndResize();
+    const initializeTerminal = async () => {
+      // Stage 1: Load fonts with robust timeout handling
+      const fontResult = await loadTerminalFont({
+        timeout: 2000,
+        fontSize: fontSize(),
+      });
 
-          // NOW signal that we're ready to receive data
-          if (props.onReady) {
-            props.onReady((data: Uint8Array) => {
-              terminal?.write(data);
-            });
-          }
+      fontLoaded = fontResult.loaded;
+      charWidth = fontResult.charWidth;
+      charHeight = fontResult.charHeight;
+
+      // Update terminal font family if we got a different one
+      if (terminal && fontResult.fontFamily !== terminal.options.fontFamily) {
+        terminal.options.fontFamily = fontResult.fontFamily;
+      }
+
+      // Log font loading result for debugging
+      console.log(`Font loaded: ${fontResult.loaded ? 'primary' : 'fallback'}, ` +
+        `family=${fontResult.fontFamily}, ` +
+        `char=${fontResult.charWidth.toFixed(1)}x${fontResult.charHeight.toFixed(1)}, ` +
+        `time=${fontResult.loadTimeMs}ms`);
+
+      // Wait for next animation frames to ensure layout is stable
+      await new Promise<void>(resolve => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
         });
       });
+
+      // Stage 2: Calculate dimensions using multi-stage strategy
+      const dims = calculateDimensions({
+        fitAddon: fitAddon ?? null,
+        container: containerRef ?? null,
+        charWidth,
+        charHeight,
+        fontLoaded,
+        fontSize: fontSize(),
+      });
+
+      console.log(`Dimensions calculated: ${dims.cols}x${dims.rows}, ` +
+        `confidence=${dims.confidence}, source=${dims.source}`);
+
+      // Apply dimensions to terminal
+      if (terminal && (dims.cols !== terminal.cols || dims.rows !== terminal.rows)) {
+        terminal.resize(dims.cols, dims.rows);
+      }
+
+      setDimensions({ cols: dims.cols, rows: dims.rows });
+
+      // Stage 3: Negotiate dimensions with server (if callback provided)
+      if (props.onNegotiateDimensions) {
+        props.onNegotiateDimensions({
+          cols: dims.cols,
+          rows: dims.rows,
+          confidence: dims.confidence,
+          source: dims.source,
+          cellWidth: dims.cellWidth,
+          fontLoaded,
+          deviceHint: getDeviceHint(),
+        });
+      } else {
+        // Fall back to simple resize callback
+        props.onResize(dims.cols, dims.rows);
+      }
+
+      // NOW signal that we're ready to receive data
+      if (props.onReady) {
+        props.onReady((data: Uint8Array) => {
+          terminal?.write(data);
+        });
+      }
     };
 
-    // Wait for fonts to load before initializing
-    if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(initializeTerminal);
-    } else {
-      // Fallback for browsers without font loading API
-      setTimeout(initializeTerminal, 100);
-    }
+    // Start initialization
+    initializeTerminal();
 
     onCleanup(() => {
       if (resizeTimeout) {

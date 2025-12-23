@@ -405,6 +405,75 @@ pub async fn handle_websocket(
                                 }
                             }
                         }
+                        WsClientMessage::NegotiateDimensions {
+                            cols,
+                            rows,
+                            confidence,
+                            source,
+                            cell_width: _,
+                            font_loaded,
+                            device_hint,
+                        } => {
+                            debug!(target: "clauset::ws", "NegotiateDimensions: session={}, {}x{}, conf={}, src={}, device={}",
+                                session_id, cols, rows, confidence, source, device_hint);
+
+                            // Convert string fields to enum types for validation
+                            let confidence_level = match confidence.as_str() {
+                                "high" => Some(clauset_core::ConfidenceLevel::High),
+                                "medium" => Some(clauset_core::ConfidenceLevel::Medium),
+                                _ => Some(clauset_core::ConfidenceLevel::Low),
+                            };
+                            let dim_source = match source.as_str() {
+                                "fitaddon" => Some(clauset_core::DimensionSource::Fitaddon),
+                                "container" => Some(clauset_core::DimensionSource::Container),
+                                "estimation" => Some(clauset_core::DimensionSource::Estimation),
+                                _ => Some(clauset_core::DimensionSource::Defaults),
+                            };
+                            let device = match device_hint.as_str() {
+                                "iphone" => Some(clauset_core::DeviceHint::Iphone),
+                                "ipad" => Some(clauset_core::DeviceHint::Ipad),
+                                "desktop" => Some(clauset_core::DeviceHint::Desktop),
+                                _ => Some(clauset_core::DeviceHint::Unknown),
+                            };
+
+                            // Validate dimensions
+                            match clauset_core::validate_dimensions(cols, rows, device, confidence_level, dim_source) {
+                                Ok(validated) => {
+                                    // Apply the dimensions to the terminal
+                                    let final_cols = validated.cols;
+                                    let final_rows = validated.rows;
+
+                                    // Resize terminal
+                                    let _ = state_clone
+                                        .session_manager
+                                        .resize_terminal(session_id, final_rows, final_cols)
+                                        .await;
+
+                                    // Log font loading status for debugging
+                                    if !font_loaded {
+                                        debug!(target: "clauset::ws", "Client reports font not loaded for session {}", session_id);
+                                    }
+
+                                    // Send confirmation
+                                    let response = WsServerMessage::DimensionsConfirmed {
+                                        cols: final_cols,
+                                        rows: final_rows,
+                                        adjusted: validated.adjusted,
+                                        adjustment_reason: validated.adjustment_reason,
+                                    };
+                                    let _ = outgoing_tx_clone.send(response).await;
+                                }
+                                Err(error) => {
+                                    // Dimensions rejected - send suggested dimensions
+                                    let response = WsServerMessage::DimensionsRejected {
+                                        reason: error.reason,
+                                        suggested_cols: error.suggested_cols,
+                                        suggested_rows: error.suggested_rows,
+                                    };
+                                    let _ = outgoing_tx_clone.send(response).await;
+                                }
+                            }
+                        }
                     }
                 }
             }

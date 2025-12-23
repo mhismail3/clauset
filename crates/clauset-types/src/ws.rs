@@ -59,6 +59,27 @@ pub enum WsClientMessage {
         /// Last sequence number needed (inclusive)
         end_seq: u64,
     },
+
+    // === Dimension Negotiation Protocol ===
+
+    /// Negotiate terminal dimensions with server validation.
+    /// Client sends this after calculating dimensions, before requesting buffer.
+    NegotiateDimensions {
+        /// Requested column count
+        cols: u16,
+        /// Requested row count
+        rows: u16,
+        /// Client's confidence in these dimensions
+        confidence: String, // "high", "medium", "low"
+        /// How dimensions were calculated
+        source: String, // "fitaddon", "container", "estimation", "defaults"
+        /// Character cell width (if known)
+        cell_width: Option<f64>,
+        /// Whether the font was loaded successfully
+        font_loaded: bool,
+        /// Device type hint
+        device_hint: String, // "iphone", "ipad", "desktop"
+    },
 }
 
 /// Messages sent from server to client.
@@ -155,6 +176,31 @@ pub enum WsServerMessage {
         new_start_seq: u64,
         /// True if client needs to resync (their ack_seq < new_start_seq)
         requires_resync: bool,
+    },
+
+    // === Dimension Negotiation Protocol ===
+
+    /// Dimensions confirmed by server.
+    /// Client can proceed with SyncRequest to get buffer.
+    DimensionsConfirmed {
+        /// Final columns (may differ from requested if adjusted)
+        cols: u16,
+        /// Final rows (may differ from requested if adjusted)
+        rows: u16,
+        /// Whether server adjusted the dimensions
+        adjusted: bool,
+        /// Reason for adjustment (if any)
+        adjustment_reason: Option<String>,
+    },
+    /// Dimensions rejected by server.
+    /// Client should use suggested dimensions and retry.
+    DimensionsRejected {
+        /// Reason for rejection
+        reason: String,
+        /// Suggested columns
+        suggested_cols: u16,
+        /// Suggested rows
+        suggested_rows: u16,
     },
 
     /// Session status changed.

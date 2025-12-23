@@ -48,6 +48,21 @@ export interface BufferOverflow {
   requires_resync: boolean;
 }
 
+// Dimension negotiation response from server
+export interface DimensionsConfirmed {
+  cols: number;
+  rows: number;
+  adjusted: boolean;
+  adjustment_reason?: string;
+}
+
+// Dimension negotiation rejection from server
+export interface DimensionsRejected {
+  reason: string;
+  suggested_cols: number;
+  suggested_rows: number;
+}
+
 export interface WebSocketManagerOptions {
   url: string;
   onMessage?: (data: WsMessage) => void;
@@ -56,6 +71,10 @@ export interface WebSocketManagerOptions {
   onTerminalData?: (data: Uint8Array) => void;
   // Callback for sync response
   onSyncResponse?: (response: SyncResponse) => void;
+  // Callback for dimension negotiation confirmation
+  onDimensionsConfirmed?: (response: DimensionsConfirmed) => void;
+  // Callback for dimension negotiation rejection
+  onDimensionsRejected?: (response: DimensionsRejected) => void;
   // Callback for stale connection detection
   onStale?: () => void;
   reconnectAttempts?: number;
@@ -342,10 +361,29 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
       case 'buffer_overflow':
         handleBufferOverflow(data as unknown as { type: string } & BufferOverflow);
         break;
+      case 'dimensions_confirmed':
+        handleDimensionsConfirmed(data as unknown as { type: string } & DimensionsConfirmed);
+        break;
+      case 'dimensions_rejected':
+        handleDimensionsRejected(data as unknown as { type: string } & DimensionsRejected);
+        break;
       default:
         // Pass through other messages to the generic handler
         options.onMessage?.(data);
     }
+  }
+
+  function handleDimensionsConfirmed(response: { type: string } & DimensionsConfirmed) {
+    console.log(`DimensionsConfirmed: ${response.cols}x${response.rows}, adjusted=${response.adjusted}`);
+    if (response.adjusted && response.adjustment_reason) {
+      console.warn(`Dimensions adjusted: ${response.adjustment_reason}`);
+    }
+    options.onDimensionsConfirmed?.(response);
+  }
+
+  function handleDimensionsRejected(response: { type: string } & DimensionsRejected) {
+    console.warn(`DimensionsRejected: ${response.reason}, suggested ${response.suggested_cols}x${response.suggested_rows}`);
+    options.onDimensionsRejected?.(response);
   }
 
   function handleTerminalChunk(chunk: { type: string } & TerminalChunk) {
@@ -600,6 +638,40 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     sendSyncRequest();
   }
 
+  /**
+   * Negotiate terminal dimensions with server validation.
+   * Call this before requestResync to ensure dimensions are validated.
+   */
+  function negotiateDimensions(params: {
+    cols: number;
+    rows: number;
+    confidence: 'high' | 'medium' | 'low';
+    source: 'fitaddon' | 'container' | 'estimation' | 'defaults';
+    cellWidth?: number;
+    fontLoaded: boolean;
+    deviceHint: 'iphone' | 'ipad' | 'desktop';
+  }) {
+    if (ws?.readyState !== WebSocket.OPEN) {
+      console.warn('Cannot negotiate dimensions: WebSocket not connected');
+      return false;
+    }
+
+    const msg = {
+      type: 'negotiate_dimensions',
+      cols: params.cols,
+      rows: params.rows,
+      confidence: params.confidence,
+      source: params.source,
+      cell_width: params.cellWidth ?? null,
+      font_loaded: params.fontLoaded,
+      device_hint: params.deviceHint,
+    };
+
+    ws.send(JSON.stringify(msg));
+    console.debug(`NegotiateDimensions: ${params.cols}x${params.rows}, confidence=${params.confidence}, device=${params.deviceHint}`);
+    return true;
+  }
+
   // === iOS PWA Lifecycle Handling ===
 
   function suspend() {
@@ -684,6 +756,7 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     getStreamState,
     getConnectionInfo,
     requestResync,
+    negotiateDimensions,
     retry,
     suspend,
     resume,
