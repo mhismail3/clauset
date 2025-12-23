@@ -543,9 +543,12 @@ static STATUS_LINE_TOKENS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^([0-9.]+)K?/([0-9.]+)K?\s*(?:\|\s*ctx:(\d+)%)?").unwrap()
 });
 
-/// Regex for just model and cost (first line of wrapped status)
+/// Regex for model and cost pattern (allows trailing text like "Update available!")
+/// Used when tokens are on a separate line or when there's trailing notifications
 static STATUS_LINE_MODEL_COST: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*\|?\s*$").unwrap()
+    // Match "Model | $Cost" optionally followed by " |" but allow any trailing text
+    // The \| at the end is optional and indicates tokens may follow (on same or next line)
+    Regex::new(r"^([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*\|?").unwrap()
 });
 
 /// Parse Claude's status line format, handling multi-line wrapping.
@@ -1393,6 +1396,29 @@ mod tests {
         assert_eq!(status.input_tokens, 0);
         assert_eq!(status.output_tokens, 0);
         assert_eq!(status.context_percent, 0);
+    }
+
+    #[test]
+    fn test_parse_status_line_update_available_multiline() {
+        // Real scenario: narrow terminal with "Update available!" on first line
+        // Line 1: "Haiku 4.5 | $0.10 |     Update available!"
+        // Line 2: "5.3K/2.1K | ctx:21%"
+        let with_update = "Some content\nHaiku 4.5 | $0.10 |     Update available!\n5.3K/2.1K | ctx:21%";
+        let status = parse_status_line(with_update).unwrap();
+        assert_eq!(status.model, "Haiku 4.5");
+        assert!((status.cost - 0.10).abs() < 0.01);
+        assert_eq!(status.input_tokens, 5300);
+        assert_eq!(status.output_tokens, 2100);
+        assert_eq!(status.context_percent, 21);
+
+        // Also test finding tokens line first and looking back
+        let with_update2 = "Content\nHaiku 4.5 | $0.10 |     Update available!\n5.3K/2.1K | ctx:21%\nMore content";
+        let status2 = parse_status_line(with_update2).unwrap();
+        assert_eq!(status2.model, "Haiku 4.5");
+        assert!((status2.cost - 0.10).abs() < 0.01);
+        assert_eq!(status2.input_tokens, 5300);
+        assert_eq!(status2.output_tokens, 2100);
+        assert_eq!(status2.context_percent, 21);
     }
 
     #[test]
