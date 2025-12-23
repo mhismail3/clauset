@@ -104,10 +104,15 @@ Success criteria: All features from docs/FEATURE_PLAN.md implemented with no reg
   - All frontend builds successfully, all backend tests pass
 
 ### Now
-- All phases complete
+- All phases complete + bug fixes
 
 ### Next
 - None - feature implementation complete
+
+## Bug Fixes Applied
+- **Views stacking on Session page**: Changed from CSS `hidden` class to Solid.js `<Show when={}>` for Chat/History views (inline styles override CSS classes)
+- **Analytics page not scrolling**: Changed from `min-height: 100vh` to `height: 100%` with `overflow-y: auto`
+- **Cost/token data not captured**: Added `complete_interaction_with_costs()` to `InteractionStore`, modified `InteractionProcessor` to track starting costs and compute deltas when interactions complete, updated hooks route to pass session costs to the processor
 
 ## Open Questions
 - None currently

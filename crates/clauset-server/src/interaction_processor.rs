@@ -15,6 +15,14 @@ use uuid::Uuid;
 /// Maximum file size for snapshots (1 MB).
 const MAX_SNAPSHOT_SIZE: u64 = 1_048_576;
 
+/// Snapshot of session costs at interaction start.
+#[derive(Debug, Clone, Copy)]
+struct CostSnapshot {
+    cost_usd: f64,
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
 /// Captures interactions and tool invocations from hook events.
 pub struct InteractionProcessor {
     store: Arc<InteractionStore>,
@@ -22,6 +30,8 @@ pub struct InteractionProcessor {
     active_interactions: DashMap<Uuid, Uuid>,
     /// Maps tool_use_id -> (tool_invocation_id, interaction_id, cwd)
     pending_tool_invocations: DashMap<String, (Uuid, Uuid, Option<String>)>,
+    /// Maps session_id -> cost snapshot at interaction start (for computing deltas)
+    starting_costs: DashMap<Uuid, CostSnapshot>,
 }
 
 impl InteractionProcessor {
@@ -30,12 +40,23 @@ impl InteractionProcessor {
             store,
             active_interactions: DashMap::new(),
             pending_tool_invocations: DashMap::new(),
+            starting_costs: DashMap::new(),
         }
     }
 
     /// Process a hook event and update the interaction tracking state.
-    pub async fn process_event(&self, event: &HookEvent) {
-        if let Err(e) = self.process_event_inner(event).await {
+    /// Requires current session costs for proper delta calculation.
+    pub async fn process_event(
+        &self,
+        event: &HookEvent,
+        cost_usd: f64,
+        input_tokens: u64,
+        output_tokens: u64,
+    ) {
+        if let Err(e) = self
+            .process_event_inner(event, cost_usd, input_tokens, output_tokens)
+            .await
+        {
             error!(target: "clauset::interactions", "Failed to process hook event: {}", e);
         }
     }
@@ -43,12 +64,16 @@ impl InteractionProcessor {
     async fn process_event_inner(
         &self,
         event: &HookEvent,
+        cost_usd: f64,
+        input_tokens: u64,
+        output_tokens: u64,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match event {
             HookEvent::UserPromptSubmit {
                 session_id, prompt, ..
             } => {
-                self.handle_user_prompt(*session_id, prompt).await?;
+                self.handle_user_prompt(*session_id, prompt, cost_usd, input_tokens, output_tokens)
+                    .await?;
             }
 
             HookEvent::PreToolUse {
@@ -93,13 +118,15 @@ impl InteractionProcessor {
                 ..
             } => {
                 if !stop_hook_active {
-                    self.handle_stop(*session_id).await?;
+                    self.handle_stop(*session_id, cost_usd, input_tokens, output_tokens)
+                        .await?;
                 }
             }
 
             HookEvent::SessionEnd { session_id, .. } => {
                 // Complete any active interaction when session ends
-                self.handle_stop(*session_id).await?;
+                self.handle_stop(*session_id, cost_usd, input_tokens, output_tokens)
+                    .await?;
             }
 
             _ => {
@@ -115,16 +142,27 @@ impl InteractionProcessor {
         &self,
         session_id: Uuid,
         prompt: &str,
+        cost_usd: f64,
+        input_tokens: u64,
+        output_tokens: u64,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Complete any existing interaction first
+        // Complete any existing interaction first (with costs from stored snapshot)
         if let Some((_, existing_id)) = self.active_interactions.remove(&session_id) {
             debug!(target: "clauset::interactions",
                 "Completing previous interaction {} before starting new one", existing_id);
+            // Complete with zero deltas since we don't have end costs
             if let Err(e) = self.store.complete_interaction(existing_id) {
                 warn!(target: "clauset::interactions",
                     "Failed to complete previous interaction: {}", e);
             }
         }
+
+        // Store starting costs for delta calculation when interaction completes
+        self.starting_costs.insert(session_id, CostSnapshot {
+            cost_usd,
+            input_tokens,
+            output_tokens,
+        });
 
         // Get next sequence number
         let seq_num = self.store.next_sequence_number(session_id)?;
@@ -137,8 +175,8 @@ impl InteractionProcessor {
         self.active_interactions.insert(session_id, interaction_id);
 
         info!(target: "clauset::interactions",
-            "Started interaction {} (seq {}) for session {}",
-            interaction_id, seq_num, session_id);
+            "Started interaction {} (seq {}) for session {} (start: ${:.4}, {}K/{}K)",
+            interaction_id, seq_num, session_id, cost_usd, input_tokens/1000, output_tokens/1000);
 
         Ok(())
     }
@@ -305,15 +343,37 @@ impl InteractionProcessor {
         Ok(())
     }
 
-    /// Handle Stop: Complete the current interaction.
+    /// Handle Stop: Complete the current interaction with cost deltas.
     async fn handle_stop(
         &self,
         session_id: Uuid,
+        cost_usd: f64,
+        input_tokens: u64,
+        output_tokens: u64,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some((_, interaction_id)) = self.active_interactions.remove(&session_id) {
-            self.store.complete_interaction(interaction_id)?;
+            // Calculate deltas from stored starting costs
+            let (cost_delta, input_delta, output_delta) =
+                if let Some((_, snapshot)) = self.starting_costs.remove(&session_id) {
+                    (
+                        (cost_usd - snapshot.cost_usd).max(0.0),
+                        input_tokens.saturating_sub(snapshot.input_tokens),
+                        output_tokens.saturating_sub(snapshot.output_tokens),
+                    )
+                } else {
+                    // No starting snapshot - use current values as total
+                    (cost_usd, input_tokens, output_tokens)
+                };
+
+            self.store.complete_interaction_with_costs(
+                interaction_id,
+                cost_delta,
+                input_delta,
+                output_delta,
+            )?;
             info!(target: "clauset::interactions",
-                "Completed interaction {} for session {}", interaction_id, session_id);
+                "Completed interaction {} for session {} (delta: ${:.4}, {}K/{}K)",
+                interaction_id, session_id, cost_delta, input_delta/1000, output_delta/1000);
         }
 
         Ok(())

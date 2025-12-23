@@ -355,7 +355,9 @@ export function Analytics() {
   return (
     <div
       style={{
-        'min-height': '100vh',
+        height: '100%',
+        'overflow-y': 'auto',
+        '-webkit-overflow-scrolling': 'touch',
         background: 'var(--color-bg-base)',
         padding: 'max(env(safe-area-inset-top), 16px) 16px max(env(safe-area-inset-bottom), 16px)',
       }}

@@ -682,72 +682,73 @@ export default function SessionPage() {
         </Show>
 
         {/* Chat View */}
-        <div class={`flex-1 flex flex-col ${currentView() !== 'chat' ? 'hidden' : ''}`}>
-          <main class="flex-1 scrollable p-4 space-y-4">
-            {/* Terminal mode notice */}
-            <Show when={session()?.mode === 'terminal' && messages().length === 0}>
-              <div class="card-bordered" style={{ padding: '24px', "text-align": 'center' }}>
-                <div
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    margin: '0 auto 12px',
-                    "border-radius": '50%',
-                    background: 'var(--color-accent-muted)',
-                    display: 'flex',
-                    "align-items": 'center',
-                    "justify-content": 'center',
-                  }}
-                >
-                  <span class="text-mono" style={{ color: 'var(--color-accent)', "font-size": '18px' }}>&gt;_</span>
+        <Show when={currentView() === 'chat'}>
+          <div class="flex-1 flex flex-col">
+            <main class="flex-1 scrollable p-4 space-y-4">
+              {/* Terminal mode notice */}
+              <Show when={session()?.mode === 'terminal' && messages().length === 0}>
+                <div class="card-bordered" style={{ padding: '24px', "text-align": 'center' }}>
+                  <div
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      margin: '0 auto 12px',
+                      "border-radius": '50%',
+                      background: 'var(--color-accent-muted)',
+                      display: 'flex',
+                      "align-items": 'center',
+                      "justify-content": 'center',
+                    }}
+                  >
+                    <span class="text-mono" style={{ color: 'var(--color-accent)', "font-size": '18px' }}>&gt;_</span>
+                  </div>
+                  <p style={{ color: 'var(--color-text-secondary)', "margin-bottom": '8px' }}>
+                    Terminal mode active
+                  </p>
+                  <p class="text-caption" style={{ "margin-bottom": '16px' }}>
+                    Output appears in the terminal view.
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setCurrentView('term')}
+                  >
+                    Switch to Terminal
+                  </Button>
                 </div>
-                <p style={{ color: 'var(--color-text-secondary)', "margin-bottom": '8px' }}>
-                  Terminal mode active
-                </p>
-                <p class="text-caption" style={{ "margin-bottom": '16px' }}>
-                  Output appears in the terminal view.
-                </p>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setCurrentView('term')}
-                >
-                  Switch to Terminal
-                </Button>
-              </div>
-            </Show>
+              </Show>
 
-            <For each={messages()}>
-              {(message) => <MessageBubble message={message} />}
-            </For>
+              <For each={messages()}>
+                {(message) => <MessageBubble message={message} />}
+              </For>
 
-            <Show when={streamingContent()}>
-              <MessageBubble
-                message={{
-                  id: 'streaming',
-                  role: 'assistant',
-                  content: streamingContent(),
-                  timestamp: Date.now(),
-                  isStreaming: true,
-                }}
-              />
-            </Show>
+              <Show when={streamingContent()}>
+                <MessageBubble
+                  message={{
+                    id: 'streaming',
+                    role: 'assistant',
+                    content: streamingContent(),
+                    timestamp: Date.now(),
+                    isStreaming: true,
+                  }}
+                />
+              </Show>
 
-            <div ref={messagesEndRef} />
-          </main>
+              <div ref={messagesEndRef} />
+            </main>
 
-          <InputBar
-            onSend={handleSendMessage}
-            disabled={wsState() !== 'connected'}
-            placeholder={session()?.mode === 'terminal' ? 'Type here (output in terminal)...' : 'Message Claude...'}
-          />
-        </div>
+            <InputBar
+              onSend={handleSendMessage}
+              disabled={wsState() !== 'connected'}
+              placeholder={session()?.mode === 'terminal' ? 'Type here (output in terminal)...' : 'Message Claude...'}
+            />
+          </div>
+        </Show>
 
-        {/* Terminal View */}
+        {/* Terminal View - always render but hide to preserve state */}
         <div
-          class={currentView() !== 'term' ? 'hidden' : ''}
           style={{
-            display: 'flex',
+            display: currentView() === 'term' ? 'flex' : 'none',
             "flex-direction": 'column',
             flex: '1 1 0%',
             "min-height": '0',
@@ -767,41 +768,43 @@ export default function SessionPage() {
         </div>
 
         {/* History/Timeline View */}
-        <div
-          class={currentView() !== 'history' ? 'hidden' : ''}
-          style={{
-            display: 'flex',
-            "flex-direction": 'column',
-            flex: '1 1 0%',
-            "min-height": '0',
-            overflow: 'hidden',
-          }}
-        >
-          <Show when={diffState()}>
-            {(diff) => (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: '0',
-                  background: 'var(--color-bg-base)',
-                  "z-index": '10',
-                  overflow: 'auto',
-                }}
-              >
-                <DiffViewer
-                  fromInteraction={diff().interactionId}
-                  toInteraction={diff().interactionId}
-                  filePath={diff().file}
-                  onClose={() => setDiffState(null)}
-                />
-              </div>
-            )}
-          </Show>
-          <TimelineView
-            sessionId={params.id}
-            onViewDiff={(interactionId, file) => setDiffState({ interactionId, file })}
-          />
-        </div>
+        <Show when={currentView() === 'history'}>
+          <div
+            style={{
+              display: 'flex',
+              "flex-direction": 'column',
+              flex: '1 1 0%',
+              "min-height": '0',
+              overflow: 'hidden',
+              position: 'relative',
+            }}
+          >
+            <Show when={diffState()}>
+              {(diff) => (
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: '0',
+                    background: 'var(--color-bg-base)',
+                    "z-index": '10',
+                    overflow: 'auto',
+                  }}
+                >
+                  <DiffViewer
+                    fromInteraction={diff().interactionId}
+                    toInteraction={diff().interactionId}
+                    filePath={diff().file}
+                    onClose={() => setDiffState(null)}
+                  />
+                </div>
+              )}
+            </Show>
+            <TimelineView
+              sessionId={params.id}
+              onViewDiff={(interactionId, file) => setDiffState({ interactionId, file })}
+            />
+          </div>
+        </Show>
       </Show>
     </div>
   );

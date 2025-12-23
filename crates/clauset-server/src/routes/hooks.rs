@@ -27,10 +27,11 @@ pub async fn receive(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<HookEventPayload>,
 ) -> Result<Json<HookResponse>, (StatusCode, String)> {
+    let session_id = payload.clauset_session_id;
     debug!(
         target: "clauset::hooks",
         "Received hook event: {} for session {}",
-        payload.hook_event_name, payload.clauset_session_id
+        payload.hook_event_name, session_id
     );
 
     // Parse into typed event
@@ -42,8 +43,19 @@ pub async fn receive(
         }
     };
 
+    // Get current session costs for interaction delta calculation
+    let (cost_usd, input_tokens, output_tokens) =
+        if let Some(activity) = state.session_manager.get_activity(session_id).await {
+            (activity.cost, activity.input_tokens, activity.output_tokens)
+        } else {
+            (0.0, 0, 0)
+        };
+
     // Capture interaction data for persistence (runs concurrently with activity update)
-    state.interaction_processor.process_event(&event).await;
+    state
+        .interaction_processor
+        .process_event(&event, cost_usd, input_tokens, output_tokens)
+        .await;
 
     // Process the event for real-time activity updates
     if let Err(e) = process_hook_event(&state, event).await {

@@ -603,6 +603,34 @@ impl InteractionStore {
         Ok(())
     }
 
+    /// Mark an interaction as completed with cost/token deltas.
+    pub fn complete_interaction_with_costs(
+        &self,
+        id: Uuid,
+        cost_usd_delta: f64,
+        input_tokens_delta: u64,
+        output_tokens_delta: u64,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"UPDATE interactions
+               SET status = 'completed',
+                   ended_at = ?1,
+                   cost_usd_delta = ?2,
+                   input_tokens_delta = ?3,
+                   output_tokens_delta = ?4
+               WHERE id = ?5"#,
+            params![
+                Utc::now().to_rfc3339(),
+                cost_usd_delta,
+                input_tokens_delta as i64,
+                output_tokens_delta as i64,
+                id.to_string()
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Mark an interaction as failed.
     pub fn fail_interaction(&self, id: Uuid, error: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
