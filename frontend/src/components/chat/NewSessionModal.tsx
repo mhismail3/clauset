@@ -1,4 +1,4 @@
-import { Show, For, createSignal, createEffect, createMemo } from 'solid-js';
+import { Show, For, createSignal, createEffect, createMemo, onCleanup } from 'solid-js';
 import { useNavigate } from '@solidjs/router';
 import { Button } from '../ui/Button';
 import { Spinner } from '../ui/Spinner';
@@ -14,8 +14,9 @@ export function NewSessionModal(props: NewSessionModalProps) {
   const [projects, setProjects] = createSignal<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = createSignal(false);
   const [projectInput, setProjectInput] = createSignal('');
-  const [showDropdown, setShowDropdown] = createSignal(false);
+  const [showProjectDropdown, setShowProjectDropdown] = createSignal(false);
   const [selectedModel, setSelectedModel] = createSignal('haiku');
+  const [showModelDropdown, setShowModelDropdown] = createSignal(false);
   const [prompt, setPrompt] = createSignal('');
   const [chatMode, setChatMode] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
@@ -24,6 +25,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
   // Find matching project by path or name
   const matchedProject = createMemo(() => {
     const input = projectInput().toLowerCase();
+    if (!input) return null;
     return projects().find(
       p => p.path === projectInput() || p.name.toLowerCase() === input
     );
@@ -49,15 +51,16 @@ export function NewSessionModal(props: NewSessionModalProps) {
     { value: 'opus', label: 'Opus', description: 'Most capable' },
   ];
 
+  const selectedModelData = createMemo(() =>
+    models.find(m => m.value === selectedModel()) || models[0]
+  );
+
   async function fetchProjects() {
     setProjectsLoading(true);
     try {
       const response = await api.projects.list();
       setProjects(response.projects);
-      // Auto-select first project if none selected
-      if (response.projects.length > 0 && !projectInput()) {
-        setProjectInput(response.projects[0].name);
-      }
+      // Don't auto-select - leave empty for user to choose or type
     } catch (e) {
       console.error('Failed to fetch projects:', e);
     } finally {
@@ -65,11 +68,28 @@ export function NewSessionModal(props: NewSessionModalProps) {
     }
   }
 
-  // Fetch projects when modal opens
+  // Reset form when modal opens
   createEffect(() => {
     if (props.isOpen) {
+      setProjectInput('');
+      setPrompt('');
+      setError(null);
       fetchProjects();
     }
+  });
+
+  // Handle escape key
+  createEffect(() => {
+    if (!props.isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        props.onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    onCleanup(() => document.removeEventListener('keydown', handleKeyDown));
   });
 
   async function handleSubmit(e: Event) {
@@ -87,13 +107,10 @@ export function NewSessionModal(props: NewSessionModalProps) {
       let projectPath: string;
 
       if (isCreatingNew()) {
-        // Create new project first
         const newProject = await api.projects.create({ name: input });
         projectPath = newProject.path;
-        // Add to list so it's available next time
         setProjects([...projects(), newProject]);
       } else {
-        // Use existing project path
         projectPath = matchedProject()!.path;
       }
 
@@ -101,7 +118,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
         project_path: projectPath,
         prompt: prompt() || undefined,
         model: selectedModel(),
-        terminal_mode: !chatMode(), // Invert: chatMode=false means terminal_mode=true
+        terminal_mode: !chatMode(),
       });
 
       await api.sessions.start(response.session_id, prompt());
@@ -121,11 +138,59 @@ export function NewSessionModal(props: NewSessionModalProps) {
     }
   }
 
+  // Shared input styles
+  const inputStyles = {
+    width: "100%",
+    "box-sizing": "border-box",
+    padding: "12px 14px",
+    "font-size": "14px",
+    "font-family": "inherit",
+    "border-radius": "10px",
+    border: "1px solid var(--color-bg-overlay)",
+    background: "var(--color-bg-base)",
+    color: "var(--color-text-primary)",
+    outline: "none",
+    transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+  } as const;
+
+  const inputFocusStyles = `
+    .modal-input:focus {
+      border-color: var(--color-accent);
+      box-shadow: 0 0 0 2px var(--color-accent-muted);
+    }
+  `;
+
+  // Shared dropdown styles
+  const dropdownStyles = {
+    position: "absolute",
+    top: "100%",
+    left: "0",
+    right: "0",
+    "margin-top": "6px",
+    "border-radius": "10px",
+    border: "1px solid var(--color-bg-overlay)",
+    background: "var(--color-bg-surface)",
+    "max-height": "180px",
+    "overflow-y": "auto",
+    "box-shadow": "0 8px 24px rgba(0, 0, 0, 0.4)",
+    "z-index": "100",
+  } as const;
+
+  const dropdownItemStyles = {
+    padding: "10px 14px",
+    cursor: "pointer",
+    "font-size": "14px",
+    transition: "background 0.1s ease",
+  } as const;
+
   return (
     <Show when={props.isOpen}>
-      {/* Backdrop - uses fixed positioning with explicit dimensions */}
+      {/* Inject focus styles */}
+      <style>{inputFocusStyles}</style>
+
+      {/* Backdrop with blur */}
       <div
-        class="overlay-backdrop animate-fade-in"
+        class="animate-fade-in"
         style={{
           position: "fixed",
           top: "0",
@@ -137,18 +202,28 @@ export function NewSessionModal(props: NewSessionModalProps) {
           "align-items": "center",
           "justify-content": "center",
           padding: "16px",
+          "padding-top": "max(16px, env(safe-area-inset-top))",
+          "padding-bottom": "max(16px, env(safe-area-inset-bottom))",
+          background: "rgba(0, 0, 0, 0.7)",
+          "-webkit-backdrop-filter": "blur(8px)",
+          "backdrop-filter": "blur(8px)",
         }}
         onClick={handleBackdropClick}
       >
-        {/* Modal - explicit width that doesn't depend on flex */}
+        {/* Modal with retro card style */}
         <div
-          class="bg-bg-surface animate-slide-up overflow-hidden"
+          class="animate-slide-up"
           style={{
-            width: "min(400px, calc(100vw - 32px))",
+            width: "min(420px, calc(100vw - 32px))",
             "max-height": "calc(100vh - 32px)",
             "max-height": "calc(100dvh - 32px)",
-            "border-radius": "16px",
-            "box-shadow": "0 8px 32px rgba(0, 0, 0, 0.5)",
+            "border-radius": "14px",
+            border: "1.5px solid var(--color-bg-overlay)",
+            background: "var(--color-bg-surface)",
+            "box-shadow": "4px 4px 0px rgba(0, 0, 0, 0.4)",
+            overflow: "hidden",
+            display: "flex",
+            "flex-direction": "column",
           }}
         >
           {/* Header */}
@@ -157,18 +232,28 @@ export function NewSessionModal(props: NewSessionModalProps) {
               display: "flex",
               "align-items": "center",
               "justify-content": "space-between",
-              padding: "20px 20px 16px",
+              padding: "18px 20px",
+              "border-bottom": "1px solid var(--color-bg-overlay)",
+              "flex-shrink": "0",
             }}
           >
-            <h2 class="text-text-primary" style={{ "font-size": "18px", "font-weight": "600", margin: "0" }}>
+            <h2
+              class="text-text-primary"
+              style={{
+                "font-size": "17px",
+                "font-weight": "600",
+                margin: "0",
+                "letter-spacing": "-0.01em",
+              }}
+            >
               New Session
             </h2>
             <button
               onClick={props.onClose}
-              class="text-text-muted hover:text-text-primary transition-colors pressable"
+              class="text-text-muted hover:text-text-primary pressable"
               style={{
-                width: "28px",
-                height: "28px",
+                width: "32px",
+                height: "32px",
                 display: "flex",
                 "align-items": "center",
                 "justify-content": "center",
@@ -176,33 +261,38 @@ export function NewSessionModal(props: NewSessionModalProps) {
                 border: "none",
                 background: "transparent",
                 cursor: "pointer",
+                transition: "color 0.15s ease",
               }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                 <path d="M18 6L6 18M6 6l12 12" />
               </svg>
             </button>
           </div>
 
-          {/* Form */}
+          {/* Form - scrollable */}
           <form
             onSubmit={handleSubmit}
             class="scrollable"
             style={{
-              padding: "0 20px 20px",
-              "max-height": "calc(100vh - 100px)",
-              "max-height": "calc(100dvh - 100px)",
+              padding: "20px",
+              "overflow-y": "auto",
+              flex: "1",
+              "-webkit-overflow-scrolling": "touch",
             }}
           >
-            <div style={{ display: "flex", "flex-direction": "column", gap: "16px" }}>
+            <div style={{ display: "flex", "flex-direction": "column", gap: "18px" }}>
+              {/* Error message */}
               <Show when={error()}>
                 <div
-                  class="text-status-error"
                   style={{
-                    padding: "10px 12px",
-                    "border-radius": "8px",
-                    background: "rgba(196, 91, 55, 0.1)",
+                    padding: "12px 14px",
+                    "border-radius": "10px",
+                    border: "1px solid var(--color-accent)",
+                    background: "var(--color-accent-muted)",
+                    color: "var(--color-accent)",
                     "font-size": "13px",
+                    "font-weight": "500",
                   }}
                 >
                   {error()}
@@ -215,7 +305,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
                   class="text-label"
                   style={{
                     display: "block",
-                    "margin-bottom": "6px",
+                    "margin-bottom": "8px",
                   }}
                 >
                   Project
@@ -228,11 +318,8 @@ export function NewSessionModal(props: NewSessionModalProps) {
                       style={{
                         display: "flex",
                         "align-items": "center",
-                        gap: "8px",
-                        padding: "10px 12px",
-                        "border-radius": "8px",
-                        background: "var(--color-bg-base)",
-                        "font-size": "14px",
+                        gap: "10px",
+                        ...inputStyles,
                       }}
                     >
                       <Spinner size="sm" />
@@ -245,51 +332,40 @@ export function NewSessionModal(props: NewSessionModalProps) {
                       type="text"
                       value={projectInput()}
                       onInput={(e) => setProjectInput(e.currentTarget.value)}
-                      onFocus={() => setShowDropdown(true)}
-                      onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
-                      placeholder="Select or create a project..."
-                      class="text-text-primary placeholder:text-text-muted"
-                      style={{
-                        width: "100%",
-                        "box-sizing": "border-box",
-                        padding: "10px 12px",
-                        "font-size": "15px",
-                        "border-radius": "8px",
-                        border: "none",
-                        background: "var(--color-bg-base)",
-                        outline: "none",
-                      }}
+                      onFocus={() => setShowProjectDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowProjectDropdown(false), 150)}
+                      placeholder="Select or type to create..."
+                      class="modal-input placeholder:text-text-muted"
+                      style={inputStyles}
                     />
+                    {/* Chevron indicator */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        right: "12px",
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        "pointer-events": "none",
+                        color: "var(--color-text-muted)",
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </div>
+
                     {/* Dropdown */}
-                    <Show when={showDropdown() && filteredProjects().length > 0}>
-                      <div
-                        class="bg-bg-surface"
-                        style={{
-                          position: "absolute",
-                          top: "100%",
-                          left: "0",
-                          right: "0",
-                          "margin-top": "4px",
-                          "border-radius": "8px",
-                          "max-height": "160px",
-                          "overflow-y": "auto",
-                          "box-shadow": "0 4px 16px rgba(0, 0, 0, 0.3)",
-                          "z-index": "100",
-                        }}
-                      >
+                    <Show when={showProjectDropdown() && filteredProjects().length > 0}>
+                      <div style={dropdownStyles}>
                         <For each={filteredProjects()}>
                           {(project) => (
                             <div
-                              class="text-text-primary hover:bg-bg-base"
-                              style={{
-                                padding: "8px 12px",
-                                cursor: "pointer",
-                                "font-size": "14px",
-                              }}
+                              class="text-text-primary hover:bg-bg-elevated"
+                              style={dropdownItemStyles}
                               onMouseDown={(e) => {
                                 e.preventDefault();
                                 setProjectInput(project.name);
-                                setShowDropdown(false);
+                                setShowProjectDropdown(false);
                               }}
                             >
                               {project.name}
@@ -299,68 +375,116 @@ export function NewSessionModal(props: NewSessionModalProps) {
                       </div>
                     </Show>
                   </div>
+
                   {/* Create new indicator */}
                   <Show when={isCreatingNew() && projectInput().trim()}>
                     <div
                       class="text-accent"
                       style={{
                         "font-size": "12px",
-                        "margin-top": "6px",
+                        "font-weight": "500",
+                        "margin-top": "8px",
                         display: "flex",
                         "align-items": "center",
-                        gap: "4px",
+                        gap: "6px",
                       }}
                     >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                         <path d="M12 5v14M5 12h14" />
                       </svg>
-                      <span>Will create new project: <strong>{projectInput().trim()}</strong></span>
+                      <span>Will create: <strong>{projectInput().trim()}</strong></span>
                     </div>
                   </Show>
                 </Show>
               </div>
 
-              {/* Model Selection */}
-              <div>
+              {/* Model Selection - Custom Dropdown */}
+              <div style={{ position: "relative" }}>
                 <label
                   class="text-label"
                   style={{
                     display: "block",
-                    "margin-bottom": "6px",
+                    "margin-bottom": "8px",
                   }}
                 >
                   Model
                 </label>
-                <select
-                  value={selectedModel()}
-                  onChange={(e) => setSelectedModel(e.currentTarget.value)}
-                  class="text-text-primary"
-                  style={{
-                    width: "100%",
-                    "box-sizing": "border-box",
-                    padding: "10px 12px",
-                    "font-size": "15px",
-                    "border-radius": "8px",
-                    border: "none",
-                    background: "var(--color-bg-base)",
-                    outline: "none",
-                    cursor: "pointer",
-                    appearance: "none",
-                    "-webkit-appearance": "none",
-                    "background-image": `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235c5855' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
-                    "background-repeat": "no-repeat",
-                    "background-position": "right 10px center",
-                    "padding-right": "32px",
-                  }}
-                >
-                  <For each={models}>
-                    {(model) => (
-                      <option value={model.value}>
-                        {model.label} — {model.description}
-                      </option>
-                    )}
-                  </For>
-                </select>
+                <div style={{ position: "relative" }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowModelDropdown(!showModelDropdown())}
+                    onBlur={() => setTimeout(() => setShowModelDropdown(false), 150)}
+                    class="modal-input text-text-primary"
+                    style={{
+                      ...inputStyles,
+                      display: "flex",
+                      "align-items": "center",
+                      "justify-content": "space-between",
+                      cursor: "pointer",
+                      "text-align": "left",
+                      "padding-right": "40px",
+                    }}
+                  >
+                    <span>
+                      {selectedModelData().label}
+                      <span class="text-text-tertiary" style={{ "margin-left": "8px" }}>
+                        — {selectedModelData().description}
+                      </span>
+                    </span>
+                  </button>
+                  {/* Chevron indicator */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: "12px",
+                      top: "50%",
+                      transform: `translateY(-50%) rotate(${showModelDropdown() ? '180deg' : '0deg'})`,
+                      "pointer-events": "none",
+                      color: "var(--color-text-muted)",
+                      transition: "transform 0.15s ease",
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </div>
+
+                  {/* Dropdown */}
+                  <Show when={showModelDropdown()}>
+                    <div style={dropdownStyles}>
+                      <For each={models}>
+                        {(model) => (
+                          <div
+                            class={`text-text-primary ${model.value === selectedModel() ? 'bg-bg-elevated' : ''} hover:bg-bg-elevated`}
+                            style={{
+                              ...dropdownItemStyles,
+                              display: "flex",
+                              "align-items": "center",
+                              "justify-content": "space-between",
+                            }}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setSelectedModel(model.value);
+                              setShowModelDropdown(false);
+                            }}
+                          >
+                            <span>
+                              {model.label}
+                              <span class="text-text-tertiary" style={{ "margin-left": "8px" }}>
+                                — {model.description}
+                              </span>
+                            </span>
+                            <Show when={model.value === selectedModel()}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2.5">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            </Show>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
               </div>
 
               {/* Initial Prompt (Optional) */}
@@ -369,29 +493,22 @@ export function NewSessionModal(props: NewSessionModalProps) {
                   class="text-label"
                   style={{
                     display: "block",
-                    "margin-bottom": "6px",
+                    "margin-bottom": "8px",
                   }}
                 >
-                  Initial Prompt{' '}
-                  <span style={{ opacity: "0.6" }}>(optional)</span>
+                  Initial Prompt
+                  <span class="text-text-muted" style={{ "margin-left": "6px", "text-transform": "none" }}>(optional)</span>
                 </label>
                 <textarea
                   value={prompt()}
                   onInput={(e) => setPrompt(e.currentTarget.value)}
                   placeholder="What would you like Claude to help with?"
                   rows={3}
-                  class="text-text-primary placeholder:text-text-muted"
+                  class="modal-input placeholder:text-text-muted"
                   style={{
-                    width: "100%",
-                    "box-sizing": "border-box",
-                    padding: "10px 12px",
-                    "font-size": "15px",
-                    "border-radius": "8px",
-                    border: "none",
-                    background: "var(--color-bg-base)",
-                    outline: "none",
+                    ...inputStyles,
                     resize: "none",
-                    "font-family": "inherit",
+                    "line-height": "1.5",
                   }}
                 />
               </div>
@@ -401,12 +518,15 @@ export function NewSessionModal(props: NewSessionModalProps) {
                 style={{
                   display: "flex",
                   "align-items": "flex-start",
-                  gap: "10px",
-                  padding: "12px",
-                  "border-radius": "8px",
+                  gap: "12px",
+                  padding: "14px",
+                  "border-radius": "10px",
+                  border: "1px solid var(--color-bg-overlay)",
                   background: "var(--color-bg-base)",
                   cursor: "pointer",
+                  transition: "border-color 0.15s ease",
                 }}
+                class="hover:border-text-muted"
               >
                 <input
                   type="checkbox"
@@ -415,7 +535,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
                   style={{
                     width: "18px",
                     height: "18px",
-                    "margin-top": "1px",
+                    "margin-top": "2px",
                     "accent-color": "var(--color-accent)",
                     cursor: "pointer",
                     "flex-shrink": "0",
@@ -424,42 +544,50 @@ export function NewSessionModal(props: NewSessionModalProps) {
                 <div style={{ flex: "1", "min-width": "0" }}>
                   <span
                     class="text-text-primary"
-                    style={{ display: "block", "font-size": "13px", "font-weight": "500" }}
+                    style={{ display: "block", "font-size": "14px", "font-weight": "500" }}
                   >
                     Chat Mode
                   </span>
                   <span
                     class="text-text-tertiary"
-                    style={{ display: "block", "font-size": "11px", "margin-top": "2px", "line-height": "1.4" }}
+                    style={{ display: "block", "font-size": "12px", "margin-top": "4px", "line-height": "1.5" }}
                   >
                     Uses Claude API (per token). Uncheck for Terminal Mode (Max subscription).
                   </span>
                 </div>
               </label>
-
-              {/* Actions */}
-              <div
-                class="safe-bottom"
-                style={{ display: "flex", gap: "10px", "padding-top": "4px" }}
-              >
-                <Button
-                  type="button"
-                  variant="ghost"
-                  style={{ flex: "1" }}
-                  onClick={props.onClose}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  style={{ flex: "1" }}
-                  disabled={loading() || !projectInput().trim()}
-                >
-                  {loading() ? 'Creating...' : 'Create'}
-                </Button>
-              </div>
             </div>
           </form>
+
+          {/* Footer Actions */}
+          <div
+            style={{
+              display: "flex",
+              gap: "12px",
+              padding: "16px 20px",
+              "padding-bottom": "max(16px, env(safe-area-inset-bottom))",
+              "border-top": "1px solid var(--color-bg-overlay)",
+              background: "var(--color-bg-surface)",
+              "flex-shrink": "0",
+            }}
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              style={{ flex: "1" }}
+              onClick={props.onClose}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              style={{ flex: "1" }}
+              disabled={loading() || !projectInput().trim()}
+              onClick={handleSubmit}
+            >
+              {loading() ? 'Creating...' : 'Create Session'}
+            </Button>
+          </div>
         </div>
       </div>
     </Show>
