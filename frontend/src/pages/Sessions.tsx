@@ -17,7 +17,7 @@ export default function Sessions() {
   const [showNewSession, setShowNewSession] = createSignal(false);
   const [menuState, setMenuState] = createSignal<{
     session: Session;
-    position: { top: number; right: number };
+    position: { top: number; bottom: number; right: number; openUpward: boolean };
     view: 'menu' | 'rename' | 'delete';
   } | null>(null);
   const [renameValue, setRenameValue] = createSignal('');
@@ -80,12 +80,20 @@ export default function Sessions() {
     const button = e.currentTarget as HTMLElement;
     const rect = button.getBoundingClientRect();
 
+    // Estimate menu height (delete/rename views are taller)
+    const estimatedMenuHeight = 180;
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const spaceAbove = rect.top - 8;
+    const openUpward = spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow;
+
     setRenameValue(session.preview || session.project_path.split('/').pop() || '');
     setMenuState({
       session,
       position: {
         top: rect.bottom + 8,
+        bottom: window.innerHeight - rect.top + 8,
         right: window.innerWidth - rect.right,
+        openUpward,
       },
       view: 'menu',
     });
@@ -303,7 +311,8 @@ export default function Sessions() {
               class="animate-scale-in"
               style={{
                 position: 'fixed',
-                top: `${state().position.top}px`,
+                top: state().position.openUpward ? 'auto' : `${state().position.top}px`,
+                bottom: state().position.openUpward ? `${state().position.bottom}px` : 'auto',
                 right: `${state().position.right}px`,
                 "z-index": '50',
                 width: '200px',
@@ -312,7 +321,7 @@ export default function Sessions() {
                 "border-radius": '12px',
                 "box-shadow": '0 8px 32px rgba(0, 0, 0, 0.4)',
                 overflow: 'hidden',
-                "transform-origin": 'top right',
+                "transform-origin": state().position.openUpward ? 'bottom right' : 'top right',
               }}
             >
               {/* Main Menu */}

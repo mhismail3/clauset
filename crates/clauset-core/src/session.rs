@@ -487,6 +487,18 @@ impl SessionManager {
             new_action,
             is_busy,
         ).await {
+            tracing::info!(
+                "[STATS_DEBUG] >>> BROADCASTING ActivityUpdate from HOOK! session={}, model='{}', cost=${:.4}, tokens={}K/{}K, ctx={}%, activity='{}', step={:?}",
+                session_id,
+                activity.model,
+                activity.cost,
+                activity.input_tokens / 1000,
+                activity.output_tokens / 1000,
+                activity.context_percent,
+                activity.current_activity,
+                activity.current_step
+            );
+
             // Broadcast the updated activity
             let _ = self.event_tx.send(ProcessEvent::ActivityUpdate {
                 session_id,

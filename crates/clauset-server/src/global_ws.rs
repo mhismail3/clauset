@@ -59,22 +59,24 @@ pub async fn handle_global_websocket(socket: WebSocket, state: Arc<AppState>) ->
                     current_activity,
                     current_step,
                     recent_actions,
-                } => Some(WsServerMessage::ActivityUpdate {
-                    session_id: *session_id,
-                    model: model.clone(),
-                    cost: *cost,
-                    input_tokens: *input_tokens,
-                    output_tokens: *output_tokens,
-                    context_percent: *context_percent,
-                    current_activity: current_activity.clone(),
-                    current_step: current_step.clone(),
-                    recent_actions: recent_actions.iter().map(|a| clauset_types::RecentAction {
-                        action_type: a.action_type.clone(),
-                        summary: a.summary.clone(),
-                        detail: a.detail.clone(),
-                        timestamp: a.timestamp,
-                    }).collect(),
-                }),
+                } => {
+                    Some(WsServerMessage::ActivityUpdate {
+                        session_id: *session_id,
+                        model: model.clone(),
+                        cost: *cost,
+                        input_tokens: *input_tokens,
+                        output_tokens: *output_tokens,
+                        context_percent: *context_percent,
+                        current_activity: current_activity.clone(),
+                        current_step: current_step.clone(),
+                        recent_actions: recent_actions.iter().map(|a| clauset_types::RecentAction {
+                            action_type: a.action_type.clone(),
+                            summary: a.summary.clone(),
+                            detail: a.detail.clone(),
+                            timestamp: a.timestamp,
+                        }).collect(),
+                    })
+                },
 
                 // Forward session exits as status changes
                 ProcessEvent::Exited { session_id, .. } => {

@@ -176,12 +176,18 @@ impl SessionBuffers {
 
         // Parse status line from FULL BUFFER: "Model | $Cost | InputK/OutputK | ctx:X%"
         if let Some(status) = parse_status_line(&clean_buffer) {
-            if buffer.activity.model != status.model
-                || (buffer.activity.cost - status.cost).abs() > 0.001
-                || buffer.activity.input_tokens != status.input_tokens
-                || buffer.activity.output_tokens != status.output_tokens
-                || buffer.activity.context_percent != status.context_percent
+            let model_changed = buffer.activity.model != status.model;
+            let cost_changed = (buffer.activity.cost - status.cost).abs() > 0.001;
+            let input_changed = buffer.activity.input_tokens != status.input_tokens;
+            let output_changed = buffer.activity.output_tokens != status.output_tokens;
+            let ctx_changed = buffer.activity.context_percent != status.context_percent;
+
+            if model_changed || cost_changed || input_changed || output_changed || ctx_changed
             {
+                tracing::debug!(
+                    "Stats updated: model='{}', cost=${:.4}, tokens={}K/{}K, ctx={}%",
+                    status.model, status.cost, status.input_tokens/1000, status.output_tokens/1000, status.context_percent
+                );
                 buffer.activity.model = status.model;
                 buffer.activity.cost = status.cost;
                 buffer.activity.input_tokens = status.input_tokens;
@@ -523,35 +529,116 @@ struct ParsedStatus {
     context_percent: u8,
 }
 
-/// Pre-compiled regex for status line parsing
-static STATUS_LINE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    // Model must start with a letter, followed by alphanumeric, dots, dashes, and spaces
-    // Examples: "Opus 4.5", "Claude 3", "Sonnet 3.5", "haiku", "opus-4-5", "claude-3-sonnet"
+/// Regex for full status line: "Model | $Cost | Input/Output | ctx:X%"
+/// Also matches partial formats where tokens/context are missing
+static STATUS_LINE_FULL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*\|\s*([0-9.]+)K?/([0-9.]+)K?\s*\|\s*ctx:(\d+)%"
+        r"^([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*(?:\|\s*([0-9.]+)K?/([0-9.]+)K?)?\s*(?:\|\s*ctx:(\d+)%)?"
     ).unwrap()
 });
 
-/// Parse Claude's status line format: "Model | $Cost | InputK/OutputK | ctx:X%"
-fn parse_status_line(text: &str) -> Option<ParsedStatus> {
-    // Look for the pattern in each line
-    for line in text.lines() {
-        let line = line.trim();
+/// Regex for continuation line with tokens: "Input/Output | ctx:X%"
+/// This handles wrapped status lines on narrow terminals
+static STATUS_LINE_TOKENS: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^([0-9.]+)K?/([0-9.]+)K?\s*(?:\|\s*ctx:(\d+)%)?").unwrap()
+});
 
-        if let Some(caps) = STATUS_LINE_REGEX.captures(line) {
+/// Regex for just model and cost (first line of wrapped status)
+static STATUS_LINE_MODEL_COST: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*\|?\s*$").unwrap()
+});
+
+/// Parse Claude's status line format, handling multi-line wrapping.
+///
+/// The status line can appear in several formats:
+/// - Full: "Opus 4.5 | $0.68 | 29.2K/22.5K | ctx:11%"
+/// - With trailing text: "Haiku 4.5 | $0.06 |     Update available!"
+/// - Wrapped (narrow terminal):
+///   Line 1: "Haiku 4.5 | $0.07 |"
+///   Line 2: "2.4K/1.2K | ctx:21%"
+fn parse_status_line(text: &str) -> Option<ParsedStatus> {
+    let lines: Vec<&str> = text.lines().collect();
+
+    // Search from the end (status line is at bottom)
+    for (i, line) in lines.iter().enumerate().rev().take(50) {
+        let trimmed = line.trim();
+
+        // Skip empty or code-like lines
+        if trimmed.is_empty() || trimmed.len() > 100 {
+            continue;
+        }
+        if trimmed.contains('"') || trimmed.contains(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        // Try full status line pattern
+        if let Some(caps) = STATUS_LINE_FULL.captures(trimmed) {
             let model = caps.get(1)?.as_str().trim().to_string();
-            let cost = caps.get(2)?.as_str().parse().ok()?;
-            let input_k: f64 = caps.get(3)?.as_str().parse().ok()?;
-            let output_k: f64 = caps.get(4)?.as_str().parse().ok()?;
-            let context_percent: u8 = caps.get(5)?.as_str().parse().ok()?;
+            let cost: f64 = caps.get(2)?.as_str().parse().ok()?;
+            let input_k: f64 = caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
+            let output_k: f64 = caps.get(4).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
+            let context: u8 = caps.get(5).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
 
             return Some(ParsedStatus {
                 model,
                 cost,
                 input_tokens: (input_k * 1000.0) as u64,
                 output_tokens: (output_k * 1000.0) as u64,
-                context_percent,
+                context_percent: context,
             });
+        }
+
+        // Try model+cost only pattern (might be first line of wrapped status)
+        if let Some(caps) = STATUS_LINE_MODEL_COST.captures(trimmed) {
+            let model = caps.get(1)?.as_str().trim().to_string();
+            let cost: f64 = caps.get(2)?.as_str().parse().ok()?;
+
+            // Check if next line has tokens/context (wrapped status)
+            let (input_k, output_k, context) = if i + 1 < lines.len() {
+                let next_line = lines[i + 1].trim();
+                if let Some(token_caps) = STATUS_LINE_TOKENS.captures(next_line) {
+                    let ink: f64 = token_caps.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
+                    let outk: f64 = token_caps.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
+                    let ctx: u8 = token_caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+                    (ink, outk, ctx)
+                } else {
+                    (0.0, 0.0, 0)
+                }
+            } else {
+                (0.0, 0.0, 0)
+            };
+
+            return Some(ParsedStatus {
+                model,
+                cost,
+                input_tokens: (input_k * 1000.0) as u64,
+                output_tokens: (output_k * 1000.0) as u64,
+                context_percent: context,
+            });
+        }
+
+        // Try tokens-only line (second line of wrapped status, search backwards for model)
+        if let Some(token_caps) = STATUS_LINE_TOKENS.captures(trimmed) {
+            let input_k: f64 = token_caps.get(1)?.as_str().parse().ok()?;
+            let output_k: f64 = token_caps.get(2)?.as_str().parse().ok()?;
+            let context: u8 = token_caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+
+            // Look backwards for model+cost line
+            if i > 0 {
+                let prev_line = lines[i - 1].trim();
+                if let Some(model_caps) = STATUS_LINE_MODEL_COST.captures(prev_line) {
+                    let model = model_caps.get(1)?.as_str().trim().to_string();
+                    let cost: f64 = model_caps.get(2)?.as_str().parse().ok()?;
+
+                    return Some(ParsedStatus {
+                        model,
+                        cost,
+                        input_tokens: (input_k * 1000.0) as u64,
+                        output_tokens: (output_k * 1000.0) as u64,
+                        context_percent: context,
+                    });
+                }
+            }
         }
     }
 
@@ -1201,6 +1288,7 @@ mod tests {
 
     #[test]
     fn test_parse_status_line() {
+        // Test full format
         let input = "Opus 4.5 | $0.68 | 29.2K/22.5K | ctx:11%";
         let status = parse_status_line(input).unwrap();
         assert_eq!(status.model, "Opus 4.5");
@@ -1208,6 +1296,103 @@ mod tests {
         assert_eq!(status.input_tokens, 29200);
         assert_eq!(status.output_tokens, 22500);
         assert_eq!(status.context_percent, 11);
+    }
+
+    #[test]
+    fn test_parse_status_line_partial() {
+        // Test minimal format: just model and cost
+        let input = "haiku | $0.00";
+        let status = parse_status_line(input).unwrap();
+        assert_eq!(status.model, "haiku");
+        assert!((status.cost - 0.0).abs() < 0.01);
+        assert_eq!(status.input_tokens, 0);
+        assert_eq!(status.output_tokens, 0);
+        assert_eq!(status.context_percent, 0);
+
+        // Test with tokens but no context
+        let input2 = "sonnet | $0.50 | 5.2K/3.1K";
+        let status2 = parse_status_line(input2).unwrap();
+        assert_eq!(status2.model, "sonnet");
+        assert!((status2.cost - 0.50).abs() < 0.01);
+        assert_eq!(status2.input_tokens, 5200);
+        assert_eq!(status2.output_tokens, 3100);
+        assert_eq!(status2.context_percent, 0);
+
+        // Test with model containing dashes
+        let input3 = "opus-4-5 | $1.23 | 10K/8K | ctx:5%";
+        let status3 = parse_status_line(input3).unwrap();
+        assert_eq!(status3.model, "opus-4-5");
+        assert!((status3.cost - 1.23).abs() < 0.01);
+        assert_eq!(status3.input_tokens, 10000);
+        assert_eq!(status3.output_tokens, 8000);
+        assert_eq!(status3.context_percent, 5);
+    }
+
+    #[test]
+    fn test_parse_status_line_false_positives() {
+        // Should NOT match status line embedded in code
+        let code = r#"let price = "haiku | $0.00";"#;
+        assert!(parse_status_line(code).is_none(), "Should not match status line in code");
+
+        // Should NOT match very long lines
+        let long_line = "This is a very long line of text that happens to contain haiku | $0.00 somewhere in the middle of it and should not be matched";
+        assert!(parse_status_line(long_line).is_none(), "Should not match in long lines");
+
+        // Should NOT match when embedded in larger text (match doesn't start at beginning)
+        let embedded = "Model: haiku | $0.00 - some extra text here";
+        assert!(parse_status_line(embedded).is_none(), "Should not match when embedded after prefix");
+
+        // SHOULD match status line with trailing "Update available!" text
+        // This is Claude Code's actual format when an update is available
+        let with_update = "Haiku 4.5 | $0.06 |     Update available!";
+        let status_update = parse_status_line(with_update).unwrap();
+        assert_eq!(status_update.model, "Haiku 4.5");
+        assert!((status_update.cost - 0.06).abs() < 0.01);
+
+        // SHOULD match a clean status line
+        let clean = "haiku | $0.50 | 5K/3K | ctx:5%";
+        assert!(parse_status_line(clean).is_some(), "Should match clean status line");
+
+        // SHOULD match with surrounding whitespace
+        let with_space = "   haiku | $0.50   ";
+        assert!(parse_status_line(with_space).is_some(), "Should match with whitespace");
+    }
+
+    #[test]
+    fn test_parse_status_line_multiline() {
+        // Test wrapped status line (narrow terminal)
+        // Line 1: "Haiku 4.5 | $0.07 |"
+        // Line 2: "2.4K/1.2K | ctx:21%"
+        let wrapped = "Some content\nHaiku 4.5 | $0.07 |\n2.4K/1.2K | ctx:21%";
+        let status = parse_status_line(wrapped).unwrap();
+        assert_eq!(status.model, "Haiku 4.5");
+        assert!((status.cost - 0.07).abs() < 0.01);
+        assert_eq!(status.input_tokens, 2400);
+        assert_eq!(status.output_tokens, 1200);
+        assert_eq!(status.context_percent, 21);
+
+        // Test where we find the token line first and look back for model
+        let wrapped2 = "Content\nOpus 4.5 | $1.23 |\n10.5K/8.2K | ctx:15%\nMore content";
+        let status2 = parse_status_line(wrapped2).unwrap();
+        assert_eq!(status2.model, "Opus 4.5");
+        assert!((status2.cost - 1.23).abs() < 0.01);
+        assert_eq!(status2.input_tokens, 10500);
+        assert_eq!(status2.output_tokens, 8200);
+        assert_eq!(status2.context_percent, 15);
+    }
+
+    #[test]
+    fn test_parse_status_line_with_notifications() {
+        // Wide terminal with notifications on the right
+        // "Opus 4.5 | $0.00 | 0/0 | ctx:0%     1 MCP server failed..."
+        // The regex should match the status part and ignore the rest
+        let with_notif = "Opus 4.5 | $0.00 | 0/0 | ctx:0%";
+        let status = parse_status_line(with_notif).unwrap();
+        assert_eq!(status.model, "Opus 4.5");
+        assert!((status.cost - 0.0).abs() < 0.01);
+        assert_eq!(status.input_tokens, 0);
+        assert_eq!(status.output_tokens, 0);
+        assert_eq!(status.context_percent, 0);
     }
 
     #[test]
