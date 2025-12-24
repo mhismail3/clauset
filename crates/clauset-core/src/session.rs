@@ -15,6 +15,8 @@ pub struct SessionManagerConfig {
     pub db_path: PathBuf,
     pub max_concurrent_sessions: usize,
     pub default_model: String,
+    /// URL for hooks to send events back to (e.g., "http://localhost:8080")
+    pub clauset_url: String,
 }
 
 impl Default for SessionManagerConfig {
@@ -27,6 +29,7 @@ impl Default for SessionManagerConfig {
                 .join("sessions.db"),
             max_concurrent_sessions: 10,
             default_model: "haiku".to_string(),
+            clauset_url: "http://localhost:8080".to_string(),
         }
     }
 }
@@ -159,6 +162,7 @@ impl SessionManager {
                     model: Some(session.model),
                     mode: session.mode,
                     resume: false,
+                    clauset_url: self.config.clauset_url.clone(),
                 },
                 self.event_tx.clone(),
             )
@@ -208,6 +212,7 @@ impl SessionManager {
                     model: Some(session.model),
                     mode: session.mode,
                     resume: true,
+                    clauset_url: self.config.clauset_url.clone(),
                 },
                 self.event_tx.clone(),
             )

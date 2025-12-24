@@ -16,11 +16,15 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: Config) -> clauset_core::Result<Self> {
+        // Build the URL that hooks should use to send events back to this server
+        let clauset_url = format!("http://localhost:{}", config.port);
+
         let session_config = SessionManagerConfig {
             claude_path: config.claude_path.clone(),
             db_path: config.db_path.clone(),
             max_concurrent_sessions: config.max_concurrent_sessions,
             default_model: config.default_model.clone(),
+            clauset_url,
         };
 
         let session_manager = Arc::new(SessionManager::new(session_config)?);

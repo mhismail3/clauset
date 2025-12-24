@@ -63,6 +63,8 @@ pub struct SpawnOptions {
     pub model: Option<String>,
     pub mode: SessionMode,
     pub resume: bool,
+    /// URL for hooks to send events back to
+    pub clauset_url: String,
 }
 
 /// Manages Claude CLI processes.
@@ -291,7 +293,7 @@ impl ProcessManager {
         // Set environment variables for Clauset hooks integration
         // These allow the hook script to identify which session and where to send events
         cmd.env("CLAUSET_SESSION_ID", opts.session_id.to_string());
-        cmd.env("CLAUSET_URL", "http://localhost:8080");
+        cmd.env("CLAUSET_URL", &opts.clauset_url);
 
         cmd.cwd(&opts.project_path);
 
