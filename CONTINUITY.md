@@ -122,8 +122,15 @@ Success criteria:
   - PWA safe area handling for mobile
   - Monospace font (JetBrains Mono) for title and inputs matching session cards
 
+- Chat UI/UX Overhaul (matching dashboard retro theme)
+  - MessageBubble.tsx: Retro offset shadows, borders on user/assistant bubbles
+  - ToolCallView: Colored left accent bar by tool type, chevron expand icon, card styling
+  - MarkdownContent: Code blocks with retro shadows and borders
+  - InputBar.tsx: Glass container, retro-styled textarea with focus glow, icon-only send button
+  - Session.tsx: Empty state card with retro styling and chat icon
+
 ### Now
-- Chat mode fully working! ✅
+- Chat UI/UX overhaul complete and tested
 
 ### Verified Working
 - User messages display as chat bubbles (from UserPromptSubmit hook)

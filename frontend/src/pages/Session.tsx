@@ -742,25 +742,38 @@ export default function SessionPage() {
             <main class="flex-1 scrollable p-4 space-y-4" style={{ "min-height": '0' }}>
               {/* Empty state when no messages yet */}
               <Show when={messages().length === 0 && !streamingContent()}>
-                <div class="card-bordered" style={{ padding: '24px', "text-align": 'center' }}>
+                <div
+                  style={{
+                    padding: '32px 24px',
+                    "text-align": 'center',
+                    background: 'var(--color-bg-surface)',
+                    border: '1.5px solid var(--color-bg-overlay)',
+                    "border-radius": '14px',
+                    "box-shadow": '3px 3px 0px rgba(0, 0, 0, 0.3)',
+                  }}
+                >
                   <div
                     style={{
-                      width: '48px',
-                      height: '48px',
-                      margin: '0 auto 12px',
-                      "border-radius": '50%',
+                      width: '56px',
+                      height: '56px',
+                      margin: '0 auto 16px',
+                      "border-radius": '14px',
                       background: 'var(--color-accent-muted)',
+                      border: '1px solid var(--color-accent)',
                       display: 'flex',
                       "align-items": 'center',
                       "justify-content": 'center',
+                      "box-shadow": '2px 2px 0px rgba(0, 0, 0, 0.2)',
                     }}
                   >
-                    <span class="text-mono" style={{ color: 'var(--color-accent)', "font-size": '18px' }}>&#x2709;</span>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2">
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    </svg>
                   </div>
-                  <p style={{ color: 'var(--color-text-secondary)', "margin-bottom": '8px' }}>
+                  <p class="text-mono" style={{ color: 'var(--color-text-primary)', "font-size": '15px', "font-weight": '600', "margin-bottom": '6px' }}>
                     No messages yet
                   </p>
-                  <p class="text-caption" style={{ "margin-bottom": '16px' }}>
+                  <p style={{ color: 'var(--color-text-tertiary)', "font-size": '13px' }}>
                     Messages from Claude will appear here.
                   </p>
                 </div>
