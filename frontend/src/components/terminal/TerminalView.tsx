@@ -2,8 +2,9 @@ import { onMount, onCleanup, createSignal, createEffect, For } from 'solid-js';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { loadTerminalFont, getRecommendedFontSize } from '../../lib/fonts';
+import { loadTerminalFont, getRecommendedFontSize, isIOS } from '../../lib/fonts';
 import { calculateDimensions, getDeviceHint, type ConfidenceLevel } from '../../lib/terminalSizing';
+import { useKeyboard } from '../../lib/keyboard';
 
 interface TerminalViewProps {
   onInput: (data: Uint8Array) => void;
@@ -353,6 +354,26 @@ export function TerminalView(props: TerminalViewProps) {
   const [ctrlActive, setCtrlActive] = createSignal(false);
   const [dimensions, setDimensions] = createSignal({ cols: 80, rows: 24 });
 
+  // iOS keyboard handling - resizes terminal when virtual keyboard appears
+  const { isVisible: keyboardVisible, viewportHeight } = useKeyboard({
+    onShow: () => {
+      // Resize terminal when keyboard appears
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          doFitAndResize();
+        });
+      });
+    },
+    onHide: () => {
+      // Resize terminal when keyboard dismisses
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          doFitAndResize();
+        });
+      });
+    },
+  });
+
   function sendSpecialKey(key: typeof SPECIAL_KEYS[number]) {
     if (key.isModifier) {
       setCtrlActive(!ctrlActive());
@@ -614,10 +635,13 @@ export function TerminalView(props: TerminalViewProps) {
       style={{
         display: 'flex',
         "flex-direction": 'column',
-        height: '100%',
+        // On iOS, use viewport height to adjust for keyboard; otherwise use 100%
+        height: isIOS() ? `${viewportHeight()}px` : '100%',
         width: '100%',
         background: '#0d0d0d',
         overflow: 'hidden',
+        // Smooth transition when keyboard animates
+        transition: isIOS() ? 'height 0.25s ease-out' : 'none',
       }}
     >
       {/* Terminal area with padding for visual spacing */}
@@ -703,7 +727,11 @@ export function TerminalView(props: TerminalViewProps) {
             "align-items": 'center',
             gap: '8px',
             padding: '10px 16px',
-            "padding-bottom": 'calc(max(env(safe-area-inset-bottom, 0px), 12px) + 16px)',
+            // Reduce bottom padding when keyboard visible (no home indicator needed)
+            "padding-bottom": keyboardVisible()
+              ? '10px'
+              : 'calc(max(env(safe-area-inset-bottom, 0px), 12px) + 16px)',
+            transition: 'padding-bottom 0.25s ease-out',
           }}
         >
           <For each={SPECIAL_KEYS}>

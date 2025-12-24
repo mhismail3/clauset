@@ -10,6 +10,8 @@ import { TimelineView } from '../components/interactions/TimelineView';
 import { DiffViewer } from '../components/interactions/DiffViewer';
 import { api, Session } from '../lib/api';
 import { createWebSocketManager, WsMessage, SyncResponse, ConnectionState } from '../lib/ws';
+import { useKeyboard } from '../lib/keyboard';
+import { isIOS } from '../lib/fonts';
 import {
   getMessagesForSession,
   addMessage,
@@ -114,6 +116,9 @@ export default function SessionPage() {
   const [diffState, setDiffState] = createSignal<{ interactionId: string; file: string } | null>(null);
   const [terminalData, setTerminalData] = createSignal<Uint8Array[]>([]);
   const [resuming, setResuming] = createSignal(false);
+
+  // iOS keyboard handling for chat view
+  const { viewportHeight } = useKeyboard();
 
   let wsManager: ReturnType<typeof createWebSocketManager> | null = null;
   let messagesEndRef: HTMLDivElement | undefined;
@@ -552,7 +557,19 @@ export default function SessionPage() {
   };
 
   return (
-    <div class="flex flex-col h-full" style={{ width: "100%", "max-width": "100%", "min-width": "0", overflow: "hidden" }}>
+    <div
+      class="flex flex-col"
+      style={{
+        // On iOS, use viewport height to adjust for keyboard; otherwise use 100%
+        height: isIOS() ? `${viewportHeight()}px` : '100%',
+        width: "100%",
+        "max-width": "100%",
+        "min-width": "0",
+        overflow: "hidden",
+        // Smooth transition when keyboard animates
+        transition: isIOS() ? 'height 0.25s ease-out' : 'none',
+      }}
+    >
       {/* Connection status banner */}
       <ConnectionStatus
         state={wsState()}

@@ -77,6 +77,11 @@
   color-scheme: dark;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+
+  /* iOS keyboard state (updated by useKeyboard hook) */
+  --keyboard-height: 0px;
+  --keyboard-visible: 0;
+  --viewport-height: 100vh;
 }
 
 html {

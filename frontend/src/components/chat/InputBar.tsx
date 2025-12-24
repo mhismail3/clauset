@@ -1,5 +1,6 @@
 import { createSignal } from 'solid-js';
 import { Button } from '../ui/Button';
+import { useKeyboard } from '../../lib/keyboard';
 
 interface InputBarProps {
   onSend: (message: string) => void;
@@ -9,6 +10,9 @@ interface InputBarProps {
 
 export function InputBar(props: InputBarProps) {
   const [message, setMessage] = createSignal('');
+
+  // iOS keyboard handling - adjust bottom padding when keyboard visible
+  const { isVisible: keyboardVisible } = useKeyboard();
 
   function handleSubmit(e: Event) {
     e.preventDefault();
@@ -29,7 +33,14 @@ export function InputBar(props: InputBarProps) {
   return (
     <form
       onSubmit={handleSubmit}
-      class="flex-none border-t border-bg-elevated bg-bg-base p-4 safe-bottom"
+      class="flex-none border-t border-bg-elevated bg-bg-base p-4"
+      style={{
+        // Reduce bottom safe area when keyboard visible (no home indicator needed)
+        "padding-bottom": keyboardVisible()
+          ? '16px'
+          : 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
+        transition: 'padding-bottom 0.25s ease-out',
+      }}
     >
       <div class="flex gap-2">
         <textarea
