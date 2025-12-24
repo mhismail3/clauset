@@ -108,17 +108,21 @@ export function updateSessionFromActivity(update: ActivityUpdate) {
   // Use path-based update for fine-grained reactivity
   // This only invalidates the specific session, not the entire list
   //
-  // Important: For stats (cost, tokens, context), only update if the new value
-  // is non-zero OR greater than current value. This prevents hook events from
-  // overwriting valid stats with 0 (hooks don't include stats, so they broadcast
-  // whatever the buffer has, which might be empty if status line hasn't been parsed).
+  // Important: For stats, only update if the new value is non-zero.
+  // This prevents hook events from overwriting valid stats with 0
+  // (hooks don't include stats, so they broadcast whatever the buffer has,
+  // which might be empty if status line hasn't been parsed).
+  //
+  // Note: We trust the backend's token values directly rather than using Math.max().
+  // The backend validates token values and the database is the source of truth.
+  // Using Math.max() could preserve false positive values from earlier parsing errors.
   setSessionsStore('list', idx, {
     model: update.model || session.model,
-    // Cost can only increase, never decrease
-    total_cost_usd: update.cost > 0 ? Math.max(update.cost, session.total_cost_usd) : session.total_cost_usd,
-    // Tokens can only increase (cumulative)
-    input_tokens: update.input_tokens > 0 ? Math.max(update.input_tokens, session.input_tokens) : session.input_tokens,
-    output_tokens: update.output_tokens > 0 ? Math.max(update.output_tokens, session.output_tokens) : session.output_tokens,
+    // Cost can only increase in reality, but trust backend value
+    total_cost_usd: update.cost > 0 ? update.cost : session.total_cost_usd,
+    // Trust backend token values directly (backend validates these)
+    input_tokens: update.input_tokens > 0 ? update.input_tokens : session.input_tokens,
+    output_tokens: update.output_tokens > 0 ? update.output_tokens : session.output_tokens,
     // Context can fluctuate, but don't overwrite with 0
     context_percent: update.context_percent > 0 ? update.context_percent : session.context_percent,
     preview: update.current_activity || session.preview,

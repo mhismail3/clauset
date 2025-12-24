@@ -121,10 +121,17 @@ Success criteria: All features from docs/FEATURE_PLAN.md implemented with no reg
   - Monospace font (JetBrains Mono) for title and inputs matching session cards
 
 ### Now
-- All features complete
+- iOS Virtual Keyboard Handling - Fixed content clipping issue (single source of truth for height)
 
 ### Next
-- None - feature implementation complete
+- Test on iOS device to verify keyboard handling works correctly
+- iOS Keyboard Fixes Applied:
+  - Created `keyboard.ts` hook using visualViewport API
+  - TerminalView uses `height: 100%` (fills parent)
+  - Session.tsx sets `height: viewportHeight()` (single source of truth)
+  - InputBar adjusts padding when keyboard visible
+  - Scroll position preserved via onBeforeShow/onBeforeHide callbacks
+  - iOS cursor hidden via `caret-color: transparent`
 
 ## Bug Fixes Applied
 - **Views stacking on Session page**: Changed from CSS `hidden` class to Solid.js `<Show when={}>` for Chat/History views (inline styles override CSS classes)
@@ -132,6 +139,7 @@ Success criteria: All features from docs/FEATURE_PLAN.md implemented with no reg
 - **Cost/token data not captured**: Added `complete_interaction_with_costs()` to `InteractionStore`, modified `InteractionProcessor` to track starting costs and compute deltas when interactions complete, updated hooks route to pass session costs to the processor
 - **Cost capture timing (late terminal output)**: Added `update_latest_interaction_costs()` method that's called from event_processor when terminal output with cost changes arrives after Stop hook
 - **Session header decluttered**: Replaced ACTIVE badge with colored status dot (green=ready, orange=thinking, gray=stopped)
+- **Inflated output token counts on dashboard**: Fixed regex patterns in `buffer.rs` to require K suffix (was `K?` which matched false positives like "804/993 files"). Added sanity validation (< 1000K) and removed `Math.max()` from frontend token updates in `sessions.ts`. Added one-time DB migration to reset any sessions with > 1M tokens. Files changed: `crates/clauset-core/src/buffer.rs`, `frontend/src/stores/sessions.ts`, `crates/clauset-core/src/db.rs`
 
 ## Open Questions
 - None currently
