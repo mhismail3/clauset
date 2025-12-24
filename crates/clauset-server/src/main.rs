@@ -21,6 +21,7 @@ use axum::{
 };
 use clap::Parser;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -36,6 +37,14 @@ use logging::{LogConfig, LogFormat};
 #[command(about = "HTTP/WebSocket server for Claude Code session management")]
 #[command(version)]
 struct Cli {
+    /// Path to config file
+    #[arg(short, long, value_name = "FILE")]
+    config: Option<PathBuf>,
+
+    /// Override port from config
+    #[arg(short, long)]
+    port: Option<u16>,
+
     /// Enable verbose logging (INFO level for most targets)
     #[arg(short, long)]
     verbose: bool,
@@ -96,8 +105,17 @@ async fn main() -> Result<()> {
     logging::init(&log_config);
 
     // Load configuration
-    let config = Config::load()?;
-    tracing::info!(target: "clauset::startup", "Loaded configuration");
+    let mut config = match &cli.config {
+        Some(path) => Config::load_from(path)?,
+        None => Config::load()?,
+    };
+
+    // Apply CLI overrides
+    if let Some(port) = cli.port {
+        config.port = port;
+    }
+
+    tracing::info!(target: "clauset::startup", "Loaded configuration (port: {})", config.port);
 
     // Initialize application state
     let state = Arc::new(AppState::new(config.clone())?);

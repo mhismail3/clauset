@@ -9,6 +9,8 @@ interface InputBarProps {
 
 const MAX_ROWS = 10;
 const LINE_HEIGHT = 23; // 16px font (iOS override in CSS) * 1.4 line-height
+const VERTICAL_PADDING = 20; // 10px top + 10px bottom
+const SINGLE_ROW_HEIGHT = LINE_HEIGHT + VERTICAL_PADDING; // 43px
 
 export function InputBar(props: InputBarProps) {
   const [message, setMessage] = createSignal('');
@@ -98,6 +100,9 @@ export function InputBar(props: InputBarProps) {
             flex: '1',
             "min-width": '0',
             "box-sizing": 'border-box',
+            // Explicit height for reliable cross-browser sizing
+            height: `${rows() * LINE_HEIGHT + VERTICAL_PADDING}px`,
+            "min-height": `${SINGLE_ROW_HEIGHT}px`,
             padding: '10px 14px',
             "font-size": '14px',
             "line-height": '1.4',
@@ -112,7 +117,7 @@ export function InputBar(props: InputBarProps) {
             "box-shadow": focused()
               ? '0 0 0 3px var(--color-accent-muted), 1px 1px 0px rgba(0, 0, 0, 0.2)'
               : '1px 1px 0px rgba(0, 0, 0, 0.2)',
-            transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
+            transition: 'border-color 0.15s ease, box-shadow 0.15s ease, height 0.1s ease',
             opacity: props.disabled ? '0.5' : '1',
             "overflow-y": shouldScroll() ? 'auto' : 'hidden',
           }}
@@ -124,8 +129,8 @@ export function InputBar(props: InputBarProps) {
           disabled={!canSend()}
           class="pressable"
           style={{
-            width: '40px',
-            height: '40px',
+            width: `${SINGLE_ROW_HEIGHT}px`,
+            height: `${SINGLE_ROW_HEIGHT}px`,
             "flex-shrink": '0',
             display: 'flex',
             "align-items": 'center',
