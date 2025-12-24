@@ -37,7 +37,8 @@ This guide covers setting up Clauset for persistent operation on macOS (Mac Mini
 | Environment | Backend Port | Frontend Access | Database | Use Case |
 |-------------|--------------|-----------------|----------|----------|
 | Production  | 8080         | `http://<host>:8080` | `sessions.db` | Always-on, accessed via iPhone/Tailscale |
-| Beta        | 8081         | `http://localhost:5173` | `sessions-beta.db` | Development with hot reload |
+| Beta (dev mode) | 8081     | `http://<host>:5173` | `sessions-beta.db` | Development with hot reload |
+| Beta (--serve)  | 8081     | `http://<host>:8081` | `sessions-beta.db` | Test production-like setup remotely |
 
 ---
 
@@ -190,58 +191,65 @@ clauset errors
 
 Beta development uses a completely isolated environment with its own database and port.
 
-### Step 1: Start the Beta Backend
+### Option A: Development Mode (Hot Reload)
 
-In **Terminal 1**:
+Best for active frontend development with instant updates.
 
+**Terminal 1 — Start beta backend:**
 ```bash
 clauset beta
 ```
 
-This:
-- Builds the release binary if needed
-- Starts the server on port **8081**
-- Uses `config/beta.toml` configuration
-- Uses separate database: `~/.local/share/clauset/sessions-beta.db`
-- Logs to terminal stdout (verbose mode enabled)
-
-Output:
-```
-▸ Starting beta server on port 8081...
-  Config: config/beta.toml
-  Database: ~/.local/share/clauset/sessions-beta.db
-
-Press Ctrl+C to stop
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-2024-01-15T10:35:00 INFO clauset::startup - Starting server on 0.0.0.0:8081
-```
-
-### Step 2: Start the Frontend Dev Server
-
-In **Terminal 2**:
-
+**Terminal 2 — Start Vite dev server:**
 ```bash
 cd frontend
 CLAUSET_BACKEND_PORT=8081 npm run dev
 ```
 
+**Access URLs:**
+| From | URL |
+|------|-----|
+| Local machine | `http://localhost:5173` |
+| Other devices (Tailscale) | `http://<mac-mini-ip>:5173` |
+
+The Vite dev server listens on all interfaces (`0.0.0.0`) and proxies API/WebSocket requests to the beta backend. Your iPhone can connect to port 5173 and get hot reload too!
+
+### Option B: Production-Like Mode (Built Frontend)
+
+Best for testing the exact production setup before deploying.
+
+**Single terminal:**
+```bash
+clauset beta --serve
+```
+
 This:
-- Starts Vite dev server on port **5173**
-- Enables hot module replacement (HMR)
-- Proxies `/api/*` and `/ws/*` to the beta backend on 8081
+- Builds the frontend (`npm run build`)
+- Starts the server on port **8081**
+- Serves static files from `frontend/dist/`
+- Works exactly like production, just on a different port with a separate database
 
-### Step 3: Access Beta
-
-Open your browser to:
-
+**Access URL:**
 ```
-http://localhost:5173
+http://<mac-mini-ip>:8081
 ```
 
-You now have:
-- Hot reload for frontend changes (instant updates)
-- Backend changes require restarting `clauset beta`
-- Completely isolated from production data
+No hot reload, but you're testing the real production configuration.
+
+### Comparison
+
+| Mode | Command | Access | Hot Reload | Use Case |
+|------|---------|--------|------------|----------|
+| Dev | `clauset beta` + `npm run dev` | `:5173` | ✅ Yes | Active frontend development |
+| Prod-like | `clauset beta --serve` | `:8081` | ❌ No | Test before deploy, remote testing |
+
+### Beta Environment Details
+
+Both modes use:
+- **Config**: `config/beta.toml`
+- **Port**: 8081
+- **Database**: `~/.local/share/clauset/sessions-beta.db` (separate from production!)
+- **Logs**: Terminal stdout (verbose mode)
 
 ### Beta Development Tips
 
@@ -598,12 +606,14 @@ clauset errors          # Show error log
 clauset deploy          # Build and deploy
 
 # === Beta Development ===
-clauset beta            # Start beta backend (port 8081)
-CLAUSET_BACKEND_PORT=8081 npm run dev --prefix frontend  # Start frontend
+clauset beta            # Start beta backend only (port 8081)
+clauset beta --serve    # Start beta with built frontend (port 8081)
+CLAUSET_BACKEND_PORT=8081 npm run dev --prefix frontend  # Vite dev server
 
 # === Access URLs ===
-# Production: http://<host>:8080
-# Beta:       http://localhost:5173
+# Production:     http://<host>:8080
+# Beta (dev):     http://<host>:5173  (Vite, hot reload)
+# Beta (--serve): http://<host>:8081  (built frontend, no hot reload)
 
 # === Setup ===
 clauset install         # First-time setup
