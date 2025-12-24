@@ -56,10 +56,10 @@ export function SearchModal(props: SearchModalProps) {
   const handleSearch = (q: string) => {
     setQuery(q);
 
-    // Debounce search
+    // Debounce search - 150ms for snappy "search as you type"
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      if (q.trim().length >= 2) {
+      if (q.trim().length >= 1) {
         search(q, {
           scope: scope() === 'all' ? undefined : scope(),
           sessionId: props.sessionId,
@@ -68,12 +68,12 @@ export function SearchModal(props: SearchModalProps) {
       } else {
         clearSearch();
       }
-    }, 300);
+    }, 150);
   };
 
   const handleScopeChange = (newScope: SearchScope) => {
     setScope(newScope);
-    if (query().trim().length >= 2) {
+    if (query().trim().length >= 1) {
       search(query(), {
         scope: newScope === 'all' ? undefined : newScope,
         sessionId: props.sessionId,
@@ -219,7 +219,7 @@ export function SearchModal(props: SearchModalProps) {
 
         {/* Results */}
         <div style={{ flex: '1', overflow: 'auto', padding: '16px' }}>
-          <Show when={query().length < 2 && !hasResults()}>
+          <Show when={query().length < 1 && !hasResults()}>
             <div
               style={{
                 display: 'flex',
@@ -238,12 +238,12 @@ export function SearchModal(props: SearchModalProps) {
                   margin: '0',
                 }}
               >
-                Type at least 2 characters to search
+                Start typing to search
               </p>
             </div>
           </Show>
 
-          <Show when={query().length >= 2 && !searchLoading() && !hasResults()}>
+          <Show when={query().length >= 1 && !searchLoading() && !hasResults()}>
             <div
               style={{
                 display: 'flex',

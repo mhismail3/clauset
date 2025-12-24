@@ -121,9 +121,10 @@ Success criteria: All features from docs/FEATURE_PLAN.md implemented with no reg
   - Monospace font (JetBrains Mono) for title and inputs matching session cards
 
 ### Now
-- Search functionality fully working
+- Prefix matching implementation complete and tested
 
 ### Next
+- Fix "Invalid Date" display in search results (minor UI bug)
 - Test on iOS device to verify keyboard handling works correctly
 
 ## Bug Fixes Applied
@@ -136,6 +137,7 @@ Success criteria: All features from docs/FEATURE_PLAN.md implemented with no reg
 - **Cost capture timing (late terminal output)**: Added `update_latest_interaction_costs()` method that's called from event_processor when terminal output with cost changes arrives after Stop hook
 - **Session header decluttered**: Replaced ACTIVE badge with colored status dot (green=ready, orange=thinking, gray=stopped)
 - **Inflated output token counts on dashboard**: Fixed regex patterns in `buffer.rs` to require K suffix (was `K?` which matched false positives like "804/993 files"). Added sanity validation (< 1000K) and removed `Math.max()` from frontend token updates in `sessions.ts`. Added one-time DB migration to reset any sessions with > 1M tokens. Files changed: `crates/clauset-core/src/buffer.rs`, `frontend/src/stores/sessions.ts`, `crates/clauset-core/src/db.rs`
+- **FTS5 prefix/partial matching**: Implemented real-time "search as you type" with prefix matching. Updated `escape_fts5_query()` to add `*` wildcard suffix. Added `prefix='2 3'` indexes to FTS5 tables. Added migration to drop/recreate FTS tables. Reduced frontend debounce to 150ms and min query length to 1 char.
 
 ## Open Questions
 - None currently

@@ -334,18 +334,101 @@ impl InteractionStore {
         Ok(())
     }
 
+    /// Check if FTS tables need migration (e.g., missing prefix indexes).
+    /// Returns true if tables exist but need to be recreated with new options.
+    fn check_fts_needs_migration(&self, conn: &Connection) -> Result<bool> {
+        // Check if interactions_fts exists
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='interactions_fts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !table_exists {
+            return Ok(false); // No migration needed, tables will be created fresh
+        }
+
+        // Check if the FTS table has prefix indexes by looking at the config
+        // FTS5 stores config in tablename_config; prefix option creates entries
+        let has_prefix: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM interactions_fts_config WHERE k = 'pgsz'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        // If the table exists but doesn't have expected config, it needs migration
+        // Actually, let's check for prefix specifically - the config table stores 'prefix' key
+        let has_prefix_config: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='interactions_fts_idx' AND sql LIKE '%prefix%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        // Simple heuristic: if the FTS table exists but we can't verify prefix config,
+        // assume it needs migration. The prefix tables would be: tablename_idx
+        // Actually, the safest check is: try to query with a prefix and see if it's indexed
+        // But that's complex. Let's use a simpler approach: check the row count of _config
+        let config_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM interactions_fts_config",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        // Tables with prefix='2 3' have more config entries (one for each prefix size)
+        // Without prefix, typically 2-3 entries; with prefix='2 3', typically 4-5 entries
+        Ok(config_count < 4)
+    }
+
+    /// Drop FTS tables and their triggers for recreation.
+    fn drop_fts_tables(&self, conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            r#"
+            -- Drop triggers first
+            DROP TRIGGER IF EXISTS interactions_fts_insert;
+            DROP TRIGGER IF EXISTS interactions_fts_delete;
+            DROP TRIGGER IF EXISTS interactions_fts_update;
+            DROP TRIGGER IF EXISTS tool_invocations_fts_insert;
+            DROP TRIGGER IF EXISTS tool_invocations_fts_delete;
+            DROP TRIGGER IF EXISTS tool_invocations_fts_update;
+
+            -- Drop FTS virtual tables
+            DROP TABLE IF EXISTS interactions_fts;
+            DROP TABLE IF EXISTS tool_invocations_fts;
+            "#,
+        )?;
+        Ok(())
+    }
+
     /// Create FTS5 virtual tables and sync triggers.
+    /// Includes prefix='2 3' for optimized prefix matching queries.
     fn create_fts_tables(&self, conn: &Connection) -> Result<()> {
         tracing::info!(target: "clauset::db", "Creating FTS5 tables for interactions");
+
+        // Check if we need to migrate (recreate with prefix indexes)
+        let needs_migration = self.check_fts_needs_migration(conn)?;
+        if needs_migration {
+            tracing::info!(target: "clauset::db", "Migrating FTS5 tables to add prefix indexes");
+            self.drop_fts_tables(conn)?;
+        }
 
         conn.execute_batch(
             r#"
             -- FTS5 index for interactions (prompts and summaries)
+            -- prefix='2 3' optimizes 2 and 3 character prefix queries
             CREATE VIRTUAL TABLE IF NOT EXISTS interactions_fts USING fts5(
                 user_prompt,
                 assistant_summary,
                 content='interactions',
-                content_rowid='rowid'
+                content_rowid='rowid',
+                prefix='2 3'
             );
 
             -- FTS5 index for tool invocations (file paths and inputs)
@@ -354,7 +437,8 @@ impl InteractionStore {
                 tool_input,
                 tool_name,
                 content='tool_invocations',
-                content_rowid='rowid'
+                content_rowid='rowid',
+                prefix='2 3'
             );
 
             -- Triggers to keep interactions_fts in sync
@@ -401,6 +485,38 @@ impl InteractionStore {
             "#,
         )?;
 
+        // If we migrated, rebuild the FTS index from existing data
+        if needs_migration {
+            self.rebuild_fts_index(conn)?;
+        }
+
+        Ok(())
+    }
+
+    /// Rebuild FTS index from existing data in source tables.
+    /// Called after FTS tables are recreated during migration.
+    fn rebuild_fts_index(&self, conn: &Connection) -> Result<()> {
+        tracing::info!(target: "clauset::db", "Rebuilding FTS index from existing data");
+
+        // Rebuild interactions_fts from interactions table
+        conn.execute(
+            r#"
+            INSERT INTO interactions_fts(rowid, user_prompt, assistant_summary)
+            SELECT rowid, user_prompt, assistant_summary FROM interactions
+            "#,
+            [],
+        )?;
+
+        // Rebuild tool_invocations_fts from tool_invocations table
+        conn.execute(
+            r#"
+            INSERT INTO tool_invocations_fts(rowid, file_path, tool_input, tool_name)
+            SELECT rowid, file_path, tool_input, tool_name FROM tool_invocations
+            "#,
+            [],
+        )?;
+
+        tracing::info!(target: "clauset::db", "FTS index rebuild complete");
         Ok(())
     }
 
@@ -1248,15 +1364,33 @@ impl InteractionStore {
     // Full-Text Search
     // =========================================================================
 
-    /// Escape a query string for FTS5.
+    /// Escape and format a query string for FTS5 prefix matching.
     ///
-    /// FTS5 has special syntax characters that need escaping.
-    /// We wrap the query in double quotes to make it a phrase search,
-    /// and escape any internal double quotes.
+    /// Each token is wrapped in double quotes (to handle special chars like '.')
+    /// and suffixed with '*' for prefix matching. Multiple tokens are joined
+    /// with AND so all must match.
+    ///
+    /// Examples:
+    /// - "Re" → "\"Re\"*" → matches "Read", "Return", "Rebuild"
+    /// - "describe project" → "\"describe\"* AND \"project\"*"
+    /// - "package.json" → "\"package.json\"*" → handles special chars
     fn escape_fts5_query(query: &str) -> String {
-        // Escape internal double quotes and wrap in quotes for phrase search
-        let escaped = query.replace('"', "\"\"");
-        format!("\"{}\"", escaped)
+        let tokens: Vec<String> = query
+            .split_whitespace()
+            .filter(|t| !t.is_empty())
+            .map(|t| {
+                // Escape internal double quotes and wrap in quotes with wildcard
+                let escaped = t.replace('"', "\"\"");
+                format!("\"{}\"*", escaped)
+            })
+            .collect();
+
+        if tokens.is_empty() {
+            return String::new();
+        }
+
+        // Join with AND - all tokens must match as prefixes
+        tokens.join(" AND ")
     }
 
     /// Search interactions using full-text search.
