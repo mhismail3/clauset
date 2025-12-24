@@ -342,64 +342,57 @@ Access production at `http://<mac-mini-ip>:8080` or via Tailscale.
 
 ## Rollback Procedure
 
-If a deployment causes issues, you can rollback to a previous version.
+Each deployment records the git commit hash. If something breaks, rollback to the last known-good state.
 
-### Option 1: Git Checkout + Redeploy
+### Quick Rollback (Recommended)
 
 ```bash
-# Find the last working commit
-git log --oneline -10
-
-# Checkout that commit
-git checkout <commit-hash>
-
-# Redeploy
-clauset deploy
+clauset rollback
 ```
 
-### Option 2: Quick Binary Rollback
+This will:
+1. Show the current vs deployed commit
+2. Ask for confirmation
+3. Stash any uncommitted changes (recoverable with `git stash pop`)
+4. Restore working directory to the deployed commit
+5. Rebuild backend and frontend
+6. Restart the production service
 
-If you have a known-good binary backed up:
+### Check Deployed Commit
 
 ```bash
-# Stop production
-clauset stop
-
-# Restore old binary
-cp /path/to/backup/clauset-server ~/.local/bin/clauset-server
-
-# Restart
-clauset start
+clauset status
 ```
 
-### Option 3: Frontend-Only Rollback
+Shows the currently deployed commit hash and message:
+```
+✓ Production service: RUNNING (PID: 12345)
+  Port: 8080
+  Deployed: 4156cf0 - Fix clauset CLI symlink resolution
+```
 
-If only the frontend is broken:
+### Manual Rollback Options
 
+**If you know the specific commit:**
 ```bash
-# Checkout old frontend code
-git checkout <commit-hash> -- frontend/
-
-# Rebuild frontend only
-cd frontend && npm run build && cd ..
-
-# Restart service (picks up new static files)
+git checkout <commit-hash> -- .
+cargo build --release && cd frontend && npm run build && cd ..
 clauset restart
 ```
 
-### Creating Backups Before Deploy
-
-Add this to your workflow before deploying:
-
+**Frontend-only fix:**
 ```bash
-# Backup current binary
-cp ~/.local/bin/clauset-server ~/.local/bin/clauset-server.backup
+git checkout <commit-hash> -- frontend/
+cd frontend && npm run build && cd ..
+clauset restart
+```
 
-# Backup current frontend
-cp -r frontend/dist frontend/dist.backup
+### Recovering Stashed Changes
 
-# Then deploy
-clauset deploy
+If rollback stashed your changes and you want them back:
+```bash
+git stash list          # See stashed changes
+git stash pop           # Restore most recent stash
 ```
 
 ---
@@ -608,6 +601,7 @@ clauset deploy          # Build and deploy
 # === Beta Development ===
 clauset beta            # Start beta backend only (port 8081)
 clauset beta --serve    # Start beta with built frontend (port 8081)
+clauset rollback        # Restore to last deployed commit
 CLAUSET_BACKEND_PORT=8081 npm run dev --prefix frontend  # Vite dev server
 
 # === Access URLs ===

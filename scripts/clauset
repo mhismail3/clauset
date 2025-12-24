@@ -20,6 +20,7 @@ DEV_BINARY="$PROJECT_DIR/target/release/clauset-server"
 LOG_DIR="$HOME/.local/share/clauset"
 LOG_FILE="$LOG_DIR/server.log"
 ERR_FILE="$LOG_DIR/server.err"
+DEPLOYED_COMMIT_FILE="$LOG_DIR/deployed-commit"
 
 # Colors
 RED='\033[0;31m'
@@ -72,8 +73,21 @@ cmd_status() {
                 echo "  Uptime: $uptime"
             fi
         fi
+
+        # Show deployed commit
+        if [ -f "$DEPLOYED_COMMIT_FILE" ]; then
+            local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
+            local commit_msg=$(cd "$PROJECT_DIR" && git log -1 --format="%s" "$deployed_commit" 2>/dev/null | head -c 50)
+            echo "  Deployed: ${deployed_commit:0:7} - $commit_msg"
+        fi
     else
         print_warning "Production service: STOPPED"
+
+        # Still show deployed commit if available
+        if [ -f "$DEPLOYED_COMMIT_FILE" ]; then
+            local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
+            echo "  Last deployed: ${deployed_commit:0:7}"
+        fi
     fi
 
     # Check if beta is running
@@ -238,6 +252,20 @@ cmd_deploy() {
 
     cd "$PROJECT_DIR"
 
+    # Check for uncommitted changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        print_warning "You have uncommitted changes!"
+        echo ""
+        git status --short
+        echo ""
+        read -p "Deploy anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_error "Aborted. Commit your changes first."
+            return 1
+        fi
+    fi
+
     # Run tests first
     print_status "Running tests..."
     if ! cargo test 2>&1; then
@@ -274,6 +302,11 @@ cmd_deploy() {
     chmod +x "$PROD_BINARY"
     print_success "Binary installed"
 
+    # Record deployed commit
+    local current_commit=$(git rev-parse HEAD)
+    echo "$current_commit" > "$DEPLOYED_COMMIT_FILE"
+    print_success "Recorded deploy: ${current_commit:0:7}"
+
     # Start service
     if [ -f "$PLIST_PATH" ]; then
         print_status "Starting production service..."
@@ -292,6 +325,96 @@ cmd_deploy() {
 
     echo ""
     print_success "Deploy complete!"
+    echo ""
+}
+
+cmd_rollback() {
+    echo ""
+    echo -e "${BLUE}Rolling Back to Production State${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    cd "$PROJECT_DIR"
+
+    # Check if we have a deployed commit recorded
+    if [ ! -f "$DEPLOYED_COMMIT_FILE" ]; then
+        print_error "No deployed commit found. Cannot rollback."
+        echo "  Run 'clauset deploy' first to record a deployment."
+        return 1
+    fi
+
+    local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
+    local deployed_msg=$(git log -1 --format="%s" "$deployed_commit" 2>/dev/null | head -c 60)
+    local current_commit=$(git rev-parse HEAD)
+
+    # Check if we're already at the deployed commit
+    if [ "$current_commit" = "$deployed_commit" ]; then
+        print_success "Already at deployed commit: ${deployed_commit:0:7}"
+        return 0
+    fi
+
+    echo "  Current:  ${current_commit:0:7} - $(git log -1 --format='%s' HEAD | head -c 50)"
+    echo "  Deployed: ${deployed_commit:0:7} - $deployed_msg"
+    echo ""
+
+    # Check for uncommitted changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        print_warning "You have uncommitted changes that will be lost!"
+        echo ""
+        git status --short
+        echo ""
+    fi
+
+    read -p "Reset working directory to deployed commit? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        print_error "Aborted."
+        return 1
+    fi
+
+    # Stash any changes just in case
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        print_status "Stashing uncommitted changes (retrievable with 'git stash pop')..."
+        git stash push -m "Auto-stash before rollback to $deployed_commit"
+    fi
+
+    # Reset to deployed commit
+    print_status "Resetting to ${deployed_commit:0:7}..."
+    git checkout "$deployed_commit" -- .
+    git reset HEAD
+    print_success "Working directory restored"
+
+    # Rebuild
+    print_status "Rebuilding release binary..."
+    cargo build --release
+    print_success "Binary rebuilt"
+
+    print_status "Rebuilding frontend..."
+    cd "$PROJECT_DIR/frontend"
+    npm run build
+    cd "$PROJECT_DIR"
+    print_success "Frontend rebuilt"
+
+    # Restart service if running
+    if is_running; then
+        print_status "Restarting production service..."
+        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        sleep 1
+        cp "$DEV_BINARY" "$PROD_BINARY"
+        launchctl load "$PLIST_PATH"
+        sleep 2
+        if is_running; then
+            print_success "Production service restarted"
+        else
+            print_error "Failed to restart service"
+        fi
+    else
+        # Just update the binary
+        cp "$DEV_BINARY" "$PROD_BINARY"
+        print_success "Binary updated (service not running)"
+    fi
+
+    echo ""
+    print_success "Rollback complete! Now at: ${deployed_commit:0:7}"
     echo ""
 }
 
@@ -415,6 +538,7 @@ cmd_help() {
     echo "  beta          Run beta backend only (use with Vite dev server)"
     echo "  beta --serve  Run beta with built frontend (access from any device)"
     echo "  deploy        Test, build, and deploy to production"
+    echo "  rollback      Restore working directory to last deployed commit"
     echo ""
     echo "Setup:"
     echo "  install     Install launchd service and CLI"
@@ -432,6 +556,7 @@ case "${1:-}" in
     errors)     cmd_errors ;;
     beta)       shift; cmd_beta "$@" ;;
     deploy)     cmd_deploy ;;
+    rollback)   cmd_rollback ;;
     install)    cmd_install ;;
     uninstall)  cmd_uninstall ;;
     help|--help|-h|"")
