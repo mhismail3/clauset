@@ -140,6 +140,16 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
+- PWA viewport overscroll fix implemented
+
+### PWA Viewport Overscroll Fix (Just Completed)
+- Created `frontend/src/lib/preventOverscroll.ts` - JavaScript hook to prevent iOS PWA rubber-banding
+- Added `usePreventOverscroll()` call in `App.tsx`
+- Intercepts `touchmove` events and prevents default when no legitimate scrollable container exists
+- Handles scroll boundary detection (at top/bottom) to prevent escape from scrollable areas
+- Does NOT modify CSS - preserves all safe-area styling that prevents status bar at bottom
+
+### Previous
 - Production/Beta deployment system implemented
 
 ### Production/Beta Deployment System (Just Completed)

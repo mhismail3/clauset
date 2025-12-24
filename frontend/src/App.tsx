@@ -1,9 +1,13 @@
 import { ParentProps, createSignal, onMount, onCleanup } from 'solid-js';
 import { ConnectionStatus } from './components/ui/ConnectionStatus';
 import { connectGlobalWs, disconnectGlobalWs } from './lib/globalWs';
+import { usePreventOverscroll } from './lib/preventOverscroll';
 
 export default function App(props: ParentProps) {
   const [isOnline, setIsOnline] = createSignal(navigator.onLine);
+
+  // Prevent iOS PWA viewport rubber-banding when no scrollable content
+  usePreventOverscroll();
 
   onMount(() => {
     const handleOnline = () => {
