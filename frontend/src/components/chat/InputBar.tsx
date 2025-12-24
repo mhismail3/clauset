@@ -22,7 +22,9 @@ export function InputBar(props: InputBarProps) {
   // Calculate rows based on content
   createEffect(() => {
     const text = message();
-    if (!textareaRef) {
+
+    // If empty, always reset to 1 row
+    if (!text || !textareaRef) {
       setRows(1);
       return;
     }
@@ -30,11 +32,12 @@ export function InputBar(props: InputBarProps) {
     // Count explicit newlines
     const newlineCount = (text.match(/\n/g) || []).length + 1;
 
-    // Temporarily reset height to get accurate scrollHeight
-    const originalHeight = textareaRef.style.height;
+    // Temporarily set rows to 1 and height to auto to get true minimum scrollHeight
+    const originalRows = textareaRef.rows;
+    textareaRef.rows = 1;
     textareaRef.style.height = 'auto';
     const scrollHeight = textareaRef.scrollHeight;
-    textareaRef.style.height = originalHeight;
+    textareaRef.rows = originalRows;
 
     // Calculate rows from scrollHeight (accounts for wrapped lines)
     // Subtract padding (10px top + 10px bottom = 20px)
@@ -52,10 +55,7 @@ export function InputBar(props: InputBarProps) {
     if (content && !props.disabled) {
       props.onSend(content);
       setMessage('');
-      // Reset to single row after send
-      if (textareaRef) {
-        textareaRef.style.height = 'auto';
-      }
+      setRows(1);
     }
   }
 
