@@ -1248,6 +1248,17 @@ impl InteractionStore {
     // Full-Text Search
     // =========================================================================
 
+    /// Escape a query string for FTS5.
+    ///
+    /// FTS5 has special syntax characters that need escaping.
+    /// We wrap the query in double quotes to make it a phrase search,
+    /// and escape any internal double quotes.
+    fn escape_fts5_query(query: &str) -> String {
+        // Escape internal double quotes and wrap in quotes for phrase search
+        let escaped = query.replace('"', "\"\"");
+        format!("\"{}\"", escaped)
+    }
+
     /// Search interactions using full-text search.
     ///
     /// Searches across user prompts and assistant summaries.
@@ -1260,6 +1271,7 @@ impl InteractionStore {
         offset: usize,
     ) -> Result<Vec<SearchResult>> {
         let conn = self.conn.lock().unwrap();
+        let escaped_query = Self::escape_fts5_query(query);
 
         let mut results = Vec::new();
 
@@ -1268,7 +1280,7 @@ impl InteractionStore {
                 r#"
                 SELECT i.*, bm25(interactions_fts) as rank
                 FROM interactions_fts fts
-                JOIN interactions i ON i.id = fts.rowid
+                JOIN interactions i ON i.rowid = fts.rowid
                 WHERE interactions_fts MATCH ?1
                 AND i.session_id = ?2
                 ORDER BY rank
@@ -1277,7 +1289,7 @@ impl InteractionStore {
             )?;
 
             let rows = stmt.query_map(
-                params![query, sid.to_string(), limit as i64, offset as i64],
+                params![&escaped_query, sid.to_string(), limit as i64, offset as i64],
                 |row| {
                     let interaction = self.row_to_interaction(row)?;
                     let rank: f64 = row.get("rank")?;
@@ -1297,14 +1309,14 @@ impl InteractionStore {
                 r#"
                 SELECT i.*, bm25(interactions_fts) as rank
                 FROM interactions_fts fts
-                JOIN interactions i ON i.id = fts.rowid
+                JOIN interactions i ON i.rowid = fts.rowid
                 WHERE interactions_fts MATCH ?1
                 ORDER BY rank
                 LIMIT ?2 OFFSET ?3
                 "#,
             )?;
 
-            let rows = stmt.query_map(params![query, limit as i64, offset as i64], |row| {
+            let rows = stmt.query_map(params![&escaped_query, limit as i64, offset as i64], |row| {
                 let interaction = self.row_to_interaction(row)?;
                 let rank: f64 = row.get("rank")?;
                 Ok(SearchResult {
@@ -1331,6 +1343,7 @@ impl InteractionStore {
         offset: usize,
     ) -> Result<Vec<ToolInvocation>> {
         let conn = self.conn.lock().unwrap();
+        let escaped_query = Self::escape_fts5_query(query);
 
         let mut results = Vec::new();
 
@@ -1339,7 +1352,7 @@ impl InteractionStore {
                 r#"
                 SELECT t.*
                 FROM tool_invocations_fts fts
-                JOIN tool_invocations t ON t.id = fts.rowid
+                JOIN tool_invocations t ON t.rowid = fts.rowid
                 WHERE tool_invocations_fts MATCH ?1
                 AND t.interaction_id = ?2
                 ORDER BY bm25(tool_invocations_fts)
@@ -1348,7 +1361,7 @@ impl InteractionStore {
             )?;
 
             let rows = stmt.query_map(
-                params![query, iid.to_string(), limit as i64, offset as i64],
+                params![&escaped_query, iid.to_string(), limit as i64, offset as i64],
                 |row| self.row_to_tool_invocation(row),
             )?;
 
@@ -1360,14 +1373,14 @@ impl InteractionStore {
                 r#"
                 SELECT t.*
                 FROM tool_invocations_fts fts
-                JOIN tool_invocations t ON t.id = fts.rowid
+                JOIN tool_invocations t ON t.rowid = fts.rowid
                 WHERE tool_invocations_fts MATCH ?1
                 ORDER BY bm25(tool_invocations_fts)
                 LIMIT ?2 OFFSET ?3
                 "#,
             )?;
 
-            let rows = stmt.query_map(params![query, limit as i64, offset as i64], |row| {
+            let rows = stmt.query_map(params![&escaped_query, limit as i64, offset as i64], |row| {
                 self.row_to_tool_invocation(row)
             })?;
 

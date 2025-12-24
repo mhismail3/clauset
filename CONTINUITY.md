@@ -121,21 +121,17 @@ Success criteria: All features from docs/FEATURE_PLAN.md implemented with no reg
   - Monospace font (JetBrains Mono) for title and inputs matching session cards
 
 ### Now
-- iOS Virtual Keyboard Handling - Fixed content clipping issue (single source of truth for height)
+- Search functionality fully working
 
 ### Next
 - Test on iOS device to verify keyboard handling works correctly
-- iOS Keyboard Fixes Applied:
-  - Created `keyboard.ts` hook using visualViewport API
-  - TerminalView uses `height: 100%` (fills parent)
-  - Session.tsx sets `height: viewportHeight()` (single source of truth)
-  - InputBar adjusts padding when keyboard visible
-  - Scroll position preserved via onBeforeShow/onBeforeHide callbacks
-  - iOS cursor hidden via `caret-color: transparent`
 
 ## Bug Fixes Applied
 - **Views stacking on Session page**: Changed from CSS `hidden` class to Solid.js `<Show when={}>` for Chat/History views (inline styles override CSS classes)
 - **Analytics page not scrolling**: Changed from `min-height: 100vh` to `height: 100%` with `overflow-y: auto`
+- **Search button not tappable**: Fixed Solid.js anti-pattern - replaced conditional return (`if (!props.isOpen) return null`) with proper `<Show when={}>` wrapper in SearchModal.tsx
+- **FTS5 syntax error with special characters**: Added `escape_fts5_query()` helper that wraps queries in double quotes for phrase search
+- **FTS5 search returning no results**: Fixed incorrect join condition - changed `i.id = fts.rowid` to `i.rowid = fts.rowid` (id is UUID, rowid is integer)
 - **Cost/token data not captured**: Added `complete_interaction_with_costs()` to `InteractionStore`, modified `InteractionProcessor` to track starting costs and compute deltas when interactions complete, updated hooks route to pass session costs to the processor
 - **Cost capture timing (late terminal output)**: Added `update_latest_interaction_costs()` method that's called from event_processor when terminal output with cost changes arrives after Stop hook
 - **Session header decluttered**: Replaced ACTIVE badge with colored status dot (green=ready, orange=thinking, gray=stopped)

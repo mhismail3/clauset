@@ -1,14 +1,12 @@
-import { Show, For, createSignal, onMount, onCleanup } from 'solid-js';
+import { Show, For, createSignal, createEffect, onCleanup } from 'solid-js';
 import { A } from '@solidjs/router';
 import { Spinner } from '../ui/Spinner';
 import { Badge } from '../ui/Badge';
 import {
   search,
   clearSearch,
-  searchQuery,
   searchResults,
   searchLoading,
-  formatCost,
 } from '../../stores/interactions';
 import { formatRelativeTime } from '../../stores/sessions';
 
@@ -16,7 +14,7 @@ interface SearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialQuery?: string;
-  sessionId?: string; // Optional: limit search to specific session
+  sessionId?: string;
 }
 
 type SearchScope = 'all' | 'prompts' | 'files' | 'tools';
@@ -27,14 +25,25 @@ export function SearchModal(props: SearchModalProps) {
   let inputRef: HTMLInputElement | undefined;
   let debounceTimer: ReturnType<typeof setTimeout>;
 
-  onMount(() => {
-    if (props.initialQuery) {
-      setQuery(props.initialQuery);
+  // Focus input when modal opens - reactive to isOpen changes
+  createEffect(() => {
+    if (props.isOpen) {
+      if (props.initialQuery) {
+        setQuery(props.initialQuery);
+      }
+      // Focus with slight delay to ensure DOM is ready
+      setTimeout(() => inputRef?.focus(), 50);
+    } else {
+      // Clear search when modal closes
+      setQuery('');
+      clearSearch();
     }
-    // Focus input when modal opens
-    setTimeout(() => inputRef?.focus(), 100);
+  });
 
-    // Handle escape key
+  // Handle escape key - only when modal is open
+  createEffect(() => {
+    if (!props.isOpen) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         props.onClose();
@@ -80,25 +89,28 @@ export function SearchModal(props: SearchModalProps) {
     return r.interactions.length > 0 || r.tool_invocations.length > 0 || r.file_matches.length > 0;
   };
 
-  if (!props.isOpen) return null;
-
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: '0',
-        'z-index': '1000',
-        display: 'flex',
-        'align-items': 'flex-start',
-        'justify-content': 'center',
-        'padding-top': 'max(10vh, 60px)',
-        background: 'rgba(0, 0, 0, 0.6)',
-        'backdrop-filter': 'blur(4px)',
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) props.onClose();
-      }}
-    >
+    <Show when={props.isOpen}>
+      <div
+        style={{
+          position: 'fixed',
+          inset: '0',
+          'z-index': '1000',
+          display: 'flex',
+          'align-items': 'flex-start',
+          'justify-content': 'center',
+          'padding-top': 'max(env(safe-area-inset-top, 0px) + 10vh, 60px)',
+          background: 'rgba(0, 0, 0, 0.6)',
+          'backdrop-filter': 'blur(4px)',
+          '-webkit-backdrop-filter': 'blur(4px)',
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) props.onClose();
+        }}
+        onTouchEnd={(e) => {
+          if (e.target === e.currentTarget) props.onClose();
+        }}
+      >
       <div
         style={{
           width: 'min(600px, 90vw)',
@@ -465,5 +477,6 @@ export function SearchModal(props: SearchModalProps) {
         </div>
       </div>
     </div>
+    </Show>
   );
 }
