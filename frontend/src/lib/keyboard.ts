@@ -1,92 +1,44 @@
 // iOS Virtual Keyboard Handler
 // Uses visualViewport API to detect keyboard and adjust layout
+// Follows visualViewport in real-time (no additional animation) for sync with iOS keyboard
 
 import { createSignal, onMount, onCleanup, Accessor } from 'solid-js';
 import { isIOS } from './fonts';
 
 export interface UseKeyboardOptions {
-  /** Called BEFORE state changes when keyboard is about to show */
+  /** Called when keyboard visibility changes (before height updates) */
   onBeforeShow?: () => void;
-  /** Called AFTER state changes when keyboard has shown */
-  onShow?: (targetHeight: number) => void;
-  /** Called BEFORE state changes when keyboard is about to hide */
   onBeforeHide?: () => void;
-  /** Called AFTER state changes when keyboard has hidden */
-  onHide?: (targetHeight: number) => void;
-  debounceMs?: number;
+  /** Called after keyboard transition completes */
+  onShow?: () => void;
+  onHide?: () => void;
 }
 
 export interface UseKeyboardResult {
   isVisible: Accessor<boolean>;
   keyboardHeight: Accessor<number>;
-  /** The target viewport height (what we should animate to) */
-  targetHeight: Accessor<number>;
-  /** The current animated height (smoothly transitions to targetHeight) */
-  animatedHeight: Accessor<number>;
+  /** Current viewport height - follows visualViewport in real-time */
+  viewportHeight: Accessor<number>;
 }
 
 /**
  * Reactive hook for iOS keyboard visibility and height.
- * Uses visualViewport API to detect when the virtual keyboard appears.
- * Provides both target height (for immediate use) and animated height (for smooth transitions).
- * Only active on iOS - returns static values on other platforms.
+ * Follows visualViewport in real-time (no additional animation).
+ * The iOS keyboard itself provides the animation - we just sync with it.
  */
 export function useKeyboard(options: UseKeyboardOptions = {}): UseKeyboardResult {
-  const { onBeforeShow, onShow, onBeforeHide, onHide, debounceMs = 16 } = options;
+  const { onBeforeShow, onBeforeHide, onShow, onHide } = options;
 
   const initialHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
 
   const [isVisible, setIsVisible] = createSignal(false);
   const [keyboardHeight, setKeyboardHeight] = createSignal(0);
-  const [targetHeight, setTargetHeight] = createSignal(initialHeight);
-  const [animatedHeight, setAnimatedHeight] = createSignal(initialHeight);
+  const [viewportHeight, setViewportHeight] = createSignal(initialHeight);
 
-  // Track stable height (viewport without keyboard)
+  // Track stable height (viewport without keyboard) for threshold calculation
   let stableViewportHeight = initialHeight;
-  let debounceTimer: number | null = null;
-  let animationFrame: number | null = null;
-
-  // Animation configuration
-  const ANIMATION_DURATION = 250; // ms
-
-  /**
-   * Smoothly animate height from current to target while calling onFrame for scroll adjustment.
-   */
-  function animateToHeight(
-    fromHeight: number,
-    toHeight: number,
-    onFrame?: (currentHeight: number, progress: number) => void,
-    onComplete?: () => void
-  ) {
-    // Cancel any existing animation
-    if (animationFrame !== null) {
-      cancelAnimationFrame(animationFrame);
-    }
-
-    const startTime = performance.now();
-
-    function animate(now: number) {
-      const elapsed = now - startTime;
-      const progress = Math.min(1, elapsed / ANIMATION_DURATION);
-      // Ease-out cubic for smooth deceleration
-      const eased = 1 - Math.pow(1 - progress, 3);
-
-      const currentHeight = fromHeight + (toHeight - fromHeight) * eased;
-      setAnimatedHeight(currentHeight);
-
-      // Callback for scroll adjustment at each frame
-      onFrame?.(currentHeight, progress);
-
-      if (progress < 1) {
-        animationFrame = requestAnimationFrame(animate);
-      } else {
-        animationFrame = null;
-        onComplete?.();
-      }
-    }
-
-    animationFrame = requestAnimationFrame(animate);
-  }
+  // Track if we've fired the "complete" callback
+  let transitionCompleteTimer: number | null = null;
 
   onMount(() => {
     // Only apply on iOS - other platforms handle keyboard natively
@@ -102,63 +54,49 @@ export function useKeyboard(options: UseKeyboardOptions = {}): UseKeyboardResult
 
     // Initialize with current viewport height
     stableViewportHeight = visualViewport.height;
-    setTargetHeight(visualViewport.height);
-    setAnimatedHeight(visualViewport.height);
+    setViewportHeight(visualViewport.height);
 
     function handleViewportChange() {
       if (!visualViewport) return;
 
-      // Debounce rapid resize events during keyboard animation
-      if (debounceTimer !== null) {
-        clearTimeout(debounceTimer);
+      const newHeight = visualViewport.height;
+      const heightDiff = stableViewportHeight - newHeight;
+
+      // Update height immediately - follow the iOS keyboard in real-time
+      setViewportHeight(newHeight);
+
+      // Threshold: Keyboard is visible if viewport shrunk by > 150px
+      const KEYBOARD_THRESHOLD = 150;
+      const keyboardNowVisible = heightDiff > KEYBOARD_THRESHOLD;
+
+      // Detect keyboard state changes
+      if (keyboardNowVisible && !isVisible()) {
+        // Keyboard just appeared
+        onBeforeShow?.();
+        setKeyboardHeight(heightDiff);
+        setIsVisible(true);
+
+        // Fire onShow after keyboard animation settles (debounced)
+        if (transitionCompleteTimer) clearTimeout(transitionCompleteTimer);
+        transitionCompleteTimer = window.setTimeout(() => {
+          onShow?.();
+        }, 100);
+      } else if (!keyboardNowVisible && isVisible()) {
+        // Keyboard just dismissed
+        onBeforeHide?.();
+        stableViewportHeight = newHeight;
+        setKeyboardHeight(0);
+        setIsVisible(false);
+
+        // Fire onHide after keyboard animation settles
+        if (transitionCompleteTimer) clearTimeout(transitionCompleteTimer);
+        transitionCompleteTimer = window.setTimeout(() => {
+          onHide?.();
+        }, 100);
+      } else if (keyboardNowVisible) {
+        // Keyboard still visible but height changed
+        setKeyboardHeight(heightDiff);
       }
-
-      debounceTimer = window.setTimeout(() => {
-        const newTargetHeight = visualViewport.height;
-        const heightDiff = stableViewportHeight - newTargetHeight;
-
-        // Threshold: Keyboard is visible if viewport shrunk by > 150px
-        const KEYBOARD_THRESHOLD = 150;
-        const keyboardNowVisible = heightDiff > KEYBOARD_THRESHOLD;
-
-        const currentAnimatedHeight = animatedHeight();
-
-        if (keyboardNowVisible && !isVisible()) {
-          // Keyboard just appeared
-          onBeforeShow?.(); // Call BEFORE state changes
-
-          setKeyboardHeight(heightDiff);
-          setIsVisible(true);
-          setTargetHeight(newTargetHeight);
-
-          // Start animation and call onShow with target height
-          animateToHeight(currentAnimatedHeight, newTargetHeight, undefined, () => {
-            onShow?.(newTargetHeight);
-          });
-        } else if (!keyboardNowVisible && isVisible()) {
-          // Keyboard just dismissed
-          onBeforeHide?.(); // Call BEFORE state changes
-
-          stableViewportHeight = newTargetHeight;
-          setKeyboardHeight(0);
-          setIsVisible(false);
-          setTargetHeight(newTargetHeight);
-
-          // Start animation and call onHide with target height
-          animateToHeight(currentAnimatedHeight, newTargetHeight, undefined, () => {
-            onHide?.(newTargetHeight);
-          });
-        } else if (keyboardNowVisible) {
-          // Keyboard still visible but height changed (orientation?)
-          setKeyboardHeight(heightDiff);
-          setTargetHeight(newTargetHeight);
-          animateToHeight(currentAnimatedHeight, newTargetHeight);
-        } else if (Math.abs(newTargetHeight - currentAnimatedHeight) > 5) {
-          // Height changed without keyboard (orientation change?)
-          setTargetHeight(newTargetHeight);
-          animateToHeight(currentAnimatedHeight, newTargetHeight);
-        }
-      }, debounceMs);
     }
 
     // Handle orientation changes - reset stable height when keyboard is hidden
@@ -166,12 +104,12 @@ export function useKeyboard(options: UseKeyboardOptions = {}): UseKeyboardResult
       setTimeout(() => {
         if (visualViewport && !isVisible()) {
           stableViewportHeight = visualViewport.height;
-          setTargetHeight(visualViewport.height);
-          setAnimatedHeight(visualViewport.height);
+          setViewportHeight(visualViewport.height);
         }
       }, 300);
     }
 
+    // Listen to visualViewport changes - this fires continuously during keyboard animation
     visualViewport.addEventListener('resize', handleViewportChange);
     visualViewport.addEventListener('scroll', handleViewportChange);
     window.addEventListener('orientationchange', handleOrientationChange);
@@ -180,14 +118,9 @@ export function useKeyboard(options: UseKeyboardOptions = {}): UseKeyboardResult
       visualViewport.removeEventListener('resize', handleViewportChange);
       visualViewport.removeEventListener('scroll', handleViewportChange);
       window.removeEventListener('orientationchange', handleOrientationChange);
-      if (debounceTimer !== null) {
-        clearTimeout(debounceTimer);
-      }
-      if (animationFrame !== null) {
-        cancelAnimationFrame(animationFrame);
-      }
+      if (transitionCompleteTimer) clearTimeout(transitionCompleteTimer);
     });
   });
 
-  return { isVisible, keyboardHeight, targetHeight, animatedHeight };
+  return { isVisible, keyboardHeight, viewportHeight };
 }

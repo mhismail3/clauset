@@ -405,27 +405,19 @@ export function TerminalView(props: TerminalViewProps) {
     savedScrollState = null;
   }
 
-  // iOS keyboard handling with smooth JS-based animation
-  const { isVisible: keyboardVisible, animatedHeight } = useKeyboard({
-    // Save scroll position BEFORE any state changes
-    onBeforeShow: () => {
-      saveScrollPosition();
-    },
-    onBeforeHide: () => {
-      saveScrollPosition();
-    },
-    // Resize terminal and restore scroll AFTER animation completes
+  // iOS keyboard handling - follows visualViewport in real-time (no animation delay)
+  const { isVisible: keyboardVisible, viewportHeight } = useKeyboard({
+    // Save scroll position BEFORE keyboard state changes
+    onBeforeShow: saveScrollPosition,
+    onBeforeHide: saveScrollPosition,
+    // Resize terminal and restore scroll AFTER keyboard animation settles
     onShow: () => {
       doFitAndResize();
-      requestAnimationFrame(() => {
-        restoreScrollPosition();
-      });
+      requestAnimationFrame(restoreScrollPosition);
     },
     onHide: () => {
       doFitAndResize();
-      requestAnimationFrame(() => {
-        restoreScrollPosition();
-      });
+      requestAnimationFrame(restoreScrollPosition);
     },
   });
 
@@ -690,12 +682,11 @@ export function TerminalView(props: TerminalViewProps) {
       style={{
         display: 'flex',
         "flex-direction": 'column',
-        // On iOS, use animated height for smooth keyboard transitions; otherwise use 100%
-        height: isIOS() ? `${animatedHeight()}px` : '100%',
+        // On iOS, follow visualViewport height in real-time to sync with keyboard
+        height: isIOS() ? `${viewportHeight()}px` : '100%',
         width: '100%',
         background: '#0d0d0d',
         overflow: 'hidden',
-        // No CSS transition - animation is handled in JavaScript for better control
       }}
     >
       {/* Terminal area with padding for visual spacing */}

@@ -117,8 +117,8 @@ export default function SessionPage() {
   const [terminalData, setTerminalData] = createSignal<Uint8Array[]>([]);
   const [resuming, setResuming] = createSignal(false);
 
-  // iOS keyboard handling for chat view (uses JS-animated height for smooth transitions)
-  const { animatedHeight } = useKeyboard();
+  // iOS keyboard handling for chat view (follows visualViewport in real-time)
+  const { viewportHeight } = useKeyboard();
 
   let wsManager: ReturnType<typeof createWebSocketManager> | null = null;
   let messagesEndRef: HTMLDivElement | undefined;
@@ -560,13 +560,12 @@ export default function SessionPage() {
     <div
       class="flex flex-col"
       style={{
-        // On iOS, use animated height for smooth keyboard transitions; otherwise use 100%
-        height: isIOS() ? `${animatedHeight()}px` : '100%',
+        // On iOS, follow visualViewport height in real-time to sync with keyboard
+        height: isIOS() ? `${viewportHeight()}px` : '100%',
         width: "100%",
         "max-width": "100%",
         "min-width": "0",
         overflow: "hidden",
-        // No CSS transition - animation is handled in JavaScript for better control
       }}
     >
       {/* Connection status banner */}
