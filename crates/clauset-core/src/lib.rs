@@ -1,6 +1,7 @@
 //! Core session and process management for Clauset.
 
 mod buffer;
+mod chat_processor;
 mod db;
 mod diff;
 mod error;
@@ -12,6 +13,7 @@ mod session;
 mod sizing;
 
 pub use buffer::{AppendResult, RecentAction, SequencedChunk, SessionActivity, SessionBuffers};
+pub use chat_processor::ChatProcessor;
 pub use db::SessionStore;
 pub use diff::{compute_diff, generate_unified_diff, DiffChangeType, DiffHunk, DiffLine, FileDiff};
 pub use error::ClausetError;

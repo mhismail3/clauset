@@ -2,7 +2,7 @@
 
 use crate::config::Config;
 use crate::interaction_processor::InteractionProcessor;
-use clauset_core::{HistoryWatcher, InteractionStore, SessionManager, SessionManagerConfig};
+use clauset_core::{ChatProcessor, HistoryWatcher, InteractionStore, SessionManager, SessionManagerConfig};
 use std::sync::Arc;
 
 /// Shared application state.
@@ -10,6 +10,7 @@ pub struct AppState {
     pub session_manager: Arc<SessionManager>,
     pub history_watcher: Arc<HistoryWatcher>,
     pub interaction_processor: Arc<InteractionProcessor>,
+    pub chat_processor: Arc<ChatProcessor>,
     pub config: Config,
 }
 
@@ -26,11 +27,13 @@ impl AppState {
         let history_watcher = Arc::new(HistoryWatcher::default());
         let interaction_store = Arc::new(InteractionStore::open(&config.db_path)?);
         let interaction_processor = Arc::new(InteractionProcessor::new(interaction_store));
+        let chat_processor = Arc::new(ChatProcessor::new());
 
         Ok(Self {
             session_manager,
             history_watcher,
             interaction_processor,
+            chat_processor,
             config,
         })
     }

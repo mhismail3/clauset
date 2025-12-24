@@ -233,6 +233,10 @@ pub enum WsServerMessage {
         /// Recent actions with details for rich preview
         recent_actions: Vec<RecentAction>,
     },
+    /// Chat event for chat mode view.
+    /// Contains structured message updates from hook events.
+    /// Note: Uses struct variant (not tuple) to avoid serde tag conflict with inner ChatEvent.
+    ChatEvent { event: crate::ChatEvent },
 }
 
 /// A single action/step performed by Claude (for activity updates)

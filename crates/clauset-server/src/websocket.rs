@@ -210,6 +210,22 @@ pub async fn handle_websocket(
                                 message: message.clone(),
                             })
                         }
+                        ProcessEvent::Chat(chat_event) => {
+                            // Forward chat events for chat mode view
+                            // Check if this event is for our session
+                            let event_session_id = match &chat_event {
+                                clauset_types::ChatEvent::Message { session_id, .. } => *session_id,
+                                clauset_types::ChatEvent::ContentDelta { session_id, .. } => *session_id,
+                                clauset_types::ChatEvent::ToolCallStart { session_id, .. } => *session_id,
+                                clauset_types::ChatEvent::ToolCallComplete { session_id, .. } => *session_id,
+                                clauset_types::ChatEvent::MessageComplete { session_id, .. } => *session_id,
+                            };
+                            if event_session_id == session_id {
+                                Some(WsServerMessage::ChatEvent { event: chat_event.clone() })
+                            } else {
+                                None
+                            }
+                        }
                         _ => None,
                     };
 
@@ -303,8 +319,10 @@ pub async fn handle_websocket(
                             let _ = buffer_tx.send(()).await;
                         }
                         WsClientMessage::Ping { timestamp } => {
-                            // Pong is handled by the send task
-                            tracing::debug!(target: "clauset::ws::ping", "Received ping: {}", timestamp);
+                            // Send pong response
+                            let pong = WsServerMessage::Pong { timestamp };
+                            let _ = outgoing_tx_clone.send(pong).await;
+                            tracing::trace!(target: "clauset::ws::ping", "Sent pong for timestamp: {}", timestamp);
                         }
                         WsClientMessage::GetState => {
                             // TODO: Send current state

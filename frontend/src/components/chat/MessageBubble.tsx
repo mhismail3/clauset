@@ -7,6 +7,12 @@ interface MessageBubbleProps {
 
 export function MessageBubble(props: MessageBubbleProps) {
   const isUser = () => props.message.role === 'user';
+  const isThinking = () =>
+    !isUser() &&
+    props.message.isStreaming &&
+    !props.message.content &&
+    !props.message.toolCalls?.length;
+  const hasContent = () => props.message.content || props.message.toolCalls?.length;
 
   return (
     <div class={`flex ${isUser() ? 'justify-end' : 'justify-start'}`}>
@@ -17,6 +23,18 @@ export function MessageBubble(props: MessageBubbleProps) {
             : 'bg-bg-elevated text-text-primary'
         }`}
       >
+        {/* Thinking indicator - shown when streaming but no content yet */}
+        <Show when={isThinking()}>
+          <div class="flex items-center gap-2 text-text-muted">
+            <div class="flex gap-1">
+              <span class="w-2 h-2 rounded-full bg-accent animate-bounce" style={{ "animation-delay": "0ms" }} />
+              <span class="w-2 h-2 rounded-full bg-accent animate-bounce" style={{ "animation-delay": "150ms" }} />
+              <span class="w-2 h-2 rounded-full bg-accent animate-bounce" style={{ "animation-delay": "300ms" }} />
+            </div>
+            <span class="text-sm">Thinking...</span>
+          </div>
+        </Show>
+
         {/* Tool Calls */}
         <Show when={props.message.toolCalls?.length}>
           <div class="space-y-2 mb-3">
@@ -27,12 +45,14 @@ export function MessageBubble(props: MessageBubbleProps) {
         </Show>
 
         {/* Content */}
-        <div class="whitespace-pre-wrap break-words">
-          <MarkdownContent content={props.message.content} />
-        </div>
+        <Show when={props.message.content}>
+          <div class="whitespace-pre-wrap break-words">
+            <MarkdownContent content={props.message.content} />
+          </div>
+        </Show>
 
-        {/* Streaming indicator */}
-        <Show when={props.message.isStreaming}>
+        {/* Streaming indicator - shown while content is still being added */}
+        <Show when={props.message.isStreaming && hasContent()}>
           <span class="inline-block w-2 h-4 bg-accent ml-1 animate-pulse" />
         </Show>
       </div>

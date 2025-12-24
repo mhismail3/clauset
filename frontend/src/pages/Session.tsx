@@ -20,6 +20,8 @@ import {
   getStreamingContent,
   addToolCall,
   updateToolCallResult,
+  handleChatEvent,
+  type ChatEvent,
 } from '../stores/messages';
 import { appendTerminalOutput, clearTerminalHistory } from '../stores/terminal';
 
@@ -439,6 +441,15 @@ export default function SessionPage() {
         }
         break;
       }
+      case 'chat_event': {
+        // Chat event from hook processing - update chat messages
+        const chatEvent = (msg as { event: ChatEvent }).event;
+        if (chatEvent) {
+          handleChatEvent(chatEvent);
+          scrollToBottom();
+        }
+        break;
+      }
     }
   }
 
@@ -460,12 +471,8 @@ export default function SessionPage() {
   async function handleSendMessage(content: string) {
     const sessionId = params.id;
 
-    addMessage(sessionId, {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content,
-      timestamp: Date.now(),
-    });
+    // Don't add message locally - it will come back from the UserPromptSubmit hook
+    // This ensures messages are only added once and stay in sync with the server
 
     scrollToBottom();
 
@@ -733,8 +740,8 @@ export default function SessionPage() {
         <Show when={currentView() === 'chat'}>
           <div class="flex-1 flex flex-col">
             <main class="flex-1 scrollable p-4 space-y-4">
-              {/* Terminal mode notice */}
-              <Show when={session()?.mode === 'terminal' && messages().length === 0}>
+              {/* Empty state when no messages yet */}
+              <Show when={messages().length === 0 && !streamingContent()}>
                 <div class="card-bordered" style={{ padding: '24px', "text-align": 'center' }}>
                   <div
                     style={{
@@ -748,21 +755,14 @@ export default function SessionPage() {
                       "justify-content": 'center',
                     }}
                   >
-                    <span class="text-mono" style={{ color: 'var(--color-accent)', "font-size": '18px' }}>&gt;_</span>
+                    <span class="text-mono" style={{ color: 'var(--color-accent)', "font-size": '18px' }}>&#x2709;</span>
                   </div>
                   <p style={{ color: 'var(--color-text-secondary)', "margin-bottom": '8px' }}>
-                    Terminal mode active
+                    No messages yet
                   </p>
                   <p class="text-caption" style={{ "margin-bottom": '16px' }}>
-                    Output appears in the terminal view.
+                    Messages from Claude will appear here.
                   </p>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setCurrentView('term')}
-                  >
-                    Switch to Terminal
-                  </Button>
                 </div>
               </Show>
 

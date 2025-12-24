@@ -5,7 +5,7 @@
 
 use crate::state::AppState;
 use axum::{extract::State, http::StatusCode, Json};
-use clauset_core::RecentAction;
+use clauset_core::{ProcessEvent, RecentAction};
 use clauset_types::{HookActivityUpdate, HookEvent, HookEventPayload, HookEventType, SessionStatus};
 use serde::Serialize;
 use serde_json::Value;
@@ -56,6 +56,13 @@ pub async fn receive(
         .interaction_processor
         .process_event(&event, cost_usd, input_tokens, output_tokens)
         .await;
+
+    // Process the event for chat mode messages
+    let chat_events = state.chat_processor.process_hook_event(&event).await;
+    for chat_event in chat_events {
+        // Broadcast chat events to WebSocket clients
+        let _ = state.session_manager.broadcast_event(ProcessEvent::Chat(chat_event));
+    }
 
     // Process the event for real-time activity updates
     if let Err(e) = process_hook_event(&state, event).await {
@@ -140,12 +147,13 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
         HookEvent::Stop {
             session_id,
             stop_hook_active,
+            transcript_path,
             ..
         } => {
             debug!(
                 target: "clauset::hooks",
-                "Claude stopped for session {} (continuing: {})",
-                session_id, stop_hook_active
+                "Claude stopped for session {} (continuing: {}, transcript: {:?})",
+                session_id, stop_hook_active, transcript_path
             );
 
             if !stop_hook_active {

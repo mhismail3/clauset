@@ -333,6 +333,10 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          // Debug: log all incoming messages
+          if (data.type !== 'terminal_chunk' && data.type !== 'pong') {
+            console.log('[WS] Received:', data.type, data);
+          }
           handleMessage(data);
         } catch (e) {
           console.error('Failed to parse WebSocket message:', e);

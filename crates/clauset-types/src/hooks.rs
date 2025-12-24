@@ -183,6 +183,7 @@ pub enum HookEvent {
         session_id: Uuid,
         claude_session_id: String,
         stop_hook_active: bool,
+        transcript_path: Option<String>,
     },
 
     /// Subagent finished
@@ -256,6 +257,7 @@ impl TryFrom<HookEventPayload> for HookEvent {
                 session_id,
                 claude_session_id,
                 stop_hook_active: p.stop_hook_active.unwrap_or(false),
+                transcript_path: p.transcript_path,
             }),
 
             "SubagentStop" => Ok(HookEvent::SubagentStop {

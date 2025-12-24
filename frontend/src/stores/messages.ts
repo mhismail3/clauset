@@ -114,4 +114,113 @@ export function clearSessionMessages(sessionId: string) {
   });
 }
 
+// ChatEvent types matching backend
+export interface ChatMessage {
+  id: string;
+  session_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  tool_calls: ChatToolCall[];
+  is_streaming: boolean;
+  is_complete: boolean;
+  timestamp: number;
+}
+
+export interface ChatToolCall {
+  id: string;
+  name: string;
+  input: unknown;
+  output?: string;
+  is_error: boolean;
+  is_complete: boolean;
+}
+
+export type ChatEvent =
+  | { type: 'message'; session_id: string; message: ChatMessage }
+  | { type: 'content_delta'; session_id: string; message_id: string; delta: string }
+  | { type: 'tool_call_start'; session_id: string; message_id: string; tool_call: ChatToolCall }
+  | { type: 'tool_call_complete'; session_id: string; message_id: string; tool_call_id: string; output: string; is_error: boolean }
+  | { type: 'message_complete'; session_id: string; message_id: string };
+
+/**
+ * Handle a ChatEvent from the WebSocket.
+ * Updates the messages store based on the event type.
+ */
+export function handleChatEvent(event: ChatEvent) {
+  console.log('[ChatEvent]', event.type, event);
+  switch (event.type) {
+    case 'message': {
+      const msg = event.message;
+      console.log('[ChatEvent] Adding message:', msg.role, msg.id, 'streaming:', msg.is_streaming);
+      const message: Message = {
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        toolCalls: msg.tool_calls.map((tc) => ({
+          id: tc.id,
+          name: tc.name,
+          input: tc.input,
+          output: tc.output,
+          isError: tc.is_error,
+        })),
+        timestamp: msg.timestamp,
+        isStreaming: msg.is_streaming,
+      };
+      addMessage(msg.session_id, message);
+      break;
+    }
+
+    case 'content_delta': {
+      // Update the message content with the delta
+      setMessages((prev) => {
+        const newMap = new Map(prev);
+        const sessionMessages = newMap.get(event.session_id) ?? [];
+        const updatedMessages = sessionMessages.map((msg) => {
+          if (msg.id === event.message_id) {
+            return { ...msg, content: msg.content + event.delta };
+          }
+          return msg;
+        });
+        newMap.set(event.session_id, updatedMessages);
+        return newMap;
+      });
+      break;
+    }
+
+    case 'tool_call_start': {
+      const tc = event.tool_call;
+      addToolCall(event.session_id, event.message_id, {
+        id: tc.id,
+        name: tc.name,
+        input: tc.input,
+        output: tc.output,
+        isError: tc.is_error,
+      });
+      break;
+    }
+
+    case 'tool_call_complete': {
+      updateToolCallResult(event.session_id, event.tool_call_id, event.output, event.is_error);
+      break;
+    }
+
+    case 'message_complete': {
+      // Mark the message as no longer streaming
+      setMessages((prev) => {
+        const newMap = new Map(prev);
+        const sessionMessages = newMap.get(event.session_id) ?? [];
+        const updatedMessages = sessionMessages.map((msg) => {
+          if (msg.id === event.message_id) {
+            return { ...msg, isStreaming: false };
+          }
+          return msg;
+        });
+        newMap.set(event.session_id, updatedMessages);
+        return newMap;
+      });
+      break;
+    }
+  }
+}
+
 export { messages, streamingMessage };

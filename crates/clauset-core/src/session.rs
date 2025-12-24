@@ -354,6 +354,11 @@ impl SessionManager {
         self.event_tx.clone()
     }
 
+    /// Broadcast an event to all subscribers.
+    pub fn broadcast_event(&self, event: ProcessEvent) -> std::result::Result<usize, broadcast::error::SendError<ProcessEvent>> {
+        self.event_tx.send(event)
+    }
+
     /// Delete a session permanently.
     pub async fn delete_session(&self, session_id: Uuid) -> Result<()> {
         // Terminate the process if it's running

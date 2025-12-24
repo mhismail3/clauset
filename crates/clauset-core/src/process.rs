@@ -49,6 +49,8 @@ pub enum ProcessEvent {
         current_step: Option<String>,
         recent_actions: Vec<crate::buffer::RecentAction>,
     },
+    /// Chat event for chat mode view.
+    Chat(clauset_types::ChatEvent),
 }
 
 /// Options for spawning a Claude process.
@@ -429,11 +431,21 @@ impl ProcessManager {
                     .map_err(|_| ClausetError::ChannelSendError)?;
             }
             Some(ManagedProcess::Terminal { writer, .. }) => {
-                // For terminal mode, send input followed by newline
+                // For terminal mode, send input followed by carriage return.
+                // Important: Send text and Enter key separately with a small delay,
+                // matching the pattern used for initial prompt (lines 378-386).
+                // Claude Code's TUI needs the Enter key to arrive as a distinct input event.
                 let mut writer = writer.lock().unwrap();
-                let input_with_newline = format!("{}\n", input);
+                // First, write the text content
                 writer
-                    .write_all(input_with_newline.as_bytes())
+                    .write_all(input.as_bytes())
+                    .map_err(|e| ClausetError::IoError(e))?;
+                writer.flush().map_err(|e| ClausetError::IoError(e))?;
+                // Small delay to let the TUI process the text
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                // Now send Enter key (carriage return) to execute
+                writer
+                    .write_all(b"\r")
                     .map_err(|e| ClausetError::IoError(e))?;
                 writer.flush().map_err(|e| ClausetError::IoError(e))?;
             }

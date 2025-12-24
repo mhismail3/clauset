@@ -1,28 +1,30 @@
 # Continuity Ledger
 
 ## Goal
-Implement comprehensive interaction tracking system with:
-- Interaction timeline (user prompts + tool invocations)
-- File diffs (before/after snapshots)
-- Cross-session full-text search
-- Cost analytics per interaction
-- Rollback capability
+Implement chat mode that displays Claude's messages as chat bubbles while maintaining 1-to-1 mapping with terminal sessions.
 
-Success criteria: All features from docs/FEATURE_PLAN.md implemented with no regressions.
+Success criteria:
+- User messages display as chat bubbles (from UserPromptSubmit hook)
+- Claude's responses display as chat bubbles (parsed from terminal output)
+- Tool calls display inline (collapsible, from PreToolUse/PostToolUse hooks)
+- Real-time streaming as Claude types
+- Toggle between term/chat views on same session
+- No regressions to terminal mode
+- NO use of `claude -p` or API/SDK - always terminal sessions
 
 ## Constraints/Assumptions
-- 30-day retention policy
-- Modified files only (Write/Edit tools)
-- Hook integration already exists (HookEventPayload)
-- Use same SQLite database file, separate tables
-- Content-addressed storage with SHA256 + zstd compression
+- Terminal PTY sessions remain source of truth (no API/SDK)
+- Existing hooks provide: UserPromptSubmit, PreToolUse, PostToolUse, Stop
+- Chat mode is a view layer over terminal data
+- Hybrid extraction: real-time terminal parsing + transcript verification
+- Collapsible tool calls in chat UI
 
 ## Key Decisions
-- Created separate `InteractionStore` module (not extending SessionStore)
-- FTS5 for full-text search on user_prompt + assistant_summary + tool_name
-- Reference counting triggers for file content deduplication
-- Foreign key from interactions → sessions (requires sessions table to exist)
-- Using `similar` crate for diff computation
+- New `ChatMessageProcessor` in clauset-core for message extraction
+- New `chat.rs` types module for ChatMessage, ChatToolCall, MessageRole
+- State machine tracks: Idle → BuildingAssistant → ToolInProgress → Idle
+- WebSocket broadcasts ChatMessage events (separate from terminal output)
+- Transcript file used for verification on Stop hook
 
 ## State
 
@@ -121,11 +123,47 @@ Success criteria: All features from docs/FEATURE_PLAN.md implemented with no reg
   - Monospace font (JetBrains Mono) for title and inputs matching session cards
 
 ### Now
-- Prefix matching implementation complete and tested
+- Chat mode fully working! ✅
+
+### Verified Working
+- User messages display as chat bubbles (from UserPromptSubmit hook)
+- Claude's responses display as chat bubbles (from transcript JSONL on Stop hook)
+- "Thinking..." indicator shows while Claude is processing
+- Streaming content deltas work correctly
+- Toggle between term/chat views on same session
+
+### Bug Fixes Applied This Session
+- **Terminal parsing disabled**: Removed `process_terminal_output()` call from event_processor - terminal output is too noisy (spinners, ANSI codes, status lines) to reliably extract Claude's prose text.
+- **Transcript-based response extraction**: Added `transcript_path` to `HookEvent::Stop` variant. On Stop hook, reads Claude's response from the transcript JSONL file and adds it to the chat message before marking complete.
+- **Fixed transcript JSONL parsing**: Transcript format is nested `{"type":"assistant", "message":{"content":[{"type":"text", "text":"..."}]}}`. Updated `read_last_assistant_response()` to check outer `type` field and navigate to nested `message.content` array.
+- **Fixed WebSocket ping/pong mismatch**: Frontend sends JSON `{type: 'ping'}` messages but server only handled protocol-level WebSocket pings. Added JSON ping handling in `global_ws.rs` - recv_task parses `{type:'ping'}` and sends `{type:'pong'}` response via channel to send_task.
+- **Fixed session WebSocket ping/pong**: Same issue as global WebSocket - added Pong response in `websocket.rs` by sending `WsServerMessage::Pong { timestamp }` via outgoing_tx channel.
+
+### Previous Bug Fixes
+- **Chat Enter key not executing in terminal**: Updated `send_input()` in process.rs to match the initial prompt pattern (lines 378-386). The fix sends text and `\r` SEPARATELY with a 50ms delay and flush between them. Claude Code's TUI needs the Enter key to arrive as a distinct input event, not concatenated with the text.
+- **Chat events not appearing in frontend**: Fixed serde serialization conflict. Both `WsServerMessage` and `ChatEvent` used `#[serde(tag = "type")]`, causing the two `type` fields to conflict. Changed `WsServerMessage::ChatEvent(ChatEvent)` (tuple variant) to `WsServerMessage::ChatEvent { event: ChatEvent }` (struct variant). Updated frontend to access `msg.event` instead of `msg.ChatEvent`.
+- **Chat message parsing error (tool_calls undefined)**: Removed `skip_serializing_if = "Vec::is_empty"` from `tool_calls` field in `ChatMessage` struct. The frontend expected `tool_calls` to always be an array, but when empty, serde omitted the field entirely causing `undefined.map()` error in JavaScript.
+- **Duplicate user messages in chat**: Removed local `addMessage()` call in frontend's `handleSendMessage()`. Messages now only come from the UserPromptSubmit hook, ensuring a single source of truth.
+- **No thinking indicator in chat**: Added thinking state detection to MessageBubble component. When an assistant message has `isStreaming: true` but no content, shows animated "Thinking..." indicator.
+- **No streaming response in chat**: Wired up `chat_processor.process_terminal_output()` in event_processor.rs to extract Claude's prose from terminal output and broadcast ContentDelta events to chat view.
+
+### Done (Chat Mode Implementation - Steps 1-5)
+- Created `crates/clauset-types/src/chat.rs` with ChatMessage, ChatToolCall, ChatRole types
+- Created `crates/clauset-core/src/chat_processor.rs` with state machine for message extraction
+- Added `ProcessEvent::Chat` variant to process.rs
+- Added `broadcast_event()` method to SessionManager
+- Added ChatProcessor to AppState and integrated with hooks.rs
+- Added `WsServerMessage::ChatEvent` variant to ws.rs
+- Updated websocket.rs and global_ws.rs to forward Chat events
+- Updated event_processor.rs to handle Chat events
+- Added `handleChatEvent()` function to frontend messages.ts store
+- Updated Session.tsx to handle chat_event WebSocket messages
+- Replaced "Terminal mode active" notice with "No messages yet" empty state
 
 ### Next
-- Fix "Invalid Date" display in search results (minor UI bug)
-- Test on iOS device to verify keyboard handling works correctly
+- Tool calls display inline (collapsible, from PreToolUse/PostToolUse hooks)
+- Real-time streaming as Claude types (currently batch on Stop hook)
+- Clean up debug logging in ws.ts
 
 ## Bug Fixes Applied
 - **Views stacking on Session page**: Changed from CSS `hidden` class to Solid.js `<Show when={}>` for Chat/History views (inline styles override CSS classes)
@@ -143,9 +181,10 @@ Success criteria: All features from docs/FEATURE_PLAN.md implemented with no reg
 - None currently
 
 ## Working Set
-- `crates/clauset-types/src/interaction.rs` - type definitions
-- `crates/clauset-core/src/interaction_store.rs` - database layer
-- `crates/clauset-core/src/diff.rs` - diff computation
-- `crates/clauset-server/src/interaction_processor.rs` - hook integration
-- `crates/clauset-server/src/routes/interactions.rs` - API endpoints
-- `docs/FEATURE_PLAN.md` - comprehensive implementation plan
+- `crates/clauset-types/src/chat.rs` - chat message types (new)
+- `crates/clauset-core/src/chat_processor.rs` - message extraction (new)
+- `crates/clauset-server/src/routes/hooks.rs` - forward events to ChatProcessor
+- `crates/clauset-server/src/ws/session.rs` - broadcast chat messages
+- `frontend/src/stores/messages.ts` - frontend message handlers
+- `frontend/src/pages/Session.tsx` - wire up handlers, remove notice
+- Plan file: `~/.claude/plans/fuzzy-forging-engelbart.md`

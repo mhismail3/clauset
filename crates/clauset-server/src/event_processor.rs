@@ -58,6 +58,9 @@ async fn process_event(state: &AppState, event: ProcessEvent) {
                 },
             );
 
+            // NOTE: Terminal output parsing disabled - too noisy (spinners, ANSI codes, status lines)
+            // Claude's response is now read from transcript file on Stop hook instead
+
             if let Some(activity) = activity {
                 // Update interaction costs if they changed (handles late terminal output after Stop hook)
                 state.interaction_processor.update_costs_from_session(
@@ -101,5 +104,7 @@ async fn process_event(state: &AppState, event: ProcessEvent) {
         ProcessEvent::SequencedTerminalOutput { .. } => {}
         // Claude events from stream-json mode
         ProcessEvent::Claude(_) => {}
+        // Chat events are handled by WebSocket handlers for chat mode view
+        ProcessEvent::Chat(_) => {}
     }
 }
