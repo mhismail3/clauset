@@ -1,5 +1,49 @@
-import { Show, For, createSignal, JSX } from 'solid-js';
+import { Show, For, createSignal, onCleanup, JSX } from 'solid-js';
 import { Message, ToolCall } from '../../stores/messages';
+
+const THINKING_PHRASES = [
+  'Thinking',
+  'Evaluating',
+  'Noodling',
+  'Considering',
+  'Processing',
+  'Pondering',
+];
+
+const DOT_CYCLE = ['●', '○', '◐', '◑'];
+
+function StreamingIndicator() {
+  const [phraseIndex, setPhraseIndex] = createSignal(0);
+  const [dotIndex, setDotIndex] = createSignal(0);
+
+  const interval = setInterval(() => {
+    setDotIndex((i) => (i + 1) % DOT_CYCLE.length);
+    if (dotIndex() === DOT_CYCLE.length - 1) {
+      setPhraseIndex((i) => (i + 1) % THINKING_PHRASES.length);
+    }
+  }, 300);
+
+  onCleanup(() => clearInterval(interval));
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        'align-items': 'center',
+        gap: '8px',
+        'margin-top': '8px',
+        color: 'var(--color-text-muted)',
+      }}
+    >
+      <span style={{ color: 'var(--color-accent)', 'font-size': '12px' }}>
+        {DOT_CYCLE[dotIndex()]}
+      </span>
+      <span class="text-mono" style={{ 'font-size': '13px' }}>
+        {THINKING_PHRASES[phraseIndex()]}...
+      </span>
+    </div>
+  );
+}
 
 interface MessageBubbleProps {
   message: Message;
@@ -99,17 +143,7 @@ export function MessageBubble(props: MessageBubbleProps) {
 
         {/* Streaming indicator - shown while content is still being added */}
         <Show when={props.message.isStreaming && hasContent()}>
-          <span
-            style={{
-              display: 'inline-block',
-              width: '2px',
-              height: '16px',
-              background: isUser() ? '#ffffff' : 'var(--color-accent)',
-              "margin-left": '2px',
-              "vertical-align": 'text-bottom',
-              animation: 'blink 1s step-end infinite',
-            }}
-          />
+          <StreamingIndicator />
         </Show>
       </div>
     </div>

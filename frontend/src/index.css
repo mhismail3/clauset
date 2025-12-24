@@ -383,6 +383,11 @@ main {
   51%, 100% { opacity: 0; }
 }
 
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.2s ease-out;
 }

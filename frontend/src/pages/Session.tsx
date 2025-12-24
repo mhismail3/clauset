@@ -1,4 +1,4 @@
-import { Show, createSignal, onMount, onCleanup, For } from 'solid-js';
+import { Show, createSignal, createEffect, onMount, onCleanup, For } from 'solid-js';
 import { useParams, useNavigate } from '@solidjs/router';
 import { Button } from '../components/ui/Button';
 import { Spinner } from '../components/ui/Spinner';
@@ -570,6 +570,17 @@ export default function SessionPage() {
 
   onCleanup(() => {
     wsManager?.disconnect();
+  });
+
+  // Trigger terminal resize when switching to terminal view
+  // This ensures proper dimensions after the container becomes visible
+  createEffect(() => {
+    if (currentView() === 'terminal' && terminalDimensions && wsManager && wsState() === 'connected') {
+      // Small delay to ensure display:flex has been applied and layout is computed
+      requestAnimationFrame(() => {
+        wsManager?.requestResync();
+      });
+    }
   });
 
   const messages = () => getMessagesForSession(params.id);

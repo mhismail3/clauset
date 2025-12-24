@@ -8,7 +8,7 @@ interface InputBarProps {
 }
 
 const MAX_ROWS = 10;
-const LINE_HEIGHT = 20; // ~14px font * 1.4 line-height
+const LINE_HEIGHT = 23; // 16px font (iOS override in CSS) * 1.4 line-height
 
 export function InputBar(props: InputBarProps) {
   const [message, setMessage] = createSignal('');
