@@ -2,7 +2,7 @@ import { onMount, onCleanup, createSignal, createEffect, For } from 'solid-js';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { loadTerminalFont, getRecommendedFontSize } from '../../lib/fonts';
+import { loadTerminalFont, getRecommendedFontSize, isIOS } from '../../lib/fonts';
 import { calculateDimensions, getDeviceHint, type ConfidenceLevel } from '../../lib/terminalSizing';
 import { useKeyboard } from '../../lib/keyboard';
 
@@ -405,8 +405,8 @@ export function TerminalView(props: TerminalViewProps) {
     savedScrollState = null;
   }
 
-  // iOS keyboard handling - resize terminal when keyboard state changes
-  const { isVisible: keyboardVisible } = useKeyboard({
+  // iOS keyboard handling - follows visualViewport in real-time (no animation delay)
+  const { isVisible: keyboardVisible, viewportHeight } = useKeyboard({
     // Save scroll position BEFORE keyboard state changes
     onBeforeShow: saveScrollPosition,
     onBeforeHide: saveScrollPosition,
@@ -682,8 +682,8 @@ export function TerminalView(props: TerminalViewProps) {
       style={{
         display: 'flex',
         "flex-direction": 'column',
-        // Always use 100% - parent (Session.tsx) handles viewport sizing
-        height: '100%',
+        // On iOS, follow visualViewport height in real-time to sync with keyboard
+        height: isIOS() ? `${viewportHeight()}px` : '100%',
         width: '100%',
         background: '#0d0d0d',
         overflow: 'hidden',
