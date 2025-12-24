@@ -128,6 +128,7 @@ Success criteria:
   - MarkdownContent: Code blocks with retro shadows and borders
   - InputBar.tsx: Glass container, retro-styled textarea with focus glow, icon-only send button
   - Session.tsx: Empty state card with retro styling and chat icon
+  - Typography: Added Source Serif 4 (serif font) for chat prose, keeping monospace for code
 
 ### Now
 - Chat UI/UX overhaul complete and tested

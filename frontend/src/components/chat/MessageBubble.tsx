@@ -86,7 +86,13 @@ export function MessageBubble(props: MessageBubbleProps) {
 
         {/* Content */}
         <Show when={props.message.content}>
-          <div style={{ "white-space": 'pre-wrap', "word-break": 'break-word' }}>
+          <div style={{
+            "white-space": 'pre-wrap',
+            "word-break": 'break-word',
+            "font-family": 'var(--font-serif)',
+            "font-size": '15px',
+            "line-height": '1.6',
+          }}>
             <MarkdownContent content={props.message.content} />
           </div>
         </Show>
@@ -400,14 +406,14 @@ function MarkdownContent(props: { content: string }) {
                     padding: '2px 6px',
                     "border-radius": '4px',
                     "font-family": 'var(--font-mono)',
-                    "font-size": '0.9em',
+                    "font-size": '0.85em',
                   }}
                 >
                   {part.content}
                 </code>
               );
             default:
-              return <span>{part.content}</span>;
+              return <span style={{ "font-family": 'inherit' }}>{part.content}</span>;
           }
         }}
       </For>
