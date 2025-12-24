@@ -570,4 +570,11 @@ select:focus {
 
 .xterm-helper-textarea {
   opacity: 0 !important;
+  /* Hide iOS blue cursor/caret */
+  caret-color: transparent !important;
+  /* Prevent iOS text selection handles */
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  /* Hide any text selection highlight */
+  -webkit-tap-highlight-color: transparent !important;
 }
