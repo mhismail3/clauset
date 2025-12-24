@@ -738,8 +738,8 @@ export default function SessionPage() {
 
         {/* Chat View */}
         <Show when={currentView() === 'chat'}>
-          <div class="flex-1 flex flex-col">
-            <main class="flex-1 scrollable p-4 space-y-4">
+          <div class="flex-1 flex flex-col" style={{ "min-height": '0' }}>
+            <main class="flex-1 scrollable p-4 space-y-4" style={{ "min-height": '0' }}>
               {/* Empty state when no messages yet */}
               <Show when={messages().length === 0 && !streamingContent()}>
                 <div class="card-bordered" style={{ padding: '24px', "text-align": 'center' }}>
