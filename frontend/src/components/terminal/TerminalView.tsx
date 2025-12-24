@@ -355,14 +355,19 @@ export function TerminalView(props: TerminalViewProps) {
   const [dimensions, setDimensions] = createSignal({ cols: 80, rows: 24 });
 
   // Track scroll position for keyboard transitions
-  let savedScrollState: { linesFromBottom: number; wasAtBottom: boolean } | null = null;
+  // We save the scroll offset in pixels from the bottom of the scrollable area
+  let savedScrollState: {
+    scrollTop: number;
+    maxScroll: number;
+    wasAtBottom: boolean;
+  } | null = null;
 
   // Helper to get xterm viewport element
   function getViewport(): HTMLElement | null {
     return containerRef?.querySelector('.xterm-viewport') as HTMLElement | null;
   }
 
-  // Save scroll position before keyboard transition
+  // Save scroll position BEFORE any height changes
   function saveScrollPosition() {
     if (!terminal) return;
     const viewport = getViewport();
@@ -370,61 +375,57 @@ export function TerminalView(props: TerminalViewProps) {
 
     const maxScroll = viewport.scrollHeight - viewport.clientHeight;
     const currentScroll = viewport.scrollTop;
-    const wasAtBottom = maxScroll <= 0 || currentScroll >= maxScroll - 5;
-    const linesFromBottom = wasAtBottom ? 0 : Math.max(0, maxScroll - currentScroll);
+    // Consider "at bottom" if within 10px of the bottom
+    const wasAtBottom = maxScroll <= 0 || currentScroll >= maxScroll - 10;
 
-    savedScrollState = { linesFromBottom, wasAtBottom };
+    savedScrollState = {
+      scrollTop: currentScroll,
+      maxScroll,
+      wasAtBottom,
+    };
   }
 
-  // Restore scroll position after keyboard transition
+  // Restore scroll position AFTER terminal resize
   function restoreScrollPosition() {
     if (!terminal || !savedScrollState) return;
     const viewport = getViewport();
     if (!viewport) return;
 
-    const maxScroll = viewport.scrollHeight - viewport.clientHeight;
+    const newMaxScroll = viewport.scrollHeight - viewport.clientHeight;
 
-    if (savedScrollState.wasAtBottom || maxScroll <= 0) {
-      // Stay at bottom
-      viewport.scrollTop = maxScroll;
+    if (savedScrollState.wasAtBottom) {
+      // If we were at the bottom, stay at the bottom
+      viewport.scrollTop = newMaxScroll;
     } else {
-      // Restore relative position from bottom
-      viewport.scrollTop = Math.max(0, maxScroll - savedScrollState.linesFromBottom);
+      // Otherwise, maintain the same absolute scroll position
+      // (same content at the top of the viewport)
+      viewport.scrollTop = Math.min(savedScrollState.scrollTop, newMaxScroll);
     }
 
     savedScrollState = null;
   }
 
-  // Resize terminal with scroll position preservation
-  function doKeyboardResize() {
-    if (!terminal || !containerRef || !fitAddon) return;
-
-    // Save scroll position before resize
-    saveScrollPosition();
-
-    // Perform the resize
-    doFitAndResize();
-
-    // Restore scroll position after a brief delay (allow xterm to settle)
-    requestAnimationFrame(() => {
-      restoreScrollPosition();
-    });
-  }
-
-  // iOS keyboard handling - resizes terminal when virtual keyboard appears
-  const { isVisible: keyboardVisible, viewportHeight } = useKeyboard({
+  // iOS keyboard handling with smooth JS-based animation
+  const { isVisible: keyboardVisible, animatedHeight } = useKeyboard({
+    // Save scroll position BEFORE any state changes
+    onBeforeShow: () => {
+      saveScrollPosition();
+    },
+    onBeforeHide: () => {
+      saveScrollPosition();
+    },
+    // Resize terminal and restore scroll AFTER animation completes
     onShow: () => {
-      // Wait for CSS transition to complete (250ms) plus buffer
-      // This ensures container has reached final size before we resize terminal
-      setTimeout(() => {
-        doKeyboardResize();
-      }, 280);
+      doFitAndResize();
+      requestAnimationFrame(() => {
+        restoreScrollPosition();
+      });
     },
     onHide: () => {
-      // Wait for CSS transition to complete before resizing
-      setTimeout(() => {
-        doKeyboardResize();
-      }, 280);
+      doFitAndResize();
+      requestAnimationFrame(() => {
+        restoreScrollPosition();
+      });
     },
   });
 
@@ -689,13 +690,12 @@ export function TerminalView(props: TerminalViewProps) {
       style={{
         display: 'flex',
         "flex-direction": 'column',
-        // On iOS, use viewport height to adjust for keyboard; otherwise use 100%
-        height: isIOS() ? `${viewportHeight()}px` : '100%',
+        // On iOS, use animated height for smooth keyboard transitions; otherwise use 100%
+        height: isIOS() ? `${animatedHeight()}px` : '100%',
         width: '100%',
         background: '#0d0d0d',
         overflow: 'hidden',
-        // Smooth transition when keyboard animates
-        transition: isIOS() ? 'height 0.25s ease-out' : 'none',
+        // No CSS transition - animation is handled in JavaScript for better control
       }}
     >
       {/* Terminal area with padding for visual spacing */}
@@ -785,7 +785,7 @@ export function TerminalView(props: TerminalViewProps) {
             "padding-bottom": keyboardVisible()
               ? '10px'
               : 'calc(max(env(safe-area-inset-bottom, 0px), 12px) + 16px)',
-            transition: 'padding-bottom 0.25s ease-out',
+            // No CSS transition - animation timing is controlled by keyboard hook's JS animation
           }}
         >
           <For each={SPECIAL_KEYS}>

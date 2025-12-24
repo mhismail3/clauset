@@ -39,7 +39,7 @@ export function InputBar(props: InputBarProps) {
         "padding-bottom": keyboardVisible()
           ? '16px'
           : 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
-        transition: 'padding-bottom 0.25s ease-out',
+        // No CSS transition - animation timing is controlled by keyboard hook's JS animation
       }}
     >
       <div class="flex gap-2">
