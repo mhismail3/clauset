@@ -284,40 +284,48 @@ export default function Sessions() {
 
           <Show when={!loading() && sessions().length === 0 && !error()}>
             <div style={{
-              "text-align": 'center',
-              padding: '48px 24px',
-              background: 'var(--color-bg-surface)',
-              "border-radius": '14px',
-              border: '1.5px solid var(--color-bg-overlay)',
-              "box-shadow": '3px 3px 0px rgba(0, 0, 0, 0.3)',
-              "max-width": '320px',
-              margin: '0 auto'
+              display: 'flex',
+              "align-items": 'center',
+              "justify-content": 'center',
+              flex: '1',
+              "min-height": '400px',
             }}>
-              <div
-                style={{
-                  width: '56px',
-                  height: '56px',
-                  margin: '0 auto 20px',
-                  "border-radius": '14px',
-                  background: 'var(--color-accent-muted)',
-                  border: '1px solid var(--color-accent)',
-                  display: 'flex',
-                  "align-items": 'center',
-                  "justify-content": 'center',
-                  "box-shadow": '2px 2px 0px rgba(0, 0, 0, 0.2)',
-                }}
-              >
-                <span class="text-mono" style={{ color: 'var(--color-accent)', "font-size": '22px', "font-weight": '600' }}>&gt;_</span>
+              <div style={{ "text-align": 'center', padding: '24px' }}>
+                <p class="text-mono" style={{ color: 'var(--color-text-primary)', "font-size": '15px', "font-weight": '600', "margin-bottom": '8px' }}>
+                  No sessions yet
+                </p>
+                <p style={{
+                  color: 'var(--color-text-tertiary)',
+                  "font-family": 'var(--font-serif)',
+                  "font-size": '14px',
+                  "margin-bottom": '24px'
+                }}>
+                  Start your first Claude Code session
+                </p>
+                <button
+                  onClick={() => setShowNewSession(true)}
+                  style={{
+                    display: 'inline-flex',
+                    "align-items": 'center',
+                    gap: '8px',
+                    padding: '10px 18px',
+                    "border-radius": '6px',
+                    border: '1.5px solid var(--color-accent)',
+                    background: 'transparent',
+                    color: 'var(--color-accent)',
+                    "font-family": 'var(--font-mono)',
+                    "font-size": '13px',
+                    "font-weight": '600',
+                    cursor: 'pointer',
+                    transition: 'background 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--color-accent-muted)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <span style={{ "font-size": '14px' }}>&gt;_</span>
+                  Create session
+                </button>
               </div>
-              <p class="text-mono" style={{ color: 'var(--color-text-primary)', "font-size": '15px', "font-weight": '600', "margin-bottom": '6px' }}>
-                No sessions yet
-              </p>
-              <p style={{ color: 'var(--color-text-tertiary)', "font-size": '13px', "margin-bottom": '20px' }}>
-                Start your first Claude Code session
-              </p>
-              <Button onClick={() => setShowNewSession(true)}>
-                Create session
-              </Button>
             </div>
           </Show>
 
