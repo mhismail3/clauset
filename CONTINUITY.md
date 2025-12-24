@@ -125,10 +125,12 @@ Success criteria:
 - Chat UI/UX Overhaul (matching dashboard retro theme)
   - MessageBubble.tsx: Retro offset shadows, borders on user/assistant bubbles
   - ToolCallView: Colored left accent bar by tool type, chevron expand icon, card styling
-  - MarkdownContent: Code blocks with retro shadows and borders
+  - MarkdownContent: Full markdown support (bold, italic, headers, lists, links, code blocks)
   - InputBar.tsx: Glass container, retro-styled textarea with focus glow, icon-only send button
   - Session.tsx: Empty state card with retro styling and chat icon
   - Typography: Added Source Serif 4 (serif font) for chat prose, keeping monospace for code
+  - User bubbles: Muted darker orange (#9a4a2e) with visible border (#7a3a22)
+  - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
 - Chat UI/UX overhaul complete and tested

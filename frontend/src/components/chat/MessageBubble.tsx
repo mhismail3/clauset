@@ -1,4 +1,4 @@
-import { Show, For, createSignal } from 'solid-js';
+import { Show, For, createSignal, JSX } from 'solid-js';
 import { Message, ToolCall } from '../../stores/messages';
 
 interface MessageBubbleProps {
@@ -21,11 +21,11 @@ export function MessageBubble(props: MessageBubbleProps) {
           "max-width": '85%',
           "border-radius": '14px',
           padding: '12px 16px',
-          // Retro styling
-          background: isUser() ? 'var(--color-accent)' : 'var(--color-bg-elevated)',
-          color: isUser() ? '#ffffff' : 'var(--color-text-primary)',
+          // Retro styling - user bubbles use muted orange, assistant uses elevated bg
+          background: isUser() ? '#9a4a2e' : 'var(--color-bg-elevated)',
+          color: isUser() ? '#f0ebe3' : 'var(--color-text-primary)',
           border: isUser()
-            ? '1px solid var(--color-accent-active)'
+            ? '1.5px solid #7a3a22'
             : '1.5px solid var(--color-bg-overlay)',
           "box-shadow": '2px 2px 0px rgba(0, 0, 0, 0.3)',
         }}
@@ -322,62 +322,203 @@ function ToolCallView(props: { toolCall: ToolCall }) {
   );
 }
 
-function MarkdownContent(props: { content: string }) {
-  // Simple markdown rendering - code blocks and inline code
-  const parts = () => {
-    const content = props.content;
-    const segments: Array<{ type: 'text' | 'code' | 'inline-code'; content: string; lang?: string }> = [];
-
-    let remaining = content;
+// Parse inline markdown (bold, italic, code, links) within a text segment
+function InlineMarkdown(props: { text: string }) {
+  const parseInline = (text: string): JSX.Element[] => {
+    const elements: JSX.Element[] = [];
+    let remaining = text;
+    let key = 0;
 
     while (remaining.length > 0) {
-      // Check for code block
-      const codeBlockMatch = remaining.match(/^```(\w*)\n([\s\S]*?)```/);
-      if (codeBlockMatch) {
-        segments.push({
-          type: 'code',
-          lang: codeBlockMatch[1] || 'text',
-          content: codeBlockMatch[2],
-        });
-        remaining = remaining.slice(codeBlockMatch[0].length);
+      // Check for inline code first (highest priority)
+      const codeMatch = remaining.match(/^`([^`]+)`/);
+      if (codeMatch) {
+        elements.push(
+          <code
+            style={{
+              background: 'var(--color-code-bg)',
+              border: '1px solid var(--color-code-border)',
+              padding: '2px 6px',
+              "border-radius": '4px',
+              "font-family": 'var(--font-mono)',
+              "font-size": '0.85em',
+            }}
+          >
+            {codeMatch[1]}
+          </code>
+        );
+        remaining = remaining.slice(codeMatch[0].length);
+        key++;
         continue;
       }
 
-      // Check for inline code
-      const inlineCodeMatch = remaining.match(/^`([^`]+)`/);
-      if (inlineCodeMatch) {
-        segments.push({ type: 'inline-code', content: inlineCodeMatch[1] });
-        remaining = remaining.slice(inlineCodeMatch[0].length);
+      // Check for bold (**text** or __text__)
+      const boldMatch = remaining.match(/^\*\*([^*]+)\*\*/) || remaining.match(/^__([^_]+)__/);
+      if (boldMatch) {
+        elements.push(<strong style={{ "font-weight": '600' }}>{boldMatch[1]}</strong>);
+        remaining = remaining.slice(boldMatch[0].length);
+        key++;
         continue;
       }
 
-      // Find next special pattern
-      const nextCode = remaining.indexOf('```');
-      const nextInline = remaining.indexOf('`');
+      // Check for italic (*text* or _text_) - but not if it's part of **
+      const italicMatch = remaining.match(/^\*([^*]+)\*/) || remaining.match(/^_([^_]+)_/);
+      if (italicMatch) {
+        elements.push(<em style={{ "font-style": 'italic' }}>{italicMatch[1]}</em>);
+        remaining = remaining.slice(italicMatch[0].length);
+        key++;
+        continue;
+      }
+
+      // Check for links [text](url)
+      const linkMatch = remaining.match(/^\[([^\]]+)\]\(([^)]+)\)/);
+      if (linkMatch) {
+        elements.push(
+          <a
+            href={linkMatch[2]}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              color: 'var(--color-accent)',
+              "text-decoration": 'underline',
+              "text-underline-offset": '2px',
+            }}
+          >
+            {linkMatch[1]}
+          </a>
+        );
+        remaining = remaining.slice(linkMatch[0].length);
+        key++;
+        continue;
+      }
+
+      // Find next special character
       const nextSpecial = Math.min(
-        nextCode >= 0 ? nextCode : Infinity,
-        nextInline >= 0 ? nextInline : Infinity
+        ...[
+          remaining.indexOf('`'),
+          remaining.indexOf('**'),
+          remaining.indexOf('__'),
+          remaining.indexOf('*'),
+          remaining.indexOf('_'),
+          remaining.indexOf('['),
+        ].filter(i => i >= 0).concat([Infinity])
       );
 
-      if (nextSpecial === Infinity) {
-        segments.push({ type: 'text', content: remaining });
+      if (nextSpecial === Infinity || nextSpecial === remaining.length) {
+        elements.push(<span>{remaining}</span>);
         break;
       }
 
       if (nextSpecial > 0) {
-        segments.push({ type: 'text', content: remaining.slice(0, nextSpecial) });
+        elements.push(<span>{remaining.slice(0, nextSpecial)}</span>);
       }
       remaining = remaining.slice(nextSpecial);
+
+      // If we're stuck on a special char that didn't match a pattern, consume it
+      if (remaining.length > 0 && nextSpecial === 0) {
+        elements.push(<span>{remaining[0]}</span>);
+        remaining = remaining.slice(1);
+      }
+      key++;
     }
 
-    return segments;
+    return elements;
+  };
+
+  return <>{parseInline(props.text)}</>;
+}
+
+function MarkdownContent(props: { content: string }) {
+  // Parse markdown into block and inline elements
+  const blocks = () => {
+    const content = props.content;
+    const result: Array<{ type: string; content: string; lang?: string; level?: number; items?: string[] }> = [];
+
+    // First, split by code blocks
+    const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = codeBlockRegex.exec(content)) !== null) {
+      // Add text before code block
+      if (match.index > lastIndex) {
+        const textBefore = content.slice(lastIndex, match.index);
+        parseTextBlocks(textBefore, result);
+      }
+      // Add code block
+      result.push({ type: 'code', lang: match[1] || 'text', content: match[2] });
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text after last code block
+    if (lastIndex < content.length) {
+      parseTextBlocks(content.slice(lastIndex), result);
+    }
+
+    return result;
+  };
+
+  // Parse text into headers, lists, paragraphs
+  function parseTextBlocks(text: string, result: Array<{ type: string; content: string; level?: number; items?: string[] }>) {
+    const lines = text.split('\n');
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // Check for headers
+      const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
+      if (headerMatch) {
+        result.push({ type: 'header', level: headerMatch[1].length, content: headerMatch[2] });
+        i++;
+        continue;
+      }
+
+      // Check for unordered list
+      if (line.match(/^[-*]\s+/)) {
+        const items: string[] = [];
+        while (i < lines.length && lines[i].match(/^[-*]\s+/)) {
+          items.push(lines[i].replace(/^[-*]\s+/, ''));
+          i++;
+        }
+        result.push({ type: 'ul', items, content: '' });
+        continue;
+      }
+
+      // Check for ordered list
+      if (line.match(/^\d+\.\s+/)) {
+        const items: string[] = [];
+        while (i < lines.length && lines[i].match(/^\d+\.\s+/)) {
+          items.push(lines[i].replace(/^\d+\.\s+/, ''));
+          i++;
+        }
+        result.push({ type: 'ol', items, content: '' });
+        continue;
+      }
+
+      // Regular text (paragraph)
+      if (line.trim()) {
+        result.push({ type: 'text', content: line });
+      }
+      i++;
+    }
+  }
+
+  const headerStyles = (level: number) => {
+    const sizes: Record<number, string> = { 1: '1.5em', 2: '1.3em', 3: '1.15em', 4: '1em', 5: '0.95em', 6: '0.9em' };
+    return {
+      "font-size": sizes[level] || '1em',
+      "font-weight": '600',
+      "margin": '12px 0 6px 0',
+      "line-height": '1.3',
+    };
   };
 
   return (
     <>
-      <For each={parts()}>
-        {(part) => {
-          switch (part.type) {
+      <For each={blocks()}>
+        {(block) => {
+          switch (block.type) {
             case 'code':
               return (
                 <pre
@@ -394,26 +535,45 @@ function MarkdownContent(props: { content: string }) {
                     "box-shadow": '1px 1px 0px rgba(0, 0, 0, 0.15)',
                   }}
                 >
-                  <code>{part.content}</code>
+                  <code>{block.content}</code>
                 </pre>
               );
-            case 'inline-code':
+            case 'header':
               return (
-                <code
-                  style={{
-                    background: 'var(--color-code-bg)',
-                    border: '1px solid var(--color-code-border)',
-                    padding: '2px 6px',
-                    "border-radius": '4px',
-                    "font-family": 'var(--font-mono)',
-                    "font-size": '0.85em',
-                  }}
-                >
-                  {part.content}
-                </code>
+                <div style={headerStyles(block.level || 1)}>
+                  <InlineMarkdown text={block.content} />
+                </div>
+              );
+            case 'ul':
+              return (
+                <ul style={{ margin: '8px 0', "padding-left": '20px', "list-style-type": 'disc' }}>
+                  <For each={block.items}>
+                    {(item) => (
+                      <li style={{ margin: '4px 0' }}>
+                        <InlineMarkdown text={item} />
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              );
+            case 'ol':
+              return (
+                <ol style={{ margin: '8px 0', "padding-left": '20px', "list-style-type": 'decimal' }}>
+                  <For each={block.items}>
+                    {(item) => (
+                      <li style={{ margin: '4px 0' }}>
+                        <InlineMarkdown text={item} />
+                      </li>
+                    )}
+                  </For>
+                </ol>
               );
             default:
-              return <span style={{ "font-family": 'inherit' }}>{part.content}</span>;
+              return (
+                <span style={{ "font-family": 'inherit' }}>
+                  <InlineMarkdown text={block.content} />
+                </span>
+              );
           }
         }}
       </For>

@@ -19,6 +19,8 @@ export interface UseKeyboardResult {
   keyboardHeight: Accessor<number>;
   /** Current viewport height - follows visualViewport in real-time */
   viewportHeight: Accessor<number>;
+  /** Current viewport offset from top - iOS scrolls page when keyboard opens */
+  offsetTop: Accessor<number>;
 }
 
 /**
@@ -34,6 +36,7 @@ export function useKeyboard(options: UseKeyboardOptions = {}): UseKeyboardResult
   const [isVisible, setIsVisible] = createSignal(false);
   const [keyboardHeight, setKeyboardHeight] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(initialHeight);
+  const [offsetTop, setOffsetTop] = createSignal(0);
 
   // Track stable height (viewport without keyboard) for threshold calculation
   let stableViewportHeight = initialHeight;
@@ -62,8 +65,9 @@ export function useKeyboard(options: UseKeyboardOptions = {}): UseKeyboardResult
       const newHeight = visualViewport.height;
       const heightDiff = stableViewportHeight - newHeight;
 
-      // Update height immediately - follow the iOS keyboard in real-time
+      // Update height and offset immediately - follow the iOS keyboard in real-time
       setViewportHeight(newHeight);
+      setOffsetTop(visualViewport.offsetTop);
 
       // Threshold: Keyboard is visible if viewport shrunk by > 150px
       const KEYBOARD_THRESHOLD = 150;
@@ -122,5 +126,5 @@ export function useKeyboard(options: UseKeyboardOptions = {}): UseKeyboardResult
     });
   });
 
-  return { isVisible, keyboardHeight, viewportHeight };
+  return { isVisible, keyboardHeight, viewportHeight, offsetTop };
 }

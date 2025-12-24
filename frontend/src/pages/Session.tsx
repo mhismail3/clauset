@@ -120,7 +120,8 @@ export default function SessionPage() {
   const [resuming, setResuming] = createSignal(false);
 
   // iOS keyboard handling for chat view (follows visualViewport in real-time)
-  const { viewportHeight } = useKeyboard();
+  // offsetTop counters iOS's automatic page scroll when keyboard appears
+  const { viewportHeight, offsetTop } = useKeyboard();
 
   let wsManager: ReturnType<typeof createWebSocketManager> | null = null;
   let messagesEndRef: HTMLDivElement | undefined;
@@ -567,8 +568,19 @@ export default function SessionPage() {
     <div
       class="flex flex-col"
       style={{
-        // On iOS, follow visualViewport height in real-time to sync with keyboard
-        height: isIOS() ? `${viewportHeight()}px` : '100%',
+        // On iOS, follow visualViewport in real-time to sync with keyboard
+        // Use position fixed + transform to counter iOS's automatic page scroll
+        ...(isIOS() ? {
+          position: 'fixed',
+          top: '0',
+          left: '0',
+          right: '0',
+          height: `${viewportHeight()}px`,
+          // Counter iOS scroll by translating back to original position
+          transform: `translateY(${offsetTop()}px)`,
+        } : {
+          height: '100%',
+        }),
         width: "100%",
         "max-width": "100%",
         "min-width": "0",
