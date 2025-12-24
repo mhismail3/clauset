@@ -150,6 +150,347 @@ export function MessageBubble(props: MessageBubbleProps) {
   );
 }
 
+// Helper to extract filename from path
+function getFilename(path: string): string {
+  return path.split('/').pop() || path;
+}
+
+// Helper to truncate text
+function truncate(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen) + '...';
+}
+
+// Format tool input for display
+function formatToolInput(name: string, input: Record<string, unknown>): JSX.Element {
+  switch (name) {
+    case 'Read': {
+      const filePath = String(input.file_path || '');
+      const offset = input.offset as number | undefined;
+      const limit = input.limit as number | undefined;
+      return (
+        <div style={{ display: 'flex', "flex-direction": 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', "align-items": 'center', gap: '6px' }}>
+            <span style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>File:</span>
+            <span class="text-mono" style={{ color: 'var(--color-text-primary)', "font-size": '12px' }}>
+              {getFilename(filePath)}
+            </span>
+          </div>
+          <Show when={offset !== undefined || limit !== undefined}>
+            <div style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>
+              {offset !== undefined && `Lines ${offset}+`}
+              {limit !== undefined && `, limit ${limit}`}
+            </div>
+          </Show>
+        </div>
+      );
+    }
+    case 'Grep': {
+      const pattern = String(input.pattern || '');
+      const path = input.path as string | undefined;
+      return (
+        <div style={{ display: 'flex', "flex-direction": 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', "align-items": 'center', gap: '6px' }}>
+            <span style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>Pattern:</span>
+            <code style={{ color: 'var(--color-accent)', "font-size": '12px', background: 'var(--color-code-bg)', padding: '2px 6px', "border-radius": '4px' }}>
+              {pattern}
+            </code>
+          </div>
+          <Show when={path}>
+            <div style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>
+              in {getFilename(path!)}
+            </div>
+          </Show>
+        </div>
+      );
+    }
+    case 'Bash': {
+      const command = String(input.command || '');
+      return (
+        <div class="text-mono" style={{
+          background: 'var(--color-code-bg)',
+          padding: '8px 10px',
+          "border-radius": '6px',
+          "font-size": '12px',
+          color: 'var(--color-text-primary)',
+          "white-space": 'pre-wrap',
+          "word-break": 'break-all',
+        }}>
+          <span style={{ color: 'var(--color-text-muted)' }}>$ </span>{command}
+        </div>
+      );
+    }
+    case 'Edit': {
+      const filePath = String(input.file_path || '');
+      const oldStr = String(input.old_string || '').slice(0, 50);
+      const newStr = String(input.new_string || '').slice(0, 50);
+      return (
+        <div style={{ display: 'flex', "flex-direction": 'column', gap: '6px' }}>
+          <div style={{ display: 'flex', "align-items": 'center', gap: '6px' }}>
+            <span style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>File:</span>
+            <span class="text-mono" style={{ color: 'var(--color-text-primary)', "font-size": '12px' }}>
+              {getFilename(filePath)}
+            </span>
+          </div>
+          <div style={{ "font-size": '11px' }}>
+            <div style={{ color: '#c45b37', background: 'rgba(196, 91, 55, 0.1)', padding: '4px 8px', "border-radius": '4px', "margin-bottom": '4px' }}>
+              − {truncate(oldStr, 40)}
+            </div>
+            <div style={{ color: '#2c8f7a', background: 'rgba(44, 143, 122, 0.1)', padding: '4px 8px', "border-radius": '4px' }}>
+              + {truncate(newStr, 40)}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    case 'Write': {
+      const filePath = String(input.file_path || '');
+      const content = String(input.content || '');
+      const lines = content.split('\n').length;
+      return (
+        <div style={{ display: 'flex', "flex-direction": 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', "align-items": 'center', gap: '6px' }}>
+            <span style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>File:</span>
+            <span class="text-mono" style={{ color: 'var(--color-text-primary)', "font-size": '12px' }}>
+              {getFilename(filePath)}
+            </span>
+          </div>
+          <div style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>
+            {lines} lines
+          </div>
+        </div>
+      );
+    }
+    case 'Glob': {
+      const pattern = String(input.pattern || '');
+      const path = input.path as string | undefined;
+      return (
+        <div style={{ display: 'flex', "flex-direction": 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', "align-items": 'center', gap: '6px' }}>
+            <span style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>Pattern:</span>
+            <code style={{ color: 'var(--color-accent)', "font-size": '12px', background: 'var(--color-code-bg)', padding: '2px 6px', "border-radius": '4px' }}>
+              {pattern}
+            </code>
+          </div>
+          <Show when={path}>
+            <div style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>
+              in {path}
+            </div>
+          </Show>
+        </div>
+      );
+    }
+    case 'Task': {
+      const description = String(input.description || '');
+      const subagentType = input.subagent_type as string | undefined;
+      return (
+        <div style={{ display: 'flex', "flex-direction": 'column', gap: '4px' }}>
+          <div style={{ color: 'var(--color-text-primary)', "font-size": '12px' }}>
+            {description}
+          </div>
+          <Show when={subagentType}>
+            <div style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>
+              Agent: {subagentType}
+            </div>
+          </Show>
+        </div>
+      );
+    }
+    case 'WebFetch': {
+      const url = String(input.url || '');
+      return (
+        <div style={{ display: 'flex', "align-items": 'center', gap: '6px' }}>
+          <span style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>URL:</span>
+          <span class="text-mono" style={{ color: 'var(--color-text-primary)', "font-size": '12px', "word-break": 'break-all' }}>
+            {truncate(url, 50)}
+          </span>
+        </div>
+      );
+    }
+    case 'WebSearch': {
+      const query = String(input.query || '');
+      return (
+        <div style={{ display: 'flex', "align-items": 'center', gap: '6px' }}>
+          <span style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>Query:</span>
+          <span style={{ color: 'var(--color-text-primary)', "font-size": '12px' }}>
+            "{query}"
+          </span>
+        </div>
+      );
+    }
+    default:
+      return (
+        <pre class="text-mono" style={{
+          "font-size": '11px',
+          color: 'var(--color-text-secondary)',
+          margin: 0,
+          "white-space": 'pre-wrap',
+          "word-break": 'break-all',
+        }}>
+          {JSON.stringify(input, null, 2)}
+        </pre>
+      );
+  }
+}
+
+// Format tool output for display
+function formatToolOutput(name: string, output: string, isError: boolean): JSX.Element {
+  if (isError) {
+    return (
+      <div style={{ color: 'var(--color-accent)', "font-size": '12px' }}>
+        {output}
+      </div>
+    );
+  }
+
+  // Try to parse JSON output
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    // Not JSON, use as-is
+  }
+
+  switch (name) {
+    case 'Read': {
+      if (parsed && typeof parsed === 'object' && 'file' in (parsed as Record<string, unknown>)) {
+        const file = (parsed as { file: { content?: string; lineCount?: number } }).file;
+        const content = file.content || '';
+        const lines = content.split('\n');
+        const preview = lines.slice(0, 5).join('\n');
+        const hasMore = lines.length > 5;
+        return (
+          <div style={{ display: 'flex', "flex-direction": 'column', gap: '6px' }}>
+            <div style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>
+              {lines.length} lines
+            </div>
+            <pre class="text-mono" style={{
+              "font-size": '11px',
+              color: 'var(--color-text-secondary)',
+              margin: 0,
+              "white-space": 'pre-wrap',
+              background: 'var(--color-code-bg)',
+              padding: '8px',
+              "border-radius": '6px',
+              "max-height": '120px',
+              overflow: 'auto',
+            }}>
+              {preview}{hasMore && '\n...'}
+            </pre>
+          </div>
+        );
+      }
+      return <span style={{ color: 'var(--color-text-muted)', "font-size": '12px' }}>{truncate(output, 100)}</span>;
+    }
+    case 'Grep': {
+      // Grep output is often a list of files or matches
+      const lines = output.split('\n').filter(Boolean);
+      if (lines.length === 0) {
+        return <span style={{ color: 'var(--color-text-muted)', "font-size": '12px' }}>No matches</span>;
+      }
+      return (
+        <div style={{ display: 'flex', "flex-direction": 'column', gap: '4px' }}>
+          <div style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>
+            {lines.length} match{lines.length !== 1 ? 'es' : ''}
+          </div>
+          <div style={{ "max-height": '100px', overflow: 'auto' }}>
+            {lines.slice(0, 8).map((line) => (
+              <div class="text-mono" style={{ "font-size": '11px', color: 'var(--color-text-secondary)', padding: '2px 0' }}>
+                {getFilename(line)}
+              </div>
+            ))}
+            {lines.length > 8 && (
+              <div style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>
+                +{lines.length - 8} more
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+    case 'Bash': {
+      const lines = output.split('\n');
+      const preview = lines.slice(0, 8).join('\n');
+      return (
+        <pre class="text-mono" style={{
+          "font-size": '11px',
+          color: 'var(--color-text-secondary)',
+          margin: 0,
+          "white-space": 'pre-wrap',
+          background: 'var(--color-code-bg)',
+          padding: '8px',
+          "border-radius": '6px',
+          "max-height": '120px',
+          overflow: 'auto',
+        }}>
+          {preview}{lines.length > 8 && '\n...'}
+        </pre>
+      );
+    }
+    case 'Edit':
+    case 'Write': {
+      // Success message
+      if (output.includes('success') || output.includes('updated') || output.includes('written')) {
+        return (
+          <div style={{ display: 'flex', "align-items": 'center', gap: '6px' }}>
+            <span style={{ color: 'var(--color-secondary)' }}>✓</span>
+            <span style={{ color: 'var(--color-text-secondary)', "font-size": '12px' }}>
+              {name === 'Edit' ? 'File updated' : 'File written'}
+            </span>
+          </div>
+        );
+      }
+      return <span style={{ color: 'var(--color-text-secondary)', "font-size": '12px' }}>{truncate(output, 80)}</span>;
+    }
+    case 'Glob': {
+      const lines = output.split('\n').filter(Boolean);
+      if (lines.length === 0) {
+        return <span style={{ color: 'var(--color-text-muted)', "font-size": '12px' }}>No files found</span>;
+      }
+      return (
+        <div style={{ display: 'flex', "flex-direction": 'column', gap: '4px' }}>
+          <div style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>
+            {lines.length} file{lines.length !== 1 ? 's' : ''}
+          </div>
+          <div style={{ "max-height": '100px', overflow: 'auto' }}>
+            {lines.slice(0, 8).map((line) => (
+              <div class="text-mono" style={{ "font-size": '11px', color: 'var(--color-text-secondary)', padding: '2px 0' }}>
+                {getFilename(line)}
+              </div>
+            ))}
+            {lines.length > 8 && (
+              <div style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>
+                +{lines.length - 8} more
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+    case 'Task': {
+      return (
+        <div style={{ color: 'var(--color-text-secondary)', "font-size": '12px', "max-height": '150px', overflow: 'auto' }}>
+          {truncate(output, 300)}
+        </div>
+      );
+    }
+    default:
+      return (
+        <pre class="text-mono" style={{
+          "font-size": '11px',
+          color: 'var(--color-text-secondary)',
+          margin: 0,
+          "white-space": 'pre-wrap',
+          "word-break": 'break-all',
+          "max-height": '150px',
+          overflow: 'auto',
+        }}>
+          {truncate(output, 500)}
+        </pre>
+      );
+  }
+}
+
 function ToolCallView(props: { toolCall: ToolCall }) {
   const [expanded, setExpanded] = createSignal(false);
 
@@ -295,22 +636,7 @@ function ToolCallView(props: { toolCall: ToolCall }) {
               >
                 Input
               </div>
-              <pre
-                style={{
-                  background: 'var(--color-code-bg)',
-                  border: '1px solid var(--color-code-border)',
-                  "border-radius": '8px',
-                  padding: '10px',
-                  "overflow-x": 'auto',
-                  margin: '0',
-                  "font-family": 'var(--font-mono)',
-                  "font-size": '11px',
-                  "line-height": '1.5',
-                  color: 'var(--color-text-secondary)',
-                }}
-              >
-                {JSON.stringify(props.toolCall.input, null, 2)}
-              </pre>
+              {formatToolInput(props.toolCall.name, props.toolCall.input as Record<string, unknown>)}
             </div>
           </Show>
           <Show when={props.toolCall.output}>
@@ -328,26 +654,7 @@ function ToolCallView(props: { toolCall: ToolCall }) {
               >
                 {props.toolCall.isError ? 'Error' : 'Output'}
               </div>
-              <pre
-                style={{
-                  background: 'var(--color-code-bg)',
-                  border: props.toolCall.isError
-                    ? '1px solid var(--color-accent)'
-                    : '1px solid var(--color-code-border)',
-                  "border-radius": '8px',
-                  padding: '10px',
-                  "overflow-x": 'auto',
-                  "max-height": '200px',
-                  "overflow-y": 'auto',
-                  margin: '0',
-                  "font-family": 'var(--font-mono)',
-                  "font-size": '11px',
-                  "line-height": '1.5',
-                  color: props.toolCall.isError ? 'var(--color-accent)' : 'var(--color-text-secondary)',
-                }}
-              >
-                {props.toolCall.output}
-              </pre>
+              {formatToolOutput(props.toolCall.name, props.toolCall.output, !!props.toolCall.isError)}
             </div>
           </Show>
         </div>

@@ -140,7 +140,14 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
-- All 5 issues from user request implemented and verified
+- Production/Beta deployment system implemented
+
+### Production/Beta Deployment System (Just Completed)
+- Added `--config` and `--port` CLI flags to clauset-server
+- Created `config/production.toml` (port 8080) and `config/beta.toml` (port 8081, separate DB)
+- Created `scripts/clauset` management CLI with: status, start, stop, restart, logs, beta, deploy, install
+- Updated `frontend/vite.config.ts` to support `CLAUSET_BACKEND_PORT` env var for beta proxying
+- Workflow: `clauset beta` runs isolated test server, `clauset deploy` promotes to production via launchd
 
 ### Verified Working
 - User messages display as chat bubbles (from UserPromptSubmit hook)

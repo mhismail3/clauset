@@ -1,0 +1,21 @@
+# Clauset server configuration - PRODUCTION
+# Used by launchd service for persistent operation
+
+# Server settings
+host = "0.0.0.0"
+port = 8080
+
+# Path to frontend static files (relative to working directory)
+static_dir = "./frontend/dist"
+
+# Claude CLI path
+claude_path = "/opt/homebrew/bin/claude"
+
+# Database path (production sessions)
+db_path = "~/.local/share/clauset/sessions.db"
+
+# Maximum concurrent sessions
+max_concurrent_sessions = 10
+
+# Default model for new sessions
+default_model = "sonnet"

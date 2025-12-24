@@ -1,0 +1,21 @@
+# Clauset server configuration - BETA
+# Used for development/testing alongside production
+
+# Server settings (different port from production)
+host = "0.0.0.0"
+port = 8081
+
+# Path to frontend static files (relative to working directory)
+static_dir = "./frontend/dist"
+
+# Claude CLI path
+claude_path = "/opt/homebrew/bin/claude"
+
+# Database path (separate from production!)
+db_path = "~/.local/share/clauset/sessions-beta.db"
+
+# Maximum concurrent sessions
+max_concurrent_sessions = 10
+
+# Default model for new sessions
+default_model = "sonnet"

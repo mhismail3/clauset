@@ -1,0 +1,439 @@
+#!/bin/bash
+# Clauset service manager
+# Manages production (launchd) and beta (terminal) environments
+
+set -e
+
+# Paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PLIST_NAME="com.clauset.server"
+PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
+PROD_BINARY="$HOME/.local/bin/clauset-server"
+DEV_BINARY="$PROJECT_DIR/target/release/clauset-server"
+LOG_DIR="$HOME/.local/share/clauset"
+LOG_FILE="$LOG_DIR/server.log"
+ERR_FILE="$LOG_DIR/server.err"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+print_status() {
+    echo -e "${BLUE}▸${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}✗${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}!${NC} $1"
+}
+
+# Check if production service is running
+is_running() {
+    launchctl list 2>/dev/null | grep -q "$PLIST_NAME"
+}
+
+# Get PID of running service
+get_pid() {
+    launchctl list 2>/dev/null | grep "$PLIST_NAME" | awk '{print $1}' | grep -v '^-$'
+}
+
+cmd_status() {
+    echo ""
+    echo -e "${BLUE}Clauset Service Status${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    if is_running; then
+        local pid=$(get_pid)
+        print_success "Production service: RUNNING (PID: ${pid:-unknown})"
+        echo "  Port: 8080"
+        echo "  Logs: $LOG_FILE"
+
+        # Show uptime if we can find the process
+        if [ -n "$pid" ] && [ "$pid" != "-" ]; then
+            local uptime=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+            if [ -n "$uptime" ]; then
+                echo "  Uptime: $uptime"
+            fi
+        fi
+    else
+        print_warning "Production service: STOPPED"
+    fi
+
+    # Check if beta is running
+    local beta_pid=$(pgrep -f "clauset-server.*beta.toml" 2>/dev/null || true)
+    if [ -n "$beta_pid" ]; then
+        print_success "Beta server: RUNNING (PID: $beta_pid)"
+        echo "  Port: 8081"
+    else
+        echo "  Beta server: not running"
+    fi
+
+    echo ""
+
+    # Show last few log lines
+    if [ -f "$LOG_FILE" ]; then
+        echo -e "${BLUE}Recent logs:${NC}"
+        tail -3 "$LOG_FILE" 2>/dev/null | sed 's/^/  /'
+    fi
+    echo ""
+}
+
+cmd_start() {
+    if is_running; then
+        print_warning "Production service is already running"
+        return 0
+    fi
+
+    if [ ! -f "$PLIST_PATH" ]; then
+        print_error "Service not installed. Run: $0 install"
+        return 1
+    fi
+
+    print_status "Starting production service..."
+    launchctl load "$PLIST_PATH"
+    sleep 1
+
+    if is_running; then
+        print_success "Production service started on port 8080"
+    else
+        print_error "Failed to start service. Check logs: $ERR_FILE"
+        return 1
+    fi
+}
+
+cmd_stop() {
+    if ! is_running; then
+        print_warning "Production service is not running"
+        return 0
+    fi
+
+    print_status "Stopping production service..."
+    launchctl unload "$PLIST_PATH"
+    sleep 1
+
+    if ! is_running; then
+        print_success "Production service stopped"
+    else
+        print_error "Failed to stop service"
+        return 1
+    fi
+}
+
+cmd_restart() {
+    print_status "Restarting production service..."
+    cmd_stop 2>/dev/null || true
+    sleep 1
+    cmd_start
+}
+
+cmd_logs() {
+    local lines="${1:-50}"
+
+    if [ ! -f "$LOG_FILE" ]; then
+        print_error "Log file not found: $LOG_FILE"
+        return 1
+    fi
+
+    echo -e "${BLUE}Tailing production logs (Ctrl+C to stop)${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    tail -f "$LOG_FILE"
+}
+
+cmd_errors() {
+    if [ ! -f "$ERR_FILE" ]; then
+        print_warning "No error log file found"
+        return 0
+    fi
+
+    echo -e "${RED}Error log:${NC}"
+    cat "$ERR_FILE"
+}
+
+cmd_beta() {
+    local serve_built=false
+
+    # Parse flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --serve)
+                serve_built=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    # Check if binary exists, if not build it
+    local binary="$DEV_BINARY"
+
+    if [ ! -f "$binary" ]; then
+        print_status "Building release binary..."
+        cd "$PROJECT_DIR"
+        cargo build --release
+    fi
+
+    # Build frontend if --serve flag
+    if [ "$serve_built" = true ]; then
+        print_status "Building frontend..."
+        cd "$PROJECT_DIR/frontend"
+        npm run build
+        cd "$PROJECT_DIR"
+
+        echo ""
+        print_status "Starting beta server on port 8081 (serving built frontend)..."
+        echo "  Config: config/beta.toml"
+        echo "  Database: ~/.local/share/clauset/sessions-beta.db"
+        echo "  Frontend: ./frontend/dist (built)"
+        echo ""
+        echo -e "${GREEN}Access from any device: http://<this-machine>:8081${NC}"
+        echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+        cd "$PROJECT_DIR"
+        exec "$binary" --config config/beta.toml -v
+    else
+        echo ""
+        print_status "Starting beta server on port 8081 (API only)..."
+        echo "  Config: config/beta.toml"
+        echo "  Database: ~/.local/share/clauset/sessions-beta.db"
+        echo ""
+        echo "  Frontend options:"
+        echo "    • Vite dev server: CLAUSET_BACKEND_PORT=8081 npm run dev --prefix frontend"
+        echo "      Access locally:  http://localhost:5173"
+        echo "      Access remotely: http://<this-machine>:5173"
+        echo ""
+        echo "    • Or use: clauset beta --serve  (builds frontend, no hot reload)"
+        echo ""
+        echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+        cd "$PROJECT_DIR"
+        exec "$binary" --config config/beta.toml -v
+    fi
+}
+
+cmd_deploy() {
+    echo ""
+    echo -e "${BLUE}Deploying to Production${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    cd "$PROJECT_DIR"
+
+    # Run tests first
+    print_status "Running tests..."
+    if ! cargo test 2>&1; then
+        print_error "Tests failed! Aborting deploy."
+        return 1
+    fi
+    print_success "Tests passed"
+
+    # Build release binary
+    print_status "Building release binary..."
+    cargo build --release
+    print_success "Binary built"
+
+    # Build frontend
+    print_status "Building frontend..."
+    cd "$PROJECT_DIR/frontend"
+    npm run build
+    print_success "Frontend built"
+    cd "$PROJECT_DIR"
+
+    # Create bin directory if needed
+    mkdir -p "$HOME/.local/bin"
+
+    # Stop service if running
+    if is_running; then
+        print_status "Stopping production service..."
+        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        sleep 1
+    fi
+
+    # Copy binary
+    print_status "Installing binary to $PROD_BINARY..."
+    cp "$DEV_BINARY" "$PROD_BINARY"
+    chmod +x "$PROD_BINARY"
+    print_success "Binary installed"
+
+    # Start service
+    if [ -f "$PLIST_PATH" ]; then
+        print_status "Starting production service..."
+        launchctl load "$PLIST_PATH"
+        sleep 2
+
+        if is_running; then
+            print_success "Production service started"
+        else
+            print_error "Failed to start service. Check: $0 errors"
+            return 1
+        fi
+    else
+        print_warning "Service not installed. Run: $0 install"
+    fi
+
+    echo ""
+    print_success "Deploy complete!"
+    echo ""
+}
+
+cmd_install() {
+    echo ""
+    echo -e "${BLUE}Installing Clauset Service${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Ensure directories exist
+    mkdir -p "$HOME/.local/bin"
+    mkdir -p "$HOME/.local/share/clauset"
+    mkdir -p "$HOME/Library/LaunchAgents"
+
+    # Check if binary exists
+    if [ ! -f "$PROD_BINARY" ]; then
+        print_warning "Production binary not found. Running deploy first..."
+        cmd_deploy
+    fi
+
+    # Create plist
+    print_status "Creating launchd service..."
+    cat > "$PLIST_PATH" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$PLIST_NAME</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>$PROD_BINARY</string>
+        <string>--config</string>
+        <string>$PROJECT_DIR/config/production.toml</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$PROJECT_DIR</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>$LOG_FILE</string>
+
+    <key>StandardErrorPath</key>
+    <string>$ERR_FILE</string>
+</dict>
+</plist>
+EOF
+    print_success "Created: $PLIST_PATH"
+
+    # Install CLI symlink
+    print_status "Installing clauset CLI..."
+    ln -sf "$SCRIPT_DIR/clauset" "$HOME/.local/bin/clauset"
+    print_success "Installed: ~/.local/bin/clauset"
+
+    # Check if ~/.local/bin is in PATH
+    if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+        print_warning "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
+
+    # Start the service
+    print_status "Starting service..."
+    launchctl load "$PLIST_PATH"
+    sleep 2
+
+    if is_running; then
+        print_success "Service started!"
+    else
+        print_error "Service failed to start. Check: clauset errors"
+    fi
+
+    echo ""
+    print_success "Installation complete!"
+    echo ""
+    echo "Commands:"
+    echo "  clauset status   - Check service status"
+    echo "  clauset logs     - View production logs"
+    echo "  clauset beta     - Run beta server (port 8081)"
+    echo "  clauset deploy   - Build and deploy to production"
+    echo ""
+}
+
+cmd_uninstall() {
+    print_status "Uninstalling Clauset service..."
+
+    if is_running; then
+        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    fi
+
+    rm -f "$PLIST_PATH"
+    rm -f "$HOME/.local/bin/clauset"
+    rm -f "$PROD_BINARY"
+
+    print_success "Service uninstalled"
+    print_warning "Data preserved in: ~/.local/share/clauset/"
+}
+
+cmd_help() {
+    echo ""
+    echo "Clauset - Claude Code Session Manager"
+    echo ""
+    echo "Usage: clauset <command>"
+    echo ""
+    echo "Service Commands:"
+    echo "  status      Show service status"
+    echo "  start       Start production service"
+    echo "  stop        Stop production service"
+    echo "  restart     Restart production service"
+    echo "  logs        Tail production logs"
+    echo "  errors      Show error log"
+    echo ""
+    echo "Development:"
+    echo "  beta          Run beta backend only (use with Vite dev server)"
+    echo "  beta --serve  Run beta with built frontend (access from any device)"
+    echo "  deploy        Test, build, and deploy to production"
+    echo ""
+    echo "Setup:"
+    echo "  install     Install launchd service and CLI"
+    echo "  uninstall   Remove service (preserves data)"
+    echo ""
+}
+
+# Main
+case "${1:-}" in
+    status)     cmd_status ;;
+    start)      cmd_start ;;
+    stop)       cmd_stop ;;
+    restart)    cmd_restart ;;
+    logs)       cmd_logs "${2:-}" ;;
+    errors)     cmd_errors ;;
+    beta)       shift; cmd_beta "$@" ;;
+    deploy)     cmd_deploy ;;
+    install)    cmd_install ;;
+    uninstall)  cmd_uninstall ;;
+    help|--help|-h|"")
+        cmd_help
+        ;;
+    *)
+        print_error "Unknown command: $1"
+        cmd_help
+        exit 1
+        ;;
+esac

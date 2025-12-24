@@ -77,13 +77,19 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Load config from a specific file path.
+    pub fn load_from(path: &std::path::Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let config: Config = toml::from_str(&content)?;
+        Ok(config)
+    }
+
+    /// Load config from default location (config/default.toml) or fall back to defaults.
     pub fn load() -> Result<Self> {
         // Try to load from config file
         let config_path = PathBuf::from("config/default.toml");
         if config_path.exists() {
-            let content = std::fs::read_to_string(&config_path)?;
-            let config: Config = toml::from_str(&content)?;
-            return Ok(config);
+            return Self::load_from(&config_path);
         }
 
         // Fall back to defaults

@@ -92,7 +92,7 @@ export function InputBar(props: InputBarProps) {
           onKeyDown={handleKeyDown}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholder={props.placeholder || "Message Claude..."}
+          placeholder={props.placeholder || "Chat with Claude Code..."}
           rows={rows()}
           disabled={props.disabled}
           class="text-mono"
@@ -104,7 +104,7 @@ export function InputBar(props: InputBarProps) {
             height: `${rows() * LINE_HEIGHT + VERTICAL_PADDING}px`,
             "min-height": `${SINGLE_ROW_HEIGHT}px`,
             padding: '10px 14px',
-            "font-size": '14px',
+            "font-size": '13px',
             "line-height": '1.4',
             resize: 'none',
             background: 'var(--color-bg-base)',
@@ -127,7 +127,6 @@ export function InputBar(props: InputBarProps) {
         <button
           type="submit"
           disabled={!canSend()}
-          class="pressable"
           style={{
             width: `${SINGLE_ROW_HEIGHT}px`,
             height: `${SINGLE_ROW_HEIGHT}px`,
@@ -135,23 +134,33 @@ export function InputBar(props: InputBarProps) {
             display: 'flex',
             "align-items": 'center',
             "justify-content": 'center',
-            background: canSend() ? 'var(--color-accent)' : 'var(--color-bg-elevated)',
-            color: canSend() ? '#ffffff' : 'var(--color-text-muted)',
-            border: canSend()
-              ? '1px solid var(--color-accent)'
-              : '1px solid var(--color-bg-overlay)',
-            "border-radius": '10px',
-            cursor: canSend() ? 'pointer' : 'not-allowed',
-            "box-shadow": canSend()
-              ? '2px 2px 0px rgba(0, 0, 0, 0.3)'
-              : '1px 1px 0px rgba(0, 0, 0, 0.2)',
-            transition: 'all 0.15s ease',
+            background: 'transparent',
+            color: canSend() ? 'var(--color-accent)' : 'var(--color-text-muted)',
+            border: 'none',
+            cursor: canSend() ? 'pointer' : 'default',
+            transition: 'color 0.15s ease, transform 0.1s ease',
+            opacity: canSend() ? 1 : 0.4,
+          }}
+          onMouseDown={(e) => {
+            if (canSend()) e.currentTarget.style.transform = 'scale(0.85)';
+          }}
+          onMouseUp={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+          }}
+          onTouchStart={(e) => {
+            if (canSend()) e.currentTarget.style.transform = 'scale(0.85)';
+          }}
+          onTouchEnd={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
           }}
         >
-          {/* Arrow icon */}
+          {/* Up arrow icon */}
           <svg
-            width="20"
-            height="20"
+            width="26"
+            height="26"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -159,8 +168,8 @@ export function InputBar(props: InputBarProps) {
             stroke-linecap="round"
             stroke-linejoin="round"
           >
-            <line x1="5" y1="12" x2="19" y2="12" />
-            <polyline points="12 5 19 12 12 19" />
+            <line x1="12" y1="19" x2="12" y2="5" />
+            <polyline points="5 12 12 5 19 12" />
           </svg>
         </button>
       </div>

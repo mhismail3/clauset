@@ -4,6 +4,10 @@ import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 
+// Backend port - defaults to 8080 (production), use 8081 for beta:
+// CLAUSET_BACKEND_PORT=8081 npm run dev
+const BACKEND_PORT = process.env.CLAUSET_BACKEND_PORT || '8080';
+
 export default defineConfig({
   plugins: [
     solid(),
@@ -57,11 +61,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: `http://localhost:${BACKEND_PORT}`,
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:8080',
+        target: `ws://localhost:${BACKEND_PORT}`,
         ws: true,
       },
     },
