@@ -129,7 +129,7 @@ export default function Sessions() {
   return (
     <div class="flex flex-col h-full">
       {/* Header */}
-      <header class="flex-none glass safe-top" style={{ "padding-inline": '16px', "padding-bottom": '14px' }}>
+      <header class="flex-none glass safe-top" style={{ "padding-inline": '16px', "padding-top": '6px', "padding-bottom": '14px' }}>
         <div
           style={{
             display: 'flex',
@@ -169,7 +169,7 @@ export default function Sessions() {
             {/* Search button */}
             <button
               onClick={() => setShowSearch(true)}
-              class="pressable"
+              class="icon-btn"
               style={{
                 width: '36px',
                 height: '36px',
@@ -193,7 +193,7 @@ export default function Sessions() {
             {/* Analytics link */}
             <A
               href="/analytics"
-              class="pressable"
+              class="icon-btn"
               style={{
                 width: '36px',
                 height: '36px',
@@ -283,27 +283,40 @@ export default function Sessions() {
           </Show>
 
           <Show when={!loading() && sessions().length === 0 && !error()}>
-            <div style={{ "text-align": 'center', padding: '64px 0' }}>
+            <div style={{
+              "text-align": 'center',
+              padding: '48px 24px',
+              background: 'var(--color-bg-surface)',
+              "border-radius": '14px',
+              border: '1.5px solid var(--color-bg-overlay)',
+              "box-shadow": '3px 3px 0px rgba(0, 0, 0, 0.3)',
+              "max-width": '320px',
+              margin: '0 auto'
+            }}>
               <div
                 style={{
-                  width: '64px',
-                  height: '64px',
-                  margin: '0 auto 16px',
-                  "border-radius": '50%',
-                  background: 'var(--color-bg-surface)',
-                  border: '1px solid var(--color-bg-overlay)',
+                  width: '56px',
+                  height: '56px',
+                  margin: '0 auto 20px',
+                  "border-radius": '14px',
+                  background: 'var(--color-accent-muted)',
+                  border: '1px solid var(--color-accent)',
                   display: 'flex',
                   "align-items": 'center',
                   "justify-content": 'center',
+                  "box-shadow": '2px 2px 0px rgba(0, 0, 0, 0.2)',
                 }}
               >
-                <span class="text-mono" style={{ color: 'var(--color-accent)', "font-size": '24px' }}>&gt;_</span>
+                <span class="text-mono" style={{ color: 'var(--color-accent)', "font-size": '22px', "font-weight": '600' }}>&gt;_</span>
               </div>
-              <p style={{ color: 'var(--color-text-secondary)', "margin-bottom": '16px' }}>
+              <p class="text-mono" style={{ color: 'var(--color-text-primary)', "font-size": '15px', "font-weight": '600', "margin-bottom": '6px' }}>
                 No sessions yet
               </p>
+              <p style={{ color: 'var(--color-text-tertiary)', "font-size": '13px', "margin-bottom": '20px' }}>
+                Start your first Claude Code session
+              </p>
               <Button onClick={() => setShowNewSession(true)}>
-                Start your first session
+                Create session
               </Button>
             </div>
           </Show>

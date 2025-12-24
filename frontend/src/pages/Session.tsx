@@ -684,7 +684,7 @@ export default function SessionPage() {
               "flex-shrink": '0',
               background: 'var(--color-bg-surface)',
               "border-radius": '10px',
-              padding: '3px',
+              padding: '2px',
               border: '1px solid var(--color-bg-overlay)',
             }}
           >
@@ -693,8 +693,8 @@ export default function SessionPage() {
                 onClick={() => setCurrentView(view)}
                 class="text-mono"
                 style={{
-                  padding: '6px 12px',
-                  "font-size": '11px',
+                  padding: '5px 10px',
+                  "font-size": '10px',
                   "font-weight": '500',
                   "border-radius": '8px',
                   border: 'none',

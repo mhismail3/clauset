@@ -335,7 +335,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
                       type="text"
                       value={projectInput()}
                       onInput={(e) => setProjectInput(e.currentTarget.value)}
-                      onFocus={() => setShowProjectDropdown(true)}
+                      onFocus={() => { setShowModelDropdown(false); setShowProjectDropdown(true); }}
                       onBlur={() => setTimeout(() => setShowProjectDropdown(false), 150)}
                       placeholder="Select or type to create..."
                       class="modal-input placeholder:text-text-muted"
@@ -416,7 +416,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
                 <div style={{ position: "relative" }}>
                   <button
                     type="button"
-                    onClick={() => setShowModelDropdown(!showModelDropdown())}
+                    onClick={() => { setShowProjectDropdown(false); setShowModelDropdown(!showModelDropdown()); }}
                     onBlur={() => setTimeout(() => setShowModelDropdown(false), 150)}
                     class="modal-input text-text-primary"
                     style={{
@@ -507,6 +507,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
                 <textarea
                   value={prompt()}
                   onInput={(e) => setPrompt(e.currentTarget.value)}
+                  onFocus={() => { setShowProjectDropdown(false); setShowModelDropdown(false); }}
                   placeholder="What would you like Claude to help with?"
                   rows={3}
                   class="modal-input placeholder:text-text-muted"
