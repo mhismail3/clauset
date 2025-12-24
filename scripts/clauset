@@ -463,6 +463,9 @@ cmd_install() {
         <false/>
     </dict>
 
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
     <key>StandardOutPath</key>
     <string>$LOG_FILE</string>
 

@@ -586,6 +586,100 @@ rm -rf ~/.local/share/clauset/
 
 ---
 
+## Power Failure Recovery
+
+This section documents how to configure your Mac Mini for automatic recovery after power outages.
+
+### Recovery Chain
+
+When power is restored after an outage, the following sequence occurs:
+
+```
+Power restored
+    → Mac auto-boots (auto-boot=true in NVRAM)
+    → macOS auto-restarts (autorestart=1 in pmset)
+    → FileVault unlock screen (if enabled) - requires password
+    → Auto-login (if FileVault disabled and autologin configured)
+    → LaunchAgent loads (RunAtLoad=true)
+    → Clauset service starts
+    → If service crashes, launchd restarts it (KeepAlive)
+```
+
+### Prerequisites
+
+Your Mac should already have these power settings configured:
+
+```bash
+# Verify power settings
+pmset -g | grep autorestart  # Should be 1
+pmset -g | grep sleep        # Should be 0
+nvram -p | grep auto-boot    # Should be true
+```
+
+If not set, configure them:
+
+```bash
+# Auto-restart after power failure
+sudo pmset -a autorestart 1
+
+# Prevent sleep
+sudo pmset -a sleep 0
+
+# Auto-boot when power is connected (usually enabled by default)
+sudo nvram auto-boot=true
+```
+
+### FileVault Consideration
+
+If FileVault (disk encryption) is enabled, automatic login is blocked. After a power outage:
+- Mac boots to FileVault unlock screen
+- Enter your password once to unlock the disk
+- macOS boots and the service starts automatically
+
+To check FileVault status:
+```bash
+fdesetup status
+```
+
+### Enabling Automatic Login (Optional)
+
+**Note:** Only works if FileVault is disabled. Reduces security - anyone with physical access gets full account access.
+
+```bash
+# Enable auto-login for your user
+sudo sysadminctl -autologin set -userName <your-username>
+
+# Check status
+sysadminctl -autologin status
+```
+
+### launchd Resilience Features
+
+The launchd configuration includes:
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| `RunAtLoad` | true | Start service when user logs in |
+| `KeepAlive.SuccessfulExit` | false | Restart if service crashes |
+| `ThrottleInterval` | 10 | Wait 10 seconds between restart attempts |
+
+### Testing Recovery
+
+To simulate a power failure recovery:
+
+```bash
+# Reboot the Mac
+sudo shutdown -r now
+```
+
+After reboot, verify the service is running:
+
+```bash
+clauset status
+```
+
+---
+
 ## Quick Reference
 
 ```bash
