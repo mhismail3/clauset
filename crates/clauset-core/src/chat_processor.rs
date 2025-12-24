@@ -10,6 +10,7 @@
 //! - State machine tracks conversation flow
 //! - Messages are broadcast via ProcessEvent for WebSocket delivery
 
+use crate::InteractionStore;
 use clauset_types::{ChatEvent, ChatMessage, ChatRole, ChatToolCall, HookEvent};
 use tracing::info;
 use once_cell::sync::Lazy;
@@ -68,6 +69,8 @@ impl SessionChatState {
 /// Manages chat message extraction for all sessions.
 pub struct ChatProcessor {
     sessions: Arc<RwLock<HashMap<Uuid, SessionChatState>>>,
+    /// Optional database store for message persistence
+    store: Option<Arc<InteractionStore>>,
 }
 
 impl Default for ChatProcessor {
@@ -80,6 +83,33 @@ impl ChatProcessor {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            store: None,
+        }
+    }
+
+    /// Create a ChatProcessor with database persistence.
+    pub fn with_store(store: Arc<InteractionStore>) -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            store: Some(store),
+        }
+    }
+
+    /// Helper to persist a message to the database.
+    fn persist_message(&self, msg: &ChatMessage) {
+        if let Some(store) = &self.store {
+            if let Err(e) = store.save_chat_message(msg) {
+                tracing::warn!(target: "clauset::chat", "Failed to persist chat message: {}", e);
+            }
+        }
+    }
+
+    /// Helper to persist a tool call to the database.
+    fn persist_tool_call(&self, message_id: &str, tool_call: &ChatToolCall) {
+        if let Some(store) = &self.store {
+            if let Err(e) = store.save_chat_tool_call(message_id, tool_call) {
+                tracing::warn!(target: "clauset::chat", "Failed to persist chat tool call: {}", e);
+            }
         }
     }
 
@@ -100,6 +130,7 @@ impl ChatProcessor {
                 // Finalize any in-progress assistant message
                 if let Some(mut msg) = state.current_message.take() {
                     msg.complete();
+                    self.persist_message(&msg);
                     events.push(ChatEvent::MessageComplete {
                         session_id: *session_id,
                         message_id: msg.id.clone(),
@@ -109,6 +140,7 @@ impl ChatProcessor {
 
                 // Create user message
                 let user_msg = ChatMessage::user(*session_id, prompt.clone());
+                self.persist_message(&user_msg);
                 events.push(ChatEvent::Message {
                     session_id: *session_id,
                     message: user_msg.clone(),
@@ -117,6 +149,7 @@ impl ChatProcessor {
 
                 // Start building assistant message
                 let assistant_msg = ChatMessage::assistant(*session_id);
+                self.persist_message(&assistant_msg);
                 events.push(ChatEvent::Message {
                     session_id: *session_id,
                     message: assistant_msg.clone(),
@@ -141,6 +174,7 @@ impl ChatProcessor {
                 // Ensure we have an assistant message
                 if state.current_message.is_none() {
                     let assistant_msg = ChatMessage::assistant(*session_id);
+                    self.persist_message(&assistant_msg);
                     events.push(ChatEvent::Message {
                         session_id: *session_id,
                         message: assistant_msg.clone(),
@@ -157,6 +191,7 @@ impl ChatProcessor {
 
                 if let Some(msg) = &mut state.current_message {
                     msg.add_tool_call(tool_call.clone());
+                    self.persist_tool_call(&msg.id, &tool_call);
                 }
 
                 events.push(ChatEvent::ToolCallStart {
@@ -194,6 +229,7 @@ impl ChatProcessor {
                     for tc in &mut msg.tool_calls {
                         if tc.id == *tool_use_id {
                             tc.complete_with_output(output.clone(), is_error);
+                            self.persist_tool_call(&msg.id, tc);
                         }
                     }
                 }
@@ -237,6 +273,7 @@ impl ChatProcessor {
                                     // Only add if message is currently empty (no streamed content)
                                     if msg.content.is_empty() {
                                         msg.append_content(&response_text);
+                                        self.persist_message(msg);
                                         events.push(ChatEvent::ContentDelta {
                                             session_id: *session_id,
                                             message_id: msg.id.clone(),
@@ -264,6 +301,7 @@ impl ChatProcessor {
                 // Finalize current assistant message
                 if let Some(mut msg) = state.current_message.take() {
                     msg.complete();
+                    self.persist_message(&msg);
                     events.push(ChatEvent::MessageComplete {
                         session_id: *session_id,
                         message_id: msg.id.clone(),
@@ -333,18 +371,55 @@ impl ChatProcessor {
     }
 
     /// Get all messages for a session.
+    ///
+    /// Returns messages from memory if available, otherwise loads from database.
     pub async fn get_messages(&self, session_id: Uuid) -> Vec<ChatMessage> {
         let sessions = self.sessions.read().await;
-        sessions
-            .get(&session_id)
-            .map(|s| {
-                let mut msgs = s.messages.clone();
-                if let Some(current) = &s.current_message {
-                    msgs.push(current.clone());
+        if let Some(s) = sessions.get(&session_id) {
+            let mut msgs = s.messages.clone();
+            if let Some(current) = &s.current_message {
+                msgs.push(current.clone());
+            }
+            return msgs;
+        }
+        drop(sessions);
+
+        // Fall back to database
+        self.get_chat_history(session_id)
+    }
+
+    /// Get chat history from the database.
+    pub fn get_chat_history(&self, session_id: Uuid) -> Vec<ChatMessage> {
+        if let Some(store) = &self.store {
+            match store.get_chat_messages(session_id) {
+                Ok(messages) => messages,
+                Err(e) => {
+                    tracing::warn!(target: "clauset::chat", "Failed to load chat history: {}", e);
+                    Vec::new()
                 }
-                msgs
-            })
-            .unwrap_or_default()
+            }
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Load messages from database into memory for a session.
+    pub async fn load_session_history(&self, session_id: Uuid) {
+        if let Some(store) = &self.store {
+            match store.get_chat_messages(session_id) {
+                Ok(messages) => {
+                    if !messages.is_empty() {
+                        let mut sessions = self.sessions.write().await;
+                        let state = sessions.entry(session_id).or_insert_with(SessionChatState::new);
+                        state.messages = messages;
+                        info!(target: "clauset::chat", "Loaded {} messages from database for session {}", state.messages.len(), session_id);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(target: "clauset::chat", "Failed to load chat history for session {}: {}", session_id, e);
+                }
+            }
+        }
     }
 
     /// Clear messages for a session.

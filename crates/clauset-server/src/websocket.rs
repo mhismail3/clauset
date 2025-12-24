@@ -423,6 +423,16 @@ pub async fn handle_websocket(
                                 }
                             }
                         }
+                        WsClientMessage::RequestChatHistory => {
+                            debug!(target: "clauset::ws", "RequestChatHistory for session {}", session_id);
+
+                            // Get chat history from database via chat processor
+                            let messages = state_clone.chat_processor.get_chat_history(session_id);
+                            debug!(target: "clauset::ws", "Sending {} chat messages for session {}", messages.len(), session_id);
+
+                            let response = WsServerMessage::ChatHistory { messages };
+                            let _ = outgoing_tx_clone.send(response).await;
+                        }
                         WsClientMessage::NegotiateDimensions {
                             cols,
                             rows,

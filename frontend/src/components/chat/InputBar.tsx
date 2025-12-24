@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js';
+import { createSignal, createEffect } from 'solid-js';
 import { useKeyboard } from '../../lib/keyboard';
 
 interface InputBarProps {
@@ -7,12 +7,44 @@ interface InputBarProps {
   placeholder?: string;
 }
 
+const MAX_ROWS = 10;
+const LINE_HEIGHT = 20; // ~14px font * 1.4 line-height
+
 export function InputBar(props: InputBarProps) {
   const [message, setMessage] = createSignal('');
   const [focused, setFocused] = createSignal(false);
+  const [rows, setRows] = createSignal(1);
+  let textareaRef: HTMLTextAreaElement | undefined;
 
   // iOS keyboard handling - adjust bottom padding when keyboard visible
   const { isVisible: keyboardVisible } = useKeyboard();
+
+  // Calculate rows based on content
+  createEffect(() => {
+    const text = message();
+    if (!textareaRef) {
+      setRows(1);
+      return;
+    }
+
+    // Count explicit newlines
+    const newlineCount = (text.match(/\n/g) || []).length + 1;
+
+    // Temporarily reset height to get accurate scrollHeight
+    const originalHeight = textareaRef.style.height;
+    textareaRef.style.height = 'auto';
+    const scrollHeight = textareaRef.scrollHeight;
+    textareaRef.style.height = originalHeight;
+
+    // Calculate rows from scrollHeight (accounts for wrapped lines)
+    // Subtract padding (10px top + 10px bottom = 20px)
+    const contentHeight = scrollHeight - 20;
+    const scrollRows = Math.ceil(contentHeight / LINE_HEIGHT);
+
+    // Use the larger of newline count or scroll-based rows
+    const calculatedRows = Math.max(newlineCount, scrollRows, 1);
+    setRows(Math.min(calculatedRows, MAX_ROWS));
+  });
 
   function handleSubmit(e: Event) {
     e.preventDefault();
@@ -20,6 +52,10 @@ export function InputBar(props: InputBarProps) {
     if (content && !props.disabled) {
       props.onSend(content);
       setMessage('');
+      // Reset to single row after send
+      if (textareaRef) {
+        textareaRef.style.height = 'auto';
+      }
     }
   }
 
@@ -31,6 +67,7 @@ export function InputBar(props: InputBarProps) {
   }
 
   const canSend = () => !props.disabled && message().trim();
+  const shouldScroll = () => rows() >= MAX_ROWS;
 
   return (
     <form
@@ -44,16 +81,17 @@ export function InputBar(props: InputBarProps) {
           : 'calc(env(safe-area-inset-bottom, 0px) + 12px)',
       }}
     >
-      <div style={{ display: 'flex', gap: '10px', "align-items": 'stretch' }}>
+      <div style={{ display: 'flex', gap: '10px', "align-items": 'flex-end' }}>
         {/* Textarea with retro styling */}
         <textarea
+          ref={textareaRef}
           value={message()}
           onInput={(e) => setMessage(e.currentTarget.value)}
           onKeyDown={handleKeyDown}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholder={props.placeholder || "Message Claude..."}
-          rows={1}
+          rows={rows()}
           disabled={props.disabled}
           class="text-mono"
           style={{
@@ -76,6 +114,7 @@ export function InputBar(props: InputBarProps) {
               : '1px 1px 0px rgba(0, 0, 0, 0.2)',
             transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
             opacity: props.disabled ? '0.5' : '1',
+            "overflow-y": shouldScroll() ? 'auto' : 'hidden',
           }}
         />
 
@@ -86,6 +125,7 @@ export function InputBar(props: InputBarProps) {
           class="pressable"
           style={{
             width: '40px',
+            height: '40px',
             "flex-shrink": '0',
             display: 'flex',
             "align-items": 'center',

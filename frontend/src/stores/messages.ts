@@ -1,5 +1,9 @@
 import { createSignal } from 'solid-js';
 
+// localStorage constants
+const STORAGE_KEY_PREFIX = 'clauset_messages_';
+const MAX_STORAGE_SIZE = 500000; // 500KB per session
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -20,8 +24,79 @@ export interface ToolCall {
 const [messages, setMessages] = createSignal<Map<string, Message[]>>(new Map());
 const [streamingMessage, setStreamingMessage] = createSignal<Map<string, string>>(new Map());
 
+// Debounce localStorage saves
+const saveTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+
+function saveToStorage(sessionId: string, msgs: Message[]) {
+  // Clear any pending save for this session
+  const existingTimeout = saveTimeouts.get(sessionId);
+  if (existingTimeout) {
+    clearTimeout(existingTimeout);
+  }
+
+  // Debounce saves by 500ms
+  const timeout = setTimeout(() => {
+    try {
+      const json = JSON.stringify(msgs);
+      if (json.length <= MAX_STORAGE_SIZE) {
+        localStorage.setItem(STORAGE_KEY_PREFIX + sessionId, json);
+      } else {
+        // If too large, keep only the most recent messages
+        const truncated = msgs.slice(-50);
+        const truncatedJson = JSON.stringify(truncated);
+        if (truncatedJson.length <= MAX_STORAGE_SIZE) {
+          localStorage.setItem(STORAGE_KEY_PREFIX + sessionId, truncatedJson);
+        }
+      }
+    } catch (e) {
+      console.warn('[messages] Failed to save to localStorage:', e);
+    }
+    saveTimeouts.delete(sessionId);
+  }, 500);
+
+  saveTimeouts.set(sessionId, timeout);
+}
+
+function loadFromStorage(sessionId: string): Message[] | null {
+  try {
+    const json = localStorage.getItem(STORAGE_KEY_PREFIX + sessionId);
+    if (json) {
+      return JSON.parse(json) as Message[];
+    }
+  } catch (e) {
+    console.warn('[messages] Failed to load from localStorage:', e);
+  }
+  return null;
+}
+
+function clearFromStorage(sessionId: string) {
+  try {
+    localStorage.removeItem(STORAGE_KEY_PREFIX + sessionId);
+  } catch (e) {
+    console.warn('[messages] Failed to clear from localStorage:', e);
+  }
+}
+
 export function getMessagesForSession(sessionId: string): Message[] {
-  return messages().get(sessionId) ?? [];
+  // First check memory
+  const inMemory = messages().get(sessionId);
+  if (inMemory !== undefined) {
+    return inMemory;
+  }
+
+  // Fall back to localStorage
+  const fromStorage = loadFromStorage(sessionId);
+  if (fromStorage) {
+    // Load into memory
+    setMessages((prev) => {
+      const newMap = new Map(prev);
+      newMap.set(sessionId, fromStorage);
+      return newMap;
+    });
+    return fromStorage;
+  }
+
+  return [];
 }
 
 export function addMessage(sessionId: string, message: Message) {
@@ -29,6 +104,16 @@ export function addMessage(sessionId: string, message: Message) {
     const newMap = new Map(prev);
     const sessionMessages = [...(newMap.get(sessionId) ?? []), message];
     newMap.set(sessionId, sessionMessages);
+    saveToStorage(sessionId, sessionMessages);
+    return newMap;
+  });
+}
+
+export function setSessionMessages(sessionId: string, msgs: Message[]) {
+  setMessages((prev) => {
+    const newMap = new Map(prev);
+    newMap.set(sessionId, msgs);
+    saveToStorage(sessionId, msgs);
     return newMap;
   });
 }
@@ -79,7 +164,9 @@ export function addToolCall(sessionId: string, messageId: string, toolCall: Tool
         ...lastMessage,
         toolCalls: [...(lastMessage.toolCalls ?? []), toolCall],
       };
-      newMap.set(sessionId, [...sessionMessages.slice(0, -1), updatedMessage]);
+      const updatedMessages = [...sessionMessages.slice(0, -1), updatedMessage];
+      newMap.set(sessionId, updatedMessages);
+      saveToStorage(sessionId, updatedMessages);
     }
 
     return newMap;
@@ -102,6 +189,7 @@ export function updateToolCallResult(sessionId: string, toolCallId: string, outp
     });
 
     newMap.set(sessionId, updatedMessages);
+    saveToStorage(sessionId, updatedMessages);
     return newMap;
   });
 }
@@ -112,6 +200,7 @@ export function clearSessionMessages(sessionId: string) {
     newMap.delete(sessionId);
     return newMap;
   });
+  clearFromStorage(sessionId);
 }
 
 // ChatEvent types matching backend
@@ -143,6 +232,36 @@ export type ChatEvent =
   | { type: 'message_complete'; session_id: string; message_id: string };
 
 /**
+ * Convert a ChatMessage from the backend to our Message format.
+ */
+function convertChatMessage(msg: ChatMessage): Message {
+  return {
+    id: msg.id,
+    role: msg.role,
+    content: msg.content,
+    toolCalls: msg.tool_calls.map((tc) => ({
+      id: tc.id,
+      name: tc.name,
+      input: tc.input,
+      output: tc.output,
+      isError: tc.is_error,
+    })),
+    timestamp: msg.timestamp,
+    isStreaming: msg.is_streaming,
+  };
+}
+
+/**
+ * Handle chat history from the backend.
+ * This replaces the current messages with the authoritative backend data.
+ */
+export function handleChatHistory(sessionId: string, chatMessages: ChatMessage[]) {
+  console.log('[messages] Received chat history:', chatMessages.length, 'messages');
+  const messages = chatMessages.map(convertChatMessage);
+  setSessionMessages(sessionId, messages);
+}
+
+/**
  * Handle a ChatEvent from the WebSocket.
  * Updates the messages store based on the event type.
  */
@@ -152,20 +271,7 @@ export function handleChatEvent(event: ChatEvent) {
     case 'message': {
       const msg = event.message;
       console.log('[ChatEvent] Adding message:', msg.role, msg.id, 'streaming:', msg.is_streaming);
-      const message: Message = {
-        id: msg.id,
-        role: msg.role,
-        content: msg.content,
-        toolCalls: msg.tool_calls.map((tc) => ({
-          id: tc.id,
-          name: tc.name,
-          input: tc.input,
-          output: tc.output,
-          isError: tc.is_error,
-        })),
-        timestamp: msg.timestamp,
-        isStreaming: msg.is_streaming,
-      };
+      const message = convertChatMessage(msg);
       addMessage(msg.session_id, message);
       break;
     }
@@ -182,6 +288,8 @@ export function handleChatEvent(event: ChatEvent) {
           return msg;
         });
         newMap.set(event.session_id, updatedMessages);
+        // Save after content delta (debounced)
+        saveToStorage(event.session_id, updatedMessages);
         return newMap;
       });
       break;
@@ -216,6 +324,8 @@ export function handleChatEvent(event: ChatEvent) {
           return msg;
         });
         newMap.set(event.session_id, updatedMessages);
+        // Save when message completes
+        saveToStorage(event.session_id, updatedMessages);
         return newMap;
       });
       break;

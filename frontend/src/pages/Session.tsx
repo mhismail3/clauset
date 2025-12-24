@@ -14,14 +14,15 @@ import { useKeyboard } from '../lib/keyboard';
 import { isIOS } from '../lib/fonts';
 import {
   getMessagesForSession,
-  addMessage,
   appendToStreamingMessage,
   finalizeStreamingMessage,
   getStreamingContent,
   addToolCall,
   updateToolCallResult,
   handleChatEvent,
+  handleChatHistory,
   type ChatEvent,
+  type ChatMessage,
 } from '../stores/messages';
 import { appendTerminalOutput, clearTerminalHistory } from '../stores/terminal';
 
@@ -113,7 +114,7 @@ export default function SessionPage() {
   const [error, setError] = createSignal<string | null>(null);
   const [wsState, setWsState] = createSignal<ConnectionState>('initial');
   const [connectionInfo, setConnectionInfo] = createSignal({ reconnectAttempt: 0, maxReconnectAttempts: 5, queuedMessageCount: 0 });
-  const [currentView, setCurrentView] = createSignal<'term' | 'chat' | 'history'>('term');
+  const [currentView, setCurrentView] = createSignal<'chat' | 'terminal' | 'history'>('chat');
   const [currentStreamingId, setCurrentStreamingId] = createSignal<string | null>(null);
   const [diffState, setDiffState] = createSignal<{ interactionId: string; file: string } | null>(null);
   const [terminalData, setTerminalData] = createSignal<Uint8Array[]>([]);
@@ -244,6 +245,10 @@ export default function SessionPage() {
         }
       }
     }
+
+    // Request chat history from the backend
+    // This replaces any localStorage cached messages with the authoritative server data
+    wsManager?.send({ type: 'request_chat_history' });
   }
 
   function handleWsMessage(msg: WsMessage) {
@@ -439,6 +444,15 @@ export default function SessionPage() {
             current_step,
             recent_actions: recent_actions || currentSession.recent_actions || [],
           });
+        }
+        break;
+      }
+      case 'chat_history': {
+        // Full chat history from backend (on connect)
+        const chatMessages = (msg as { messages: ChatMessage[] }).messages;
+        if (chatMessages && Array.isArray(chatMessages)) {
+          handleChatHistory(params.id, chatMessages);
+          scrollToBottom();
         }
         break;
       }
@@ -663,7 +677,7 @@ export default function SessionPage() {
               border: '1px solid var(--color-bg-overlay)',
             }}
           >
-            {(['term', 'chat', 'history'] as const).map((view) => (
+            {(['chat', 'terminal', 'history'] as const).map((view) => (
               <button
                 onClick={() => setCurrentView(view)}
                 class="text-mono"
@@ -821,7 +835,7 @@ export default function SessionPage() {
         {/* Terminal View - always render but hide to preserve state */}
         <div
           style={{
-            display: currentView() === 'term' ? 'flex' : 'none',
+            display: currentView() === 'terminal' ? 'flex' : 'none',
             "flex-direction": 'column',
             flex: '1 1 0%',
             "min-height": '0',

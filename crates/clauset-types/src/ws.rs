@@ -80,6 +80,12 @@ pub enum WsClientMessage {
         /// Device type hint
         device_hint: String, // "iphone", "ipad", "desktop"
     },
+
+    // === Chat History Protocol ===
+
+    /// Request chat history for the session.
+    /// Client sends this on connect to load persisted chat messages.
+    RequestChatHistory,
 }
 
 /// Messages sent from server to client.
@@ -237,6 +243,15 @@ pub enum WsServerMessage {
     /// Contains structured message updates from hook events.
     /// Note: Uses struct variant (not tuple) to avoid serde tag conflict with inner ChatEvent.
     ChatEvent { event: crate::ChatEvent },
+
+    // === Chat History Protocol ===
+
+    /// Full chat history for a session.
+    /// Sent in response to RequestChatHistory.
+    ChatHistory {
+        /// All chat messages for the session (ordered by sequence)
+        messages: Vec<crate::ChatMessage>,
+    },
 }
 
 /// A single action/step performed by Claude (for activity updates)

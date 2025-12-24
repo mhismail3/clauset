@@ -26,8 +26,8 @@ impl AppState {
         let session_manager = Arc::new(SessionManager::new(session_config)?);
         let history_watcher = Arc::new(HistoryWatcher::default());
         let interaction_store = Arc::new(InteractionStore::open(&config.db_path)?);
-        let interaction_processor = Arc::new(InteractionProcessor::new(interaction_store));
-        let chat_processor = Arc::new(ChatProcessor::new());
+        let interaction_processor = Arc::new(InteractionProcessor::new(interaction_store.clone()));
+        let chat_processor = Arc::new(ChatProcessor::with_store(interaction_store));
 
         Ok(Self {
             session_manager,

@@ -122,6 +122,13 @@ Success criteria:
   - PWA safe area handling for mobile
   - Monospace font (JetBrains Mono) for title and inputs matching session cards
 
+- Chat Persistence, UI Fixes, and Cleanup (5 issues)
+  - Issue 1: Chat history persistence - database tables + localStorage cache
+  - Issue 2: Chat view as default mode, tabs renamed to "chat | terminal | history"
+  - Issue 3: Removed Chat Mode toggle from New Session modal
+  - Issue 4: Fixed keyboard overlap in New Session modal (useKeyboard hook)
+  - Issue 5: Multi-line chat textbox expansion (max 10 lines, then scroll)
+
 - Chat UI/UX Overhaul (matching dashboard retro theme)
   - MessageBubble.tsx: Retro offset shadows, borders on user/assistant bubbles
   - ToolCallView: Colored left accent bar by tool type, chevron expand icon, card styling
@@ -133,7 +140,7 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
-- Chat UI/UX overhaul complete and tested
+- All 5 issues from user request implemented and verified
 
 ### Verified Working
 - User messages display as chat bubbles (from UserPromptSubmit hook)

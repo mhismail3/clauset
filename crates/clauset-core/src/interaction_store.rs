@@ -298,6 +298,48 @@ impl InteractionStore {
             "#,
         )?;
 
+        // Create chat_messages table for chat view persistence
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                sequence_number INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                is_streaming INTEGER NOT NULL DEFAULT 0,
+                is_complete INTEGER NOT NULL DEFAULT 1,
+                timestamp INTEGER NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id
+                ON chat_messages(session_id);
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_session_seq
+                ON chat_messages(session_id, sequence_number);
+            "#,
+        )?;
+
+        // Create chat_tool_calls table for tool calls within chat messages
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS chat_tool_calls (
+                id TEXT PRIMARY KEY,
+                message_id TEXT NOT NULL,
+                sequence_number INTEGER NOT NULL,
+                tool_name TEXT NOT NULL,
+                tool_input TEXT,
+                tool_output TEXT,
+                is_error INTEGER NOT NULL DEFAULT 0,
+                is_complete INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chat_tool_calls_message_id
+                ON chat_tool_calls(message_id);
+            "#,
+        )?;
+
         Ok(())
     }
 
@@ -1803,6 +1845,224 @@ impl InteractionStore {
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
         Ok(rows)
+    }
+
+    // =========================================================================
+    // Chat Message CRUD (for chat view persistence)
+    // =========================================================================
+
+    /// Save a chat message (insert or update).
+    pub fn save_chat_message(&self, msg: &clauset_types::ChatMessage) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        // Get next sequence number if this is a new message
+        let seq_num: i64 = conn
+            .query_row(
+                "SELECT sequence_number FROM chat_messages WHERE id = ?1",
+                params![&msg.id],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| {
+                // New message - get next sequence
+                conn.query_row(
+                    "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM chat_messages WHERE session_id = ?1",
+                    params![msg.session_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap_or(1)
+            });
+
+        let role_str = match msg.role {
+            clauset_types::ChatRole::User => "user",
+            clauset_types::ChatRole::Assistant => "assistant",
+        };
+
+        conn.execute(
+            r#"
+            INSERT INTO chat_messages (id, session_id, sequence_number, role, content, is_streaming, is_complete, timestamp)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(id) DO UPDATE SET
+                content = excluded.content,
+                is_streaming = excluded.is_streaming,
+                is_complete = excluded.is_complete
+            "#,
+            params![
+                &msg.id,
+                msg.session_id.to_string(),
+                seq_num,
+                role_str,
+                &msg.content,
+                msg.is_streaming as i32,
+                msg.is_complete as i32,
+                msg.timestamp as i64,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Save a chat tool call (insert or update).
+    pub fn save_chat_tool_call(&self, message_id: &str, tool_call: &clauset_types::ChatToolCall) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        // Get next sequence number if this is a new tool call
+        let seq_num: i64 = conn
+            .query_row(
+                "SELECT sequence_number FROM chat_tool_calls WHERE id = ?1",
+                params![&tool_call.id],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| {
+                // New tool call - get next sequence
+                conn.query_row(
+                    "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM chat_tool_calls WHERE message_id = ?1",
+                    params![message_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(1)
+            });
+
+        conn.execute(
+            r#"
+            INSERT INTO chat_tool_calls (id, message_id, sequence_number, tool_name, tool_input, tool_output, is_error, is_complete)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(id) DO UPDATE SET
+                tool_output = excluded.tool_output,
+                is_error = excluded.is_error,
+                is_complete = excluded.is_complete
+            "#,
+            params![
+                &tool_call.id,
+                message_id,
+                seq_num,
+                &tool_call.name,
+                tool_call.input.to_string(),
+                tool_call.output.as_deref(),
+                tool_call.is_error as i32,
+                tool_call.is_complete as i32,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Get all chat messages for a session (ordered by sequence).
+    pub fn get_chat_messages(&self, session_id: Uuid) -> Result<Vec<clauset_types::ChatMessage>> {
+        let conn = self.conn.lock().unwrap();
+
+        // Get all messages
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, session_id, role, content, is_streaming, is_complete, timestamp
+            FROM chat_messages
+            WHERE session_id = ?1
+            ORDER BY sequence_number ASC
+            "#,
+        )?;
+
+        let messages: Vec<(String, String, String, i32, i32, i64)> = stmt
+            .query_map(params![session_id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>("id")?,
+                    row.get::<_, String>("role")?,
+                    row.get::<_, String>("content")?,
+                    row.get::<_, i32>("is_streaming")?,
+                    row.get::<_, i32>("is_complete")?,
+                    row.get::<_, i64>("timestamp")?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        drop(stmt);
+
+        // Build ChatMessage objects with tool calls
+        let mut result = Vec::new();
+        for (id, role, content, is_streaming, is_complete, timestamp) in messages {
+            // Get tool calls for this message
+            let tool_calls = self.get_chat_tool_calls_internal(&conn, &id)?;
+
+            result.push(clauset_types::ChatMessage {
+                id,
+                session_id,
+                role: if role == "user" {
+                    clauset_types::ChatRole::User
+                } else {
+                    clauset_types::ChatRole::Assistant
+                },
+                content,
+                tool_calls,
+                is_streaming: is_streaming != 0,
+                is_complete: is_complete != 0,
+                timestamp: timestamp as u64,
+            });
+        }
+
+        Ok(result)
+    }
+
+    /// Internal helper to get tool calls for a message.
+    fn get_chat_tool_calls_internal(
+        &self,
+        conn: &Connection,
+        message_id: &str,
+    ) -> Result<Vec<clauset_types::ChatToolCall>> {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, tool_name, tool_input, tool_output, is_error, is_complete
+            FROM chat_tool_calls
+            WHERE message_id = ?1
+            ORDER BY sequence_number ASC
+            "#,
+        )?;
+
+        let tool_calls = stmt
+            .query_map(params![message_id], |row| {
+                let id: String = row.get("id")?;
+                let name: String = row.get("tool_name")?;
+                let input_str: Option<String> = row.get("tool_input")?;
+                let output: Option<String> = row.get("tool_output")?;
+                let is_error: i32 = row.get("is_error")?;
+                let is_complete: i32 = row.get("is_complete")?;
+
+                let input = input_str
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or(serde_json::Value::Null);
+
+                Ok(clauset_types::ChatToolCall {
+                    id,
+                    name,
+                    input,
+                    output,
+                    is_error: is_error != 0,
+                    is_complete: is_complete != 0,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(tool_calls)
+    }
+
+    /// Delete all chat messages for a session.
+    pub fn delete_chat_messages(&self, session_id: Uuid) -> Result<u32> {
+        let conn = self.conn.lock().unwrap();
+        let count = conn.execute(
+            "DELETE FROM chat_messages WHERE session_id = ?1",
+            params![session_id.to_string()],
+        )?;
+        Ok(count as u32)
+    }
+
+    /// Get the count of chat messages for a session.
+    pub fn get_chat_message_count(&self, session_id: Uuid) -> Result<u32> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM chat_messages WHERE session_id = ?1",
+            params![session_id.to_string()],
+            |row| row.get(0),
+        )?;
+        Ok(count as u32)
     }
 
     // =========================================================================

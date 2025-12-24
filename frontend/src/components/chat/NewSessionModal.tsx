@@ -3,6 +3,7 @@ import { useNavigate } from '@solidjs/router';
 import { Button } from '../ui/Button';
 import { Spinner } from '../ui/Spinner';
 import { api, Project } from '../../lib/api';
+import { useKeyboard } from '../../lib/keyboard';
 
 interface NewSessionModalProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface NewSessionModalProps {
 
 export function NewSessionModal(props: NewSessionModalProps) {
   const navigate = useNavigate();
+  const { isVisible: keyboardVisible, viewportHeight } = useKeyboard();
   const [projects, setProjects] = createSignal<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = createSignal(false);
   const [projectInput, setProjectInput] = createSignal('');
@@ -18,7 +20,6 @@ export function NewSessionModal(props: NewSessionModalProps) {
   const [selectedModel, setSelectedModel] = createSignal('haiku');
   const [showModelDropdown, setShowModelDropdown] = createSignal(false);
   const [prompt, setPrompt] = createSignal('');
-  const [chatMode, setChatMode] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
@@ -118,7 +119,6 @@ export function NewSessionModal(props: NewSessionModalProps) {
         project_path: projectPath,
         prompt: prompt() || undefined,
         model: selectedModel(),
-        terminal_mode: !chatMode(),
       });
 
       await api.sessions.start(response.session_id, prompt());
@@ -216,8 +216,9 @@ export function NewSessionModal(props: NewSessionModalProps) {
           class="animate-slide-up"
           style={{
             width: "min(380px, calc(100vw - 32px))",
-            "max-height": "calc(100vh - 32px)",
-            "max-height": "calc(100dvh - 32px)",
+            "max-height": keyboardVisible()
+              ? `${viewportHeight() - 32}px`
+              : "calc(100dvh - 32px)",
             "border-radius": "12px",
             border: "1.5px solid var(--color-bg-overlay)",
             background: "var(--color-bg-surface)",
@@ -516,50 +517,6 @@ export function NewSessionModal(props: NewSessionModalProps) {
                   }}
                 />
               </div>
-
-              {/* Chat Mode Toggle */}
-              <label
-                style={{
-                  display: "flex",
-                  "align-items": "flex-start",
-                  gap: "10px",
-                  padding: "10px",
-                  "border-radius": "8px",
-                  border: "1px solid var(--color-bg-overlay)",
-                  background: "var(--color-bg-base)",
-                  cursor: "pointer",
-                  transition: "border-color 0.15s ease",
-                }}
-                class="hover:border-text-muted"
-              >
-                <input
-                  type="checkbox"
-                  checked={chatMode()}
-                  onChange={(e) => setChatMode(e.currentTarget.checked)}
-                  style={{
-                    width: "16px",
-                    height: "16px",
-                    "margin-top": "1px",
-                    "accent-color": "var(--color-accent)",
-                    cursor: "pointer",
-                    "flex-shrink": "0",
-                  }}
-                />
-                <div style={{ flex: "1", "min-width": "0" }}>
-                  <span
-                    class="text-text-primary text-mono"
-                    style={{ display: "block", "font-size": "13px", "font-weight": "500" }}
-                  >
-                    Chat Mode
-                  </span>
-                  <span
-                    class="text-text-tertiary text-mono"
-                    style={{ display: "block", "font-size": "11px", "margin-top": "2px", "line-height": "1.4" }}
-                  >
-                    API billing. Uncheck for Terminal (Max sub).
-                  </span>
-                </div>
-              </label>
             </div>
           </form>
 
