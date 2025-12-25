@@ -148,20 +148,34 @@ export default function Sessions() {
             <img
               src="/logo.svg"
               alt="Clauset logo"
-              style={{ width: '28px', height: '28px' }}
+              style={{ width: '34px', height: '34px' }}
             />
-            <h1
-              class="text-brand"
-              style={{
-                color: 'var(--color-accent)',
-                "font-size": '20px',
-                "font-weight": '600',
-                margin: '0',
-                "letter-spacing": '0.5px',
-              }}
-            >
-              Clauset
-            </h1>
+            <div>
+              <h1
+                class="text-brand"
+                style={{
+                  color: 'var(--color-accent)',
+                  "font-size": '20px',
+                  "font-weight": '600',
+                  margin: '0',
+                  "letter-spacing": '0.5px',
+                  "line-height": '1.1',
+                }}
+              >
+                Clauset
+              </h1>
+              <p
+                style={{
+                  "font-family": 'var(--font-serif)',
+                  "font-size": '11px',
+                  color: 'var(--color-text-muted)',
+                  margin: '0',
+                  "margin-top": '-1px',
+                }}
+              >
+                Keep your sessions organized.
+              </p>
+            </div>
           </div>
 
           {/* Right: Navigation buttons + Active session count */}
