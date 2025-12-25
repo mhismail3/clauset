@@ -138,25 +138,41 @@ const QUEUE_STORAGE_KEY = 'clauset_message_queue';
 // Maximum age for queued messages (5 minutes)
 const MAX_QUEUE_AGE_MS = 5 * 60 * 1000;
 
-// Get device-appropriate default dimensions
+// Calculate dimensions based on actual screen size
 // These are sent immediately on connect before terminal is visible
 function getDeviceDefaultDimensions(): { cols: number; rows: number } {
-  const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  // Use visualViewport if available (more accurate on mobile), fallback to window
+  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
 
-  if (isIOSDevice) {
-    const screenWidth = window.screen.width;
-    const pixelRatio = window.devicePixelRatio || 1;
-    const logicalWidth = screenWidth / pixelRatio;
+  // Terminal font settings (must match TerminalView.tsx)
+  const fontSize = 14; // Default font size
+  const estimatedCharWidth = fontSize * 0.6;  // ~8.4px for 14px font
+  const estimatedCharHeight = fontSize * 1.25; // ~17.5px for 14px font
 
-    // iPad vs iPhone based on logical screen width
-    if (logicalWidth >= 768) {
-      return { cols: 80, rows: 30 }; // iPad
-    }
-    return { cols: 45, rows: 25 }; // iPhone - slightly larger than min for safety
-  }
+  // Estimate UI chrome that reduces available terminal space:
+  // - Header: ~60px
+  // - Keyboard helper bar (esc/tab/ctrl): ~50px
+  // - Safe areas (notch, home indicator): ~50px total estimate
+  // - Terminal container padding: 24px horizontal, 16px vertical
+  const uiChromeHeight = 60 + 50 + 50 + 16; // ~176px
+  const horizontalPadding = 24;
 
-  return { cols: 80, rows: 24 }; // Desktop default
+  const availableWidth = viewportWidth - horizontalPadding;
+  const availableHeight = viewportHeight - uiChromeHeight;
+
+  // Calculate columns and rows
+  const cols = Math.floor(availableWidth / estimatedCharWidth);
+  const rows = Math.floor(availableHeight / estimatedCharHeight);
+
+  // Clamp to reasonable bounds
+  const finalCols = Math.max(20, Math.min(300, cols));
+  const finalRows = Math.max(5, Math.min(100, rows));
+
+  console.log(`Initial dimensions estimate: ${finalCols}x${finalRows} ` +
+    `(viewport: ${viewportWidth}x${viewportHeight}, char: ${estimatedCharWidth.toFixed(1)}x${estimatedCharHeight.toFixed(1)})`);
+
+  return { cols: finalCols, rows: finalRows };
 }
 
 export function createWebSocketManager(options: WebSocketManagerOptions) {
