@@ -153,20 +153,16 @@ Success criteria:
 ### Previous
 - Terminal width fix for chat-default mode completed
 
-### Terminal Width Fix for Chat-Default Mode (Comprehensive Fix)
-- **Problem**: When chat mode is the default tab, terminal displays at ~20-40 cols instead of full width
-- **Root cause**: Multiple issues:
-  1. `fitAddon.proposeDimensions()` returns minimum 20x5 for hidden containers
-  2. These wrong dimensions were sent to server immediately on WebSocket connect
-  3. PTY created with wrong dimensions, Claude Code renders welcome at that width
-- **Fix**: Three-part solution:
-  1. `terminalSizing.ts` - Don't trust fitAddon if container is hidden (clientWidth=0)
-  2. `TerminalView.tsx` - Don't send dimensions to server if container is hidden
-  3. `ws.ts` - Defer initial sync request until dimensions are known (non-zero)
+### Terminal Width Fix for Chat-Default Mode (Final Fix)
+- **Problem**: When chat mode is the default tab, terminal displays at wrong width
+- **Root cause**: Race condition - server creates PTY before client sends dimensions
+- **Fix**: Two-phase approach:
+  1. Send device-appropriate defaults IMMEDIATELY on connect (45 cols for iPhone, 80 for desktop)
+  2. Send accurate dimensions when terminal becomes visible
 - Files changed:
-  - `frontend/src/lib/terminalSizing.ts` - Check container visibility before using fitAddon
-  - `frontend/src/components/terminal/TerminalView.tsx` - Check visibility before onResize, added isVisible prop/effect
-  - `frontend/src/lib/ws.ts` - Defer initial sync until dimensions set, default dims to 0x0
+  - `frontend/src/lib/ws.ts` - Added `getDeviceDefaultDimensions()`, send immediately on connect, update on change
+  - `frontend/src/lib/terminalSizing.ts` - Don't trust fitAddon if container is hidden
+  - `frontend/src/components/terminal/TerminalView.tsx` - Defer server notification until visible
   - `frontend/src/pages/Session.tsx` - Pass isVisible prop
 
 ### Previous

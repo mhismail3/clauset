@@ -138,6 +138,27 @@ const QUEUE_STORAGE_KEY = 'clauset_message_queue';
 // Maximum age for queued messages (5 minutes)
 const MAX_QUEUE_AGE_MS = 5 * 60 * 1000;
 
+// Get device-appropriate default dimensions
+// These are sent immediately on connect before terminal is visible
+function getDeviceDefaultDimensions(): { cols: number; rows: number } {
+  const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  if (isIOSDevice) {
+    const screenWidth = window.screen.width;
+    const pixelRatio = window.devicePixelRatio || 1;
+    const logicalWidth = screenWidth / pixelRatio;
+
+    // iPad vs iPhone based on logical screen width
+    if (logicalWidth >= 768) {
+      return { cols: 80, rows: 30 }; // iPad
+    }
+    return { cols: 45, rows: 25 }; // iPhone - slightly larger than min for safety
+  }
+
+  return { cols: 80, rows: 24 }; // Desktop default
+}
+
 export function createWebSocketManager(options: WebSocketManagerOptions) {
   let ws: WebSocket | null = null;
   let reconnectCount = 0;
@@ -146,6 +167,9 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
   let messageQueue: Array<{ data: unknown; timestamp: number }> = [];
   let isSuspended = false;
 
+  // Get device-appropriate defaults for initial sync
+  const deviceDefaults = getDeviceDefaultDimensions();
+
   // Stream state for reliable delivery
   const streamState: StreamState = {
     lastContiguousSeq: 0,
@@ -153,14 +177,11 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     lastAckedSeq: 0,
     ackTimer: null,
     gapRecoveryTimer: null,
-    // Start with 0x0 to indicate dimensions are unknown
-    // Initial sync will be deferred until dimensions are set
-    terminalCols: 0,
-    terminalRows: 0,
+    // Use device-appropriate defaults so PTY is created with reasonable dimensions
+    // These will be updated when terminal becomes visible
+    terminalCols: deviceDefaults.cols,
+    terminalRows: deviceDefaults.rows,
   };
-
-  // Track if initial sync has been sent (deferred until dimensions known)
-  let initialSyncSent = false;
 
   // Heartbeat state
   const heartbeatState: HeartbeatState = {
@@ -321,16 +342,10 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
         // Start heartbeat
         startHeartbeat();
 
-        // Send SyncRequest to get current state and any missed chunks
-        // IMPORTANT: Only send if dimensions are known (non-zero)
-        // If dimensions are 0x0, defer until setTerminalDimensions is called
-        // This prevents creating PTY with wrong dimensions when terminal is hidden
-        if (streamState.terminalCols > 0 && streamState.terminalRows > 0) {
-          sendSyncRequest();
-          initialSyncSent = true;
-        } else {
-          console.log('Deferring initial sync until terminal dimensions are known');
-        }
+        // Send SyncRequest immediately with device-appropriate default dimensions
+        // This ensures PTY is created with reasonable dimensions (45 cols for iPhone, 80 for desktop)
+        // Dimensions will be updated when terminal becomes visible
+        sendSyncRequest();
 
         // Flush queued messages
         if (messageQueue.length > 0) {
@@ -619,7 +634,6 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     stopHeartbeat();
     clearStreamTimers();
     messageQueue = [];
-    initialSyncSent = false; // Reset so next connect can send initial sync
     ws?.close(1000, 'Client disconnect');
     ws = null;
     setState('initial');
@@ -646,15 +660,15 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
   }
 
   function setTerminalDimensions(cols: number, rows: number) {
+    const changed = cols !== streamState.terminalCols || rows !== streamState.terminalRows;
     streamState.terminalCols = cols;
     streamState.terminalRows = rows;
 
-    // If this is the first time dimensions are set and we're connected,
-    // send the deferred initial sync request now
-    if (!initialSyncSent && ws?.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
-      console.log(`Sending deferred initial sync with dimensions ${cols}x${rows}`);
+    // If dimensions changed and we're connected, send updated dimensions via resync
+    // This handles the case where terminal becomes visible and we have accurate measurements
+    if (changed && ws?.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
+      console.log(`Sending dimension update: ${cols}x${rows}`);
       sendSyncRequest();
-      initialSyncSent = true;
     }
   }
 
