@@ -524,7 +524,19 @@ export default function SessionPage() {
     setResuming(true);
     setError(null);
     try {
-      await api.sessions.resume(params.id);
+      const response = await api.sessions.resume(params.id);
+      if (!response.ok) {
+        const errorText = await response.text();
+        // Check for specific error types
+        if (errorText.includes('not resumable') || errorText.includes('SessionNotResumable')) {
+          setError('This session cannot be resumed. It may have been created before session persistence was enabled. Try starting a new session instead.');
+        } else if (errorText.includes('not found')) {
+          setError('Session not found. It may have been deleted.');
+        } else {
+          setError(errorText || 'Failed to resume session');
+        }
+        return;
+      }
       await loadSession();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to resume session');

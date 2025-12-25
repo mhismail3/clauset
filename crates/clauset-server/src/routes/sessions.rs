@@ -2,11 +2,11 @@
 
 use crate::state::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
-use clauset_core::CreateSessionOptions;
+use clauset_core::{ClaudeSessionReader, CreateSessionOptions};
 use clauset_types::{SessionMode, SessionSummary};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -210,4 +210,127 @@ pub async fn rename(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(StatusCode::OK)
+}
+
+// === Claude Sessions from ~/.claude ===
+
+#[derive(Deserialize)]
+pub struct ClaudeSessionsQuery {
+    pub project_path: PathBuf,
+}
+
+/// A Claude session from ~/.claude storage.
+#[derive(Serialize)]
+pub struct ClaudeSessionResponse {
+    pub session_id: String,
+    pub project_path: PathBuf,
+    pub timestamp: String,
+    pub preview: String,
+    /// Whether this session already exists in Clauset's database
+    pub in_clauset: bool,
+}
+
+#[derive(Serialize)]
+pub struct ClaudeSessionsListResponse {
+    pub sessions: Vec<ClaudeSessionResponse>,
+}
+
+/// List sessions from ~/.claude/history.jsonl for a specific project.
+/// Returns sessions that exist in Claude's storage, indicating which ones
+/// are already imported into Clauset.
+pub async fn list_claude_sessions(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ClaudeSessionsQuery>,
+) -> Result<Json<ClaudeSessionsListResponse>, (StatusCode, String)> {
+    let reader = ClaudeSessionReader::new();
+
+    let claude_sessions = reader
+        .list_sessions_for_project(&query.project_path)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Get existing Clauset sessions to check for duplicates
+    let clauset_sessions = state
+        .session_manager
+        .list_sessions()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Build a set of claude_session_ids that are already in Clauset
+    let existing_ids: std::collections::HashSet<String> = clauset_sessions
+        .iter()
+        .map(|s| s.claude_session_id.to_string())
+        .collect();
+
+    let sessions: Vec<ClaudeSessionResponse> = claude_sessions
+        .into_iter()
+        .map(|s| ClaudeSessionResponse {
+            session_id: s.session_id.clone(),
+            project_path: s.project_path,
+            timestamp: s.timestamp.to_rfc3339(),
+            preview: s.preview,
+            in_clauset: existing_ids.contains(&s.session_id),
+        })
+        .collect();
+
+    Ok(Json(ClaudeSessionsListResponse { sessions }))
+}
+
+#[derive(Deserialize)]
+pub struct ImportSessionRequest {
+    pub claude_session_id: String,
+    pub project_path: PathBuf,
+}
+
+#[derive(Serialize)]
+pub struct ImportSessionResponse {
+    pub session_id: Uuid,
+    pub claude_session_id: String,
+    pub ws_url: String,
+}
+
+/// Import a session from ~/.claude into Clauset.
+/// Creates a new Clauset session that references the existing Claude session.
+pub async fn import_session(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ImportSessionRequest>,
+) -> Result<Json<ImportSessionResponse>, (StatusCode, String)> {
+    // Verify the session exists in Claude's storage
+    let reader = ClaudeSessionReader::new();
+    let claude_session = reader
+        .get_session(&req.claude_session_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            format!("Session {} not found in ~/.claude", req.claude_session_id),
+        ))?;
+
+    // Parse the claude_session_id as UUID
+    let claude_uuid = Uuid::parse_str(&req.claude_session_id)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid session ID: {}", e)))?;
+
+    // Create a Clauset session with the existing Claude session ID
+    let session = state
+        .session_manager
+        .create_session(CreateSessionOptions {
+            project_path: req.project_path,
+            prompt: claude_session.preview,
+            model: None, // Will use default model
+            mode: SessionMode::Terminal,
+            resume_session_id: Some(claude_uuid),
+        })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    info!(
+        target: "clauset::session",
+        "Imported Claude session {} as Clauset session {}",
+        req.claude_session_id,
+        session.id
+    );
+
+    Ok(Json(ImportSessionResponse {
+        session_id: session.id,
+        claude_session_id: req.claude_session_id,
+        ws_url: format!("/ws/sessions/{}", session.id),
+    }))
 }

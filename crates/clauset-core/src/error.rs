@@ -8,6 +8,9 @@ pub enum ClausetError {
     #[error("Session not found: {0}")]
     SessionNotFound(Uuid),
 
+    #[error("Session {0} has no resumable state (Claude session ID not captured)")]
+    SessionNotResumable(Uuid),
+
     #[error("Session already exists: {0}")]
     SessionAlreadyExists(Uuid),
 

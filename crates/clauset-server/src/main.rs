@@ -137,6 +137,9 @@ async fn main() -> Result<()> {
         .route("/sessions/{id}/start", post(routes::sessions::start))
         .route("/sessions/{id}/resume", post(routes::sessions::resume))
         .route("/sessions/{id}/input", post(routes::sessions::send_input))
+        // Claude sessions from ~/.claude
+        .route("/claude-sessions", get(routes::sessions::list_claude_sessions))
+        .route("/sessions/import", post(routes::sessions::import_session))
         // Interaction timeline
         .route(
             "/sessions/{id}/interactions",

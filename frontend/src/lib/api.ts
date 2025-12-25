@@ -229,6 +229,30 @@ export interface StorageStats {
   total_compressed_size: number;
 }
 
+// Claude sessions from ~/.claude
+export interface ClaudeSession {
+  session_id: string;
+  project_path: string;
+  timestamp: string;
+  preview: string;
+  in_clauset: boolean;
+}
+
+export interface ClaudeSessionsResponse {
+  sessions: ClaudeSession[];
+}
+
+export interface ImportSessionRequest {
+  claude_session_id: string;
+  project_path: string;
+}
+
+export interface ImportSessionResponse {
+  session_id: string;
+  claude_session_id: string;
+  ws_url: string;
+}
+
 const BASE_URL = '/api';
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
@@ -288,6 +312,16 @@ export const api = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
+      }),
+
+    // Claude sessions from ~/.claude
+    listClaudeSessions: (projectPath: string) =>
+      fetchJSON<ClaudeSessionsResponse>(`/claude-sessions?project_path=${encodeURIComponent(projectPath)}`),
+
+    import: (req: ImportSessionRequest) =>
+      fetchJSON<ImportSessionResponse>('/sessions/import', {
+        method: 'POST',
+        body: JSON.stringify(req),
       }),
   },
 

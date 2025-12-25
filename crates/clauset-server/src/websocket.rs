@@ -89,6 +89,13 @@ pub async fn handle_websocket(
                             match claude_event {
                                 clauset_types::ClaudeEvent::System(system) => {
                                     if system.subtype == "init" {
+                                        // Store Claude's real session ID for future resume
+                                        if let Err(e) = state_clone.session_manager.set_claude_session_id(
+                                            session_id,
+                                            &system.session_id.to_string(),
+                                        ) {
+                                            warn!(target: "clauset::ws", "Failed to store claude_session_id for session {}: {}", session_id, e);
+                                        }
                                         Some(WsServerMessage::SessionInit {
                                             session_id,
                                             claude_session_id: system.session_id,

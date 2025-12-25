@@ -43,6 +43,14 @@ pub async fn receive(
         }
     };
 
+    // Capture Claude's session ID from the hook event (first hook that fires)
+    // This is needed for resume to work - Terminal mode doesn't emit JSON events
+    let claude_session_id = extract_claude_session_id(&event);
+    if let Err(e) = state.session_manager.set_claude_session_id(session_id, &claude_session_id) {
+        // This will fail if already set (which is expected) - only log on real errors
+        debug!(target: "clauset::hooks", "Could not set Claude session ID: {}", e);
+    }
+
     // Get current session costs for interaction delta calculation
     let (cost_usd, input_tokens, output_tokens) =
         if let Some(activity) = state.session_manager.get_activity(session_id).await {
@@ -449,4 +457,19 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+/// Extract Claude's session ID from any hook event.
+fn extract_claude_session_id(event: &HookEvent) -> String {
+    match event {
+        HookEvent::SessionStart { claude_session_id, .. } => claude_session_id.clone(),
+        HookEvent::SessionEnd { claude_session_id, .. } => claude_session_id.clone(),
+        HookEvent::UserPromptSubmit { claude_session_id, .. } => claude_session_id.clone(),
+        HookEvent::PreToolUse { claude_session_id, .. } => claude_session_id.clone(),
+        HookEvent::PostToolUse { claude_session_id, .. } => claude_session_id.clone(),
+        HookEvent::Stop { claude_session_id, .. } => claude_session_id.clone(),
+        HookEvent::SubagentStop { claude_session_id, .. } => claude_session_id.clone(),
+        HookEvent::Notification { claude_session_id, .. } => claude_session_id.clone(),
+        HookEvent::PreCompact { claude_session_id, .. } => claude_session_id.clone(),
+    }
 }

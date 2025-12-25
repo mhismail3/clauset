@@ -12,6 +12,14 @@ pub struct SessionStore {
     conn: Mutex<Connection>,
 }
 
+/// Persisted terminal buffer data for session resume.
+#[derive(Debug, Clone)]
+pub struct TerminalBufferData {
+    pub data: Vec<u8>,
+    pub start_seq: u64,
+    pub end_seq: u64,
+}
+
 impl SessionStore {
     /// Open or create the database at the given path.
     pub fn open(path: &Path) -> Result<Self> {
@@ -49,6 +57,15 @@ impl SessionStore {
 
             CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
             CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity_at);
+
+            -- Terminal buffer persistence for session resume
+            CREATE TABLE IF NOT EXISTS terminal_buffers (
+                session_id TEXT PRIMARY KEY,
+                data BLOB NOT NULL,
+                start_seq INTEGER NOT NULL,
+                end_seq INTEGER NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             "#,
         )?;
         Ok(())
@@ -246,6 +263,34 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Update Claude's session ID (captured from hook events).
+    /// This is the real session ID that Claude uses for resumption.
+    /// Only updates if the current value is nil (not yet captured).
+    pub fn update_claude_session_id(&self, id: Uuid, claude_session_id: &str) -> Result<()> {
+        let nil_uuid = Uuid::nil().to_string();
+        let conn = self.conn.lock().unwrap();
+
+        // Only update if current value is nil (not yet captured)
+        let rows_changed = conn.execute(
+            "UPDATE sessions SET claude_session_id = ?1, last_activity_at = ?2
+             WHERE id = ?3 AND claude_session_id = ?4",
+            params![
+                claude_session_id,
+                chrono::Utc::now().to_rfc3339(),
+                id.to_string(),
+                nil_uuid,
+            ],
+        )?;
+
+        if rows_changed == 0 {
+            // Either session not found or already has a valid session ID - this is expected
+            return Err(ClausetError::ParseError(
+                "Session ID already captured or session not found".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Update recent actions and current step (for persisting on session stop).
     pub fn update_activity(
         &self,
@@ -270,6 +315,69 @@ impl SessionStore {
                 chrono::Utc::now().to_rfc3339(),
                 id.to_string()
             ],
+        )?;
+        Ok(())
+    }
+
+    // ========================================================================
+    // Terminal Buffer Persistence
+    // ========================================================================
+
+    /// Save terminal buffer to database.
+    /// Replaces any existing buffer for this session.
+    pub fn save_terminal_buffer(
+        &self,
+        session_id: Uuid,
+        data: &[u8],
+        start_seq: u64,
+        end_seq: u64,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT OR REPLACE INTO terminal_buffers (session_id, data, start_seq, end_seq, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+            params![
+                session_id.to_string(),
+                data,
+                start_seq as i64,
+                end_seq as i64,
+                chrono::Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Load terminal buffer from database.
+    /// Returns None if no buffer exists for this session.
+    pub fn get_terminal_buffer(&self, session_id: Uuid) -> Result<Option<TerminalBufferData>> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn
+            .query_row(
+                "SELECT data, start_seq, end_seq FROM terminal_buffers WHERE session_id = ?1",
+                params![session_id.to_string()],
+                |row| {
+                    let data: Vec<u8> = row.get(0)?;
+                    let start_seq: i64 = row.get(1)?;
+                    let end_seq: i64 = row.get(2)?;
+                    Ok(TerminalBufferData {
+                        data,
+                        start_seq: start_seq as u64,
+                        end_seq: end_seq as u64,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(result)
+    }
+
+    /// Delete terminal buffer for a session.
+    pub fn delete_terminal_buffer(&self, session_id: Uuid) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM terminal_buffers WHERE session_id = ?1",
+            params![session_id.to_string()],
         )?;
         Ok(())
     }

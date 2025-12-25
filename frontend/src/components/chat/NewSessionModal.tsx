@@ -2,7 +2,7 @@ import { Show, For, createSignal, createEffect, createMemo, onCleanup } from 'so
 import { useNavigate } from '@solidjs/router';
 import { Button } from '../ui/Button';
 import { Spinner } from '../ui/Spinner';
-import { api, Project } from '../../lib/api';
+import { api, Project, ClaudeSession } from '../../lib/api';
 import { useKeyboard } from '../../lib/keyboard';
 
 interface NewSessionModalProps {
@@ -13,6 +13,7 @@ interface NewSessionModalProps {
 export function NewSessionModal(props: NewSessionModalProps) {
   const navigate = useNavigate();
   const { isVisible: keyboardVisible, viewportHeight } = useKeyboard();
+  const [mode, setMode] = createSignal<'new' | 'import'>('new');
   const [projects, setProjects] = createSignal<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = createSignal(false);
   const [projectInput, setProjectInput] = createSignal('');
@@ -22,6 +23,11 @@ export function NewSessionModal(props: NewSessionModalProps) {
   const [prompt, setPrompt] = createSignal('');
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+
+  // Import mode state
+  const [claudeSessions, setClaudeSessions] = createSignal<ClaudeSession[]>([]);
+  const [importLoading, setImportLoading] = createSignal(false);
+  const [importingId, setImportingId] = createSignal<string | null>(null);
 
   // Find matching project by path or name
   const matchedProject = createMemo(() => {
@@ -72,12 +78,51 @@ export function NewSessionModal(props: NewSessionModalProps) {
   // Reset form when modal opens
   createEffect(() => {
     if (props.isOpen) {
+      setMode('new');
       setProjectInput('');
       setPrompt('');
       setError(null);
+      setClaudeSessions([]);
       fetchProjects();
     }
   });
+
+  // Fetch claude sessions when project changes (in import mode)
+  async function fetchClaudeSessions(projectPath: string) {
+    if (!projectPath) {
+      setClaudeSessions([]);
+      return;
+    }
+    setImportLoading(true);
+    try {
+      const response = await api.sessions.listClaudeSessions(projectPath);
+      // Filter to show only sessions not already in Clauset
+      setClaudeSessions(response.sessions.filter(s => !s.in_clauset));
+    } catch (e) {
+      console.error('Failed to fetch Claude sessions:', e);
+      setClaudeSessions([]);
+    } finally {
+      setImportLoading(false);
+    }
+  }
+
+  // Handle import session
+  async function handleImport(session: ClaudeSession) {
+    setImportingId(session.session_id);
+    setError(null);
+    try {
+      const response = await api.sessions.import({
+        claude_session_id: session.session_id,
+        project_path: session.project_path,
+      });
+      props.onClose();
+      navigate(`/session/${response.session_id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to import session');
+    } finally {
+      setImportingId(null);
+    }
+  }
 
   // Handle escape key
   createEffect(() => {
@@ -228,80 +273,134 @@ export function NewSessionModal(props: NewSessionModalProps) {
             "flex-direction": "column",
           }}
         >
-          {/* Header */}
+          {/* Header with Tabs */}
           <div
             style={{
               display: "flex",
-              "align-items": "center",
-              "justify-content": "space-between",
-              padding: "12px 16px",
+              "flex-direction": "column",
               "border-bottom": "1px solid var(--color-bg-overlay)",
               "flex-shrink": "0",
             }}
           >
-            <h2
-              class="text-text-primary text-mono"
+            {/* Title row */}
+            <div
               style={{
-                "font-size": "14px",
-                "font-weight": "600",
-                margin: "0",
-              }}
-            >
-              New Session
-            </h2>
-            <button
-              onClick={props.onClose}
-              class="text-text-muted hover:text-text-primary pressable"
-              style={{
-                width: "28px",
-                height: "28px",
                 display: "flex",
                 "align-items": "center",
-                "justify-content": "center",
-                "border-radius": "6px",
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                transition: "color 0.15s ease",
+                "justify-content": "space-between",
+                padding: "12px 16px 8px",
               }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
+              <h2
+                class="text-text-primary text-mono"
+                style={{
+                  "font-size": "14px",
+                  "font-weight": "600",
+                  margin: "0",
+                }}
+              >
+                {mode() === 'new' ? 'New Session' : 'Import Session'}
+              </h2>
+              <button
+                onClick={props.onClose}
+                class="text-text-muted hover:text-text-primary pressable"
+                style={{
+                  width: "28px",
+                  height: "28px",
+                  display: "flex",
+                  "align-items": "center",
+                  "justify-content": "center",
+                  "border-radius": "6px",
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  transition: "color 0.15s ease",
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div style={{ display: "flex", padding: "0 16px", gap: "4px" }}>
+              <button
+                onClick={() => setMode('new')}
+                class="text-mono"
+                style={{
+                  padding: "8px 12px",
+                  "font-size": "12px",
+                  "font-weight": mode() === 'new' ? "600" : "400",
+                  border: "none",
+                  background: mode() === 'new' ? "var(--color-bg-elevated)" : "transparent",
+                  color: mode() === 'new' ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                  "border-radius": "6px 6px 0 0",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                New
+              </button>
+              <button
+                onClick={() => {
+                  setMode('import');
+                  // Fetch claude sessions for current project
+                  const matched = matchedProject();
+                  if (matched) {
+                    fetchClaudeSessions(matched.path);
+                  }
+                }}
+                class="text-mono"
+                style={{
+                  padding: "8px 12px",
+                  "font-size": "12px",
+                  "font-weight": mode() === 'import' ? "600" : "400",
+                  border: "none",
+                  background: mode() === 'import' ? "var(--color-bg-elevated)" : "transparent",
+                  color: mode() === 'import' ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                  "border-radius": "6px 6px 0 0",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                Import from Terminal
+              </button>
+            </div>
           </div>
 
-          {/* Form - scrollable */}
-          <form
-            onSubmit={handleSubmit}
-            class="scrollable"
-            style={{
-              padding: "14px 16px",
-              "overflow-y": "auto",
-              flex: "1",
-              "-webkit-overflow-scrolling": "touch",
-            }}
-          >
-            <div style={{ display: "flex", "flex-direction": "column", gap: "12px" }}>
-              {/* Error message */}
-              <Show when={error()}>
-                <div
-                  class="text-mono"
-                  style={{
-                    padding: "8px 10px",
-                    "border-radius": "6px",
-                    border: "1px solid var(--color-accent)",
-                    background: "var(--color-accent-muted)",
-                    color: "var(--color-accent)",
-                    "font-size": "12px",
-                    "font-weight": "500",
-                  }}
-                >
-                  {error()}
-                </div>
-              </Show>
+          {/* New Session Form */}
+          <Show when={mode() === 'new'}>
+            <form
+              onSubmit={handleSubmit}
+              class="scrollable"
+              style={{
+                padding: "14px 16px",
+                "overflow-y": "auto",
+                flex: "1",
+                "-webkit-overflow-scrolling": "touch",
+              }}
+            >
+              <div style={{ display: "flex", "flex-direction": "column", gap: "12px" }}>
+                {/* Error message */}
+                <Show when={error()}>
+                  <div
+                    class="text-mono"
+                    style={{
+                      padding: "8px 10px",
+                      "border-radius": "6px",
+                      border: "1px solid var(--color-accent)",
+                      background: "var(--color-accent-muted)",
+                      color: "var(--color-accent)",
+                      "font-size": "12px",
+                      "font-weight": "500",
+                    }}
+                  >
+                    {error()}
+                  </div>
+                </Show>
 
-              {/* Project Selection */}
+                {/* Project Selection */}
               <div style={{ position: "relative" }}>
                 <label
                   class="text-label text-mono"
@@ -518,37 +617,275 @@ export function NewSessionModal(props: NewSessionModalProps) {
                   }}
                 />
               </div>
-            </div>
-          </form>
+              </div>
+            </form>
 
-          {/* Footer Actions */}
-          <div
-            style={{
-              display: "flex",
-              gap: "10px",
-              padding: "12px 16px",
-              "border-top": "1px solid var(--color-bg-overlay)",
-              background: "var(--color-bg-surface)",
-              "flex-shrink": "0",
-            }}
-          >
-            <Button
-              type="button"
-              variant="ghost"
-              style={{ flex: "1" }}
-              onClick={props.onClose}
+            {/* Footer Actions for New Mode */}
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                padding: "12px 16px",
+                "border-top": "1px solid var(--color-bg-overlay)",
+                background: "var(--color-bg-surface)",
+                "flex-shrink": "0",
+              }}
             >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              style={{ flex: "1" }}
-              disabled={loading() || !projectInput().trim()}
-              onClick={handleSubmit}
+              <Button
+                type="button"
+                variant="ghost"
+                style={{ flex: "1" }}
+                onClick={props.onClose}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                style={{ flex: "1" }}
+                disabled={loading() || !projectInput().trim()}
+                onClick={handleSubmit}
+              >
+                {loading() ? 'Creating...' : 'Create Session'}
+              </Button>
+            </div>
+          </Show>
+
+          {/* Import Mode Content */}
+          <Show when={mode() === 'import'}>
+            <div
+              class="scrollable"
+              style={{
+                padding: "14px 16px",
+                "overflow-y": "auto",
+                flex: "1",
+                "-webkit-overflow-scrolling": "touch",
+              }}
             >
-              {loading() ? 'Creating...' : 'Create Session'}
-            </Button>
-          </div>
+              {/* Error message */}
+              <Show when={error()}>
+                <div
+                  class="text-mono"
+                  style={{
+                    padding: "8px 10px",
+                    "border-radius": "6px",
+                    border: "1px solid var(--color-accent)",
+                    background: "var(--color-accent-muted)",
+                    color: "var(--color-accent)",
+                    "font-size": "12px",
+                    "font-weight": "500",
+                    "margin-bottom": "12px",
+                  }}
+                >
+                  {error()}
+                </div>
+              </Show>
+
+              {/* Project Selection for Import */}
+              <div style={{ "margin-bottom": "16px" }}>
+                <label
+                  class="text-label text-mono"
+                  style={{
+                    display: "block",
+                    "margin-bottom": "6px",
+                    "font-size": "11px",
+                  }}
+                >
+                  Select Project
+                </label>
+                <Show
+                  when={!projectsLoading()}
+                  fallback={
+                    <div
+                      class="text-text-muted"
+                      style={{
+                        display: "flex",
+                        "align-items": "center",
+                        gap: "10px",
+                        ...inputStyles,
+                      }}
+                    >
+                      <Spinner size="sm" />
+                      <span>Loading projects...</span>
+                    </div>
+                  }
+                >
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type="text"
+                      value={projectInput()}
+                      onInput={(e) => {
+                        setProjectInput(e.currentTarget.value);
+                        // Fetch sessions when project changes
+                        const matched = projects().find(
+                          p => p.name.toLowerCase() === e.currentTarget.value.toLowerCase()
+                        );
+                        if (matched) {
+                          fetchClaudeSessions(matched.path);
+                        }
+                      }}
+                      onFocus={() => setShowProjectDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowProjectDropdown(false), 150)}
+                      placeholder="Select a project..."
+                      class="modal-input placeholder:text-text-muted"
+                      style={inputStyles}
+                    />
+                    <Show when={showProjectDropdown() && filteredProjects().length > 0}>
+                      <div style={dropdownStyles}>
+                        <For each={filteredProjects()}>
+                          {(project) => (
+                            <div
+                              class="text-text-primary hover:bg-bg-elevated"
+                              style={dropdownItemStyles}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setProjectInput(project.name);
+                                setShowProjectDropdown(false);
+                                fetchClaudeSessions(project.path);
+                              }}
+                            >
+                              {project.name}
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                </Show>
+              </div>
+
+              {/* Session List */}
+              <Show when={importLoading()}>
+                <div
+                  style={{
+                    display: "flex",
+                    "align-items": "center",
+                    "justify-content": "center",
+                    padding: "32px",
+                  }}
+                >
+                  <Spinner size="md" />
+                </div>
+              </Show>
+
+              <Show when={!importLoading() && claudeSessions().length === 0 && matchedProject()}>
+                <div
+                  style={{
+                    "text-align": "center",
+                    padding: "32px 16px",
+                    color: "var(--color-text-muted)",
+                  }}
+                >
+                  <p class="text-mono" style={{ "font-size": "13px", margin: "0" }}>
+                    No terminal sessions found
+                  </p>
+                  <p style={{ "font-size": "12px", margin: "8px 0 0", "font-family": "var(--font-serif)" }}>
+                    All Claude sessions for this project are already in Clauset
+                  </p>
+                </div>
+              </Show>
+
+              <Show when={!importLoading() && !matchedProject()}>
+                <div
+                  style={{
+                    "text-align": "center",
+                    padding: "32px 16px",
+                    color: "var(--color-text-muted)",
+                  }}
+                >
+                  <p class="text-mono" style={{ "font-size": "13px", margin: "0" }}>
+                    Select a project above
+                  </p>
+                  <p style={{ "font-size": "12px", margin: "8px 0 0", "font-family": "var(--font-serif)" }}>
+                    Sessions from the terminal will appear here
+                  </p>
+                </div>
+              </Show>
+
+              <Show when={!importLoading() && claudeSessions().length > 0}>
+                <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+                  <For each={claudeSessions()}>
+                    {(session) => (
+                      <div
+                        style={{
+                          padding: "12px",
+                          "border-radius": "8px",
+                          border: "1px solid var(--color-bg-overlay)",
+                          background: "var(--color-bg-elevated)",
+                        }}
+                      >
+                        <div style={{ display: "flex", "justify-content": "space-between", "align-items": "flex-start" }}>
+                          <div style={{ flex: "1", "min-width": "0" }}>
+                            <p
+                              class="text-mono"
+                              style={{
+                                "font-size": "13px",
+                                "font-weight": "500",
+                                margin: "0 0 4px",
+                                color: "var(--color-text-primary)",
+                                overflow: "hidden",
+                                "text-overflow": "ellipsis",
+                                "white-space": "nowrap",
+                              }}
+                            >
+                              {session.preview || 'Untitled session'}
+                            </p>
+                            <p
+                              style={{
+                                "font-size": "11px",
+                                color: "var(--color-text-muted)",
+                                margin: "0",
+                              }}
+                            >
+                              {new Date(session.timestamp).toLocaleString()}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleImport(session)}
+                            disabled={importingId() === session.session_id}
+                            style={{
+                              padding: "6px 12px",
+                              "font-size": "12px",
+                              "font-weight": "500",
+                              "border-radius": "6px",
+                              border: "none",
+                              background: "var(--color-accent)",
+                              color: "#ffffff",
+                              cursor: importingId() === session.session_id ? "not-allowed" : "pointer",
+                              opacity: importingId() === session.session_id ? "0.7" : "1",
+                              "white-space": "nowrap",
+                            }}
+                          >
+                            {importingId() === session.session_id ? 'Importing...' : 'Import'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
+
+            {/* Footer for Import Mode */}
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                padding: "12px 16px",
+                "border-top": "1px solid var(--color-bg-overlay)",
+                background: "var(--color-bg-surface)",
+                "flex-shrink": "0",
+              }}
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                style={{ flex: "1" }}
+                onClick={props.onClose}
+              >
+                Cancel
+              </Button>
+            </div>
+          </Show>
         </div>
       </div>
     </Show>

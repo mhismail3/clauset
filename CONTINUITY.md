@@ -1,34 +1,56 @@
 # Continuity Ledger
 
 ## Goal
-Implement chat mode that displays Claude's messages as chat bubbles while maintaining 1-to-1 mapping with terminal sessions.
+Session persistence across backend restarts using ~/.claude as source of truth - **COMPLETED**
 
 Success criteria:
-- User messages display as chat bubbles (from UserPromptSubmit hook)
-- Claude's responses display as chat bubbles (parsed from terminal output)
-- Tool calls display inline (collapsible, from PreToolUse/PostToolUse hooks)
-- Real-time streaming as Claude types
-- Toggle between term/chat views on same session
-- No regressions to terminal mode
-- NO use of `claude -p` or API/SDK - always terminal sessions
+- Sessions survive backend restarts/redeploys
+- Resume uses Claude's real session ID
+- Import terminal sessions into Clauset
+- Terminal history visible after resume
+- Chat history visible after resume
+- Clear error when session cannot be resumed
 
 ## Constraints/Assumptions
-- Terminal PTY sessions remain source of truth (no API/SDK)
-- Existing hooks provide: UserPromptSubmit, PreToolUse, PostToolUse, Stop
-- Chat mode is a view layer over terminal data
-- Hybrid extraction: real-time terminal parsing + transcript verification
-- Collapsible tool calls in chat UI
+- Claude stores session data in ~/.claude/history.jsonl and ~/.claude/projects/
+- Clauset must use Claude's real session ID for resume to work
+- Terminal buffer must be persisted for seamless resume experience
+- Chat history already persists to SQLite (only terminal buffer was missing)
 
 ## Key Decisions
-- New `ChatMessageProcessor` in clauset-core for message extraction
-- New `chat.rs` types module for ChatMessage, ChatToolCall, MessageRole
-- State machine tracks: Idle → BuildingAssistant → ToolInProgress → Idle
-- WebSocket broadcasts ChatMessage events (separate from terminal output)
-- Transcript file used for verification on Stop hook
+- Use Uuid::nil() as sentinel for "no session ID captured yet"
+- Save terminal buffer on session stop (not periodically, to reduce I/O)
+- Parse ~/.claude/history.jsonl to list sessions for import
+- Use resume_session_id option in create_session for imported sessions
 
 ## State
 
-### Done
+### Done (Session Persistence - December 2024)
+- Phase 1: Capture Claude's real session ID from System init event
+  - Added update_claude_session_id() in db.rs
+  - Added set_claude_session_id() in session.rs
+  - Capture session ID in websocket.rs on System init event
+  - Use Uuid::nil() initially in session creation
+- Phase 2: Read sessions from ~/.claude
+  - Created claude_sessions.rs with ClaudeSessionReader
+  - Added /api/claude-sessions endpoint
+  - Added /api/sessions/import endpoint
+- Phase 3: Validate & Handle Resume Errors
+  - Added SessionNotResumable error type
+  - Validate claude_session_id before resume
+- Phase 4: Terminal buffer persistence
+  - Added terminal_buffers table
+  - Save buffer on session stop (persist_session_activity)
+  - Load buffer on resume
+- Phase 5: Frontend Import UI
+  - Added import tab in NewSessionModal
+  - List Claude sessions from ~/.claude
+  - Import sessions with one click
+- Phase 5: Better resume error handling
+  - Specific error messages for non-resumable sessions
+  - Suggest starting new session when resume fails
+
+### Previous Implementation Work
 - Phase 1: Database Schema & Core Infrastructure
   - Created `clauset_types::interaction` module with all type definitions
   - Created `clauset_core::interaction_store` module with schema, CRUD, cleanup
@@ -140,6 +162,29 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
+- Testing Terminal mode session ID capture fix
+
+### Terminal Mode Session ID Capture (Just Completed)
+- **Problem**: Session ID capture only worked in StreamJson mode (via `ProcessEvent::Claude` events in websocket.rs)
+- **Root cause**: Terminal mode doesn't emit JSON events - only raw PTY output. The existing code in `websocket.rs` listened for `ProcessEvent::Claude(ClaudeEvent::System)` events which never arrive in Terminal mode.
+- **Fix**: Capture Claude's session ID from hook events (SessionStart, UserPromptSubmit, etc.) - every hook includes `claude_session_id`
+- Files changed:
+  - `crates/clauset-server/src/routes/hooks.rs` - Added `extract_claude_session_id()` helper; capture session ID on first hook
+  - `crates/clauset-core/src/db.rs` - Updated `update_claude_session_id()` to only update if current value is nil (idempotent)
+
+### Previous
+- Chat line break preservation fix completed
+
+### Chat Line Break Preservation Fix
+- **Problem**: Chat view collapsed all line breaks - text displayed as single paragraph even when terminal showed proper formatting
+- **Root cause**: `parseTextBlocks()` in MarkdownContent skipped empty lines (`if (line.trim())`) and rendered each line as separate `<span>` elements
+- **Fix**:
+  1. Accumulate consecutive text lines into paragraphs, flush on empty line
+  2. Added new `paragraph` block type with `white-space: pre-wrap`
+  3. Use `<p>` tags with proper margins for paragraph separation
+- File changed: `frontend/src/components/chat/MessageBubble.tsx`
+
+### Previous
 - Initial prompt fix completed
 
 ### Initial Prompt Fix (Just Completed)

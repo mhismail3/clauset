@@ -113,7 +113,8 @@ impl SessionManager {
         }
 
         let session_id = Uuid::new_v4();
-        let claude_session_id = opts.resume_session_id.unwrap_or_else(Uuid::new_v4);
+        // Use provided resume ID or nil (will be populated when Claude sends init event)
+        let claude_session_id = opts.resume_session_id.unwrap_or(Uuid::nil());
         let now = chrono::Utc::now();
 
         let session = Session {
@@ -187,6 +188,9 @@ impl SessionManager {
         // Initialize activity buffer with "Ready" state and broadcast
         self.initialize_session_activity(session_id).await;
 
+        // Note: Claude's session ID is captured from hook events (SessionStart, UserPromptSubmit, etc.)
+        // See hooks.rs - extract_claude_session_id() captures it on first hook
+
         info!(target: "clauset::session", "Session {} started successfully", session_id);
         Ok(())
     }
@@ -198,8 +202,31 @@ impl SessionManager {
             .get(session_id)?
             .ok_or(ClausetError::SessionNotFound(session_id))?;
 
+        // Check if we have a valid Claude session ID (not nil)
+        if session.claude_session_id.is_nil() {
+            warn!(
+                target: "clauset::session",
+                "Cannot resume session {} - Claude session ID not captured",
+                session_id
+            );
+            return Err(ClausetError::SessionNotResumable(session_id));
+        }
+
         // Update status
         self.db.update_status(session_id, SessionStatus::Starting)?;
+
+        // Load persisted terminal buffer before spawning so it's ready for clients
+        if let Ok(Some(buffer_data)) = self.db.get_terminal_buffer(session_id) {
+            info!(
+                target: "clauset::session",
+                "Restoring terminal buffer for session {}: {} bytes",
+                session_id,
+                buffer_data.data.len()
+            );
+            self.buffers
+                .restore_buffer(session_id, buffer_data.data, buffer_data.start_seq, buffer_data.end_seq)
+                .await;
+        }
 
         // Spawn process in resume mode
         self.process_manager
@@ -225,6 +252,7 @@ impl SessionManager {
         self.db.update_status(session_id, SessionStatus::Active)?;
 
         // Initialize activity buffer with "Ready" state and broadcast
+        // Note: If we restored a buffer, initialize_session won't clear it
         self.initialize_session_activity(session_id).await;
 
         Ok(())
@@ -318,8 +346,16 @@ impl SessionManager {
         self.db.update_status(session_id, status)
     }
 
+    /// Store Claude's real session ID (captured from System init event).
+    /// This is the ID that Claude uses internally and is required for resume.
+    pub fn set_claude_session_id(&self, session_id: Uuid, claude_id: &str) -> Result<()> {
+        info!(target: "clauset::session", "Storing Claude session ID {} for session {}", claude_id, session_id);
+        self.db.update_claude_session_id(session_id, claude_id)
+    }
+
     /// Persist session activity data to database (call before stopping a session).
     pub async fn persist_session_activity(&self, session_id: Uuid) {
+        // Persist activity (current step, recent actions)
         if let Some(activity) = self.buffers.get_activity(session_id).await {
             let recent_actions: Vec<clauset_types::RecentAction> = activity
                 .recent_actions
@@ -340,6 +376,20 @@ impl SessionManager {
                 warn!(target: "clauset::session", "Failed to persist session {} activity: {}", session_id, e);
             } else {
                 debug!(target: "clauset::session", "Persisted {} recent actions for session {}", recent_actions.len(), session_id);
+            }
+        }
+
+        // Persist terminal buffer for resume
+        if let Some((data, start_seq, end_seq)) = self.buffers.get_buffer_for_persistence(session_id).await {
+            if let Err(e) = self.db.save_terminal_buffer(session_id, &data, start_seq, end_seq) {
+                warn!(target: "clauset::session", "Failed to persist session {} terminal buffer: {}", session_id, e);
+            } else {
+                info!(
+                    target: "clauset::session",
+                    "Persisted terminal buffer for session {}: {} bytes",
+                    session_id,
+                    data.len()
+                );
             }
         }
     }

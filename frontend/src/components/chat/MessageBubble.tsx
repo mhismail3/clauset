@@ -803,6 +803,15 @@ function MarkdownContent(props: { content: string }) {
   function parseTextBlocks(text: string, result: Array<{ type: string; content: string; level?: number; items?: string[] }>) {
     const lines = text.split('\n');
     let i = 0;
+    let paragraphLines: string[] = [];
+
+    // Flush accumulated paragraph lines as a single paragraph block
+    const flushParagraph = () => {
+      if (paragraphLines.length > 0) {
+        result.push({ type: 'paragraph', content: paragraphLines.join('\n') });
+        paragraphLines = [];
+      }
+    };
 
     while (i < lines.length) {
       const line = lines[i];
@@ -810,6 +819,7 @@ function MarkdownContent(props: { content: string }) {
       // Check for headers
       const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
       if (headerMatch) {
+        flushParagraph();
         result.push({ type: 'header', level: headerMatch[1].length, content: headerMatch[2] });
         i++;
         continue;
@@ -817,6 +827,7 @@ function MarkdownContent(props: { content: string }) {
 
       // Check for unordered list
       if (line.match(/^[-*]\s+/)) {
+        flushParagraph();
         const items: string[] = [];
         while (i < lines.length && lines[i].match(/^[-*]\s+/)) {
           items.push(lines[i].replace(/^[-*]\s+/, ''));
@@ -828,6 +839,7 @@ function MarkdownContent(props: { content: string }) {
 
       // Check for ordered list
       if (line.match(/^\d+\.\s+/)) {
+        flushParagraph();
         const items: string[] = [];
         while (i < lines.length && lines[i].match(/^\d+\.\s+/)) {
           items.push(lines[i].replace(/^\d+\.\s+/, ''));
@@ -837,12 +849,20 @@ function MarkdownContent(props: { content: string }) {
         continue;
       }
 
-      // Regular text (paragraph)
-      if (line.trim()) {
-        result.push({ type: 'text', content: line });
+      // Empty line ends current paragraph
+      if (!line.trim()) {
+        flushParagraph();
+        i++;
+        continue;
       }
+
+      // Accumulate text into current paragraph
+      paragraphLines.push(line);
       i++;
     }
+
+    // Flush any remaining paragraph
+    flushParagraph();
   }
 
   const headerStyles = (level: number) => {
@@ -909,9 +929,15 @@ function MarkdownContent(props: { content: string }) {
                   </For>
                 </ol>
               );
+            case 'paragraph':
+              return (
+                <p style={{ margin: '8px 0', "white-space": 'pre-wrap' }}>
+                  <InlineMarkdown text={block.content} />
+                </p>
+              );
             default:
               return (
-                <span style={{ "font-family": 'inherit' }}>
+                <span style={{ "font-family": 'inherit', "white-space": 'pre-wrap' }}>
                   <InlineMarkdown text={block.content} />
                 </span>
               );

@@ -689,6 +689,62 @@ impl SessionBuffers {
         buffer.activity.clone()
     }
 
+    /// Restore a session's buffer from persisted data.
+    /// Used when resuming a session to restore terminal history.
+    /// Returns true if buffer was restored, false if no data provided.
+    pub async fn restore_buffer(
+        &self,
+        session_id: Uuid,
+        data: Vec<u8>,
+        start_seq: u64,
+        end_seq: u64,
+    ) -> bool {
+        if data.is_empty() {
+            return false;
+        }
+
+        tracing::info!(
+            target: "clauset::session",
+            "Restoring buffer for session {}: {} bytes, seq {}..{}",
+            session_id,
+            data.len(),
+            start_seq,
+            end_seq
+        );
+
+        let mut buffers = self.buffers.write().await;
+        let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
+
+        // Clear existing buffer and restore
+        buffer.sequenced.clear();
+
+        // Push the entire persisted data as a single chunk
+        // The sequence numbers will be reset to start from the current next_seq
+        buffer.sequenced.push(data);
+
+        // Set activity to Ready state (will be updated once Claude responds)
+        buffer.activity.current_step = Some("Ready".to_string());
+        buffer.activity.current_activity = "Ready".to_string();
+        buffer.activity.is_busy = false;
+        buffer.activity.last_update = std::time::Instant::now();
+
+        true
+    }
+
+    /// Get buffer data for persistence.
+    /// Returns (data, start_seq, end_seq) or None if buffer doesn't exist or is empty.
+    pub async fn get_buffer_for_persistence(&self, session_id: Uuid) -> Option<(Vec<u8>, u64, u64)> {
+        let buffers = self.buffers.read().await;
+        buffers.get(&session_id).and_then(|b| {
+            let (start, end, data) = b.get_all();
+            if data.is_empty() {
+                None
+            } else {
+                Some((data, start, end))
+            }
+        })
+    }
+
     /// Update activity from a hook event. This is the authoritative source for activity state.
     /// Returns the updated activity if successful.
     pub async fn update_from_hook(
