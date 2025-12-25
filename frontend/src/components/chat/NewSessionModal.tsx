@@ -527,7 +527,6 @@ export function NewSessionModal(props: NewSessionModalProps) {
               display: "flex",
               gap: "10px",
               padding: "12px 16px",
-              "padding-bottom": "max(12px, env(safe-area-inset-bottom))",
               "border-top": "1px solid var(--color-bg-overlay)",
               background: "var(--color-bg-surface)",
               "flex-shrink": "0",
