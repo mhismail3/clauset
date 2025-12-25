@@ -140,9 +140,20 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
+- Terminal width fix for chat-default mode completed
+
+### Terminal Width Fix for Chat-Default Mode (Just Completed)
+- **Problem**: When chat mode is the default tab, terminal displays at ~40 cols instead of full width
+- **Root cause**: Terminal mounts with `display:none` (chat is visible), so `clientWidth=0` during init, falling back to iPhone defaults (40 cols)
+- **Fix**: Added `isVisible` prop to TerminalView that triggers `doFitAndResize()` via double RAF when visibility changes to true
+- Files changed:
+  - `frontend/src/components/terminal/TerminalView.tsx` - Added `isVisible` prop + createEffect
+  - `frontend/src/pages/Session.tsx` - Pass `isVisible={currentView() === 'terminal'}`, removed redundant `requestResync()` effect
+
+### Previous
 - PWA viewport overscroll fix implemented
 
-### PWA Viewport Overscroll Fix (Just Completed)
+### PWA Viewport Overscroll Fix
 - Created `frontend/src/lib/preventOverscroll.ts` - JavaScript hook to prevent iOS PWA rubber-banding
 - Added `usePreventOverscroll()` call in `App.tsx`
 - Intercepts `touchmove` events and prevents default when no legitimate scrollable container exists

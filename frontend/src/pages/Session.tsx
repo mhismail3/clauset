@@ -572,17 +572,6 @@ export default function SessionPage() {
     wsManager?.disconnect();
   });
 
-  // Trigger terminal resize when switching to terminal view
-  // This ensures proper dimensions after the container becomes visible
-  createEffect(() => {
-    if (currentView() === 'terminal' && terminalDimensions && wsManager && wsState() === 'connected') {
-      // Small delay to ensure display:flex has been applied and layout is computed
-      requestAnimationFrame(() => {
-        wsManager?.requestResync();
-      });
-    }
-  });
-
   const messages = () => getMessagesForSession(params.id);
   const streamingContent = () => {
     const id = currentStreamingId();
@@ -862,6 +851,7 @@ export default function SessionPage() {
             onClose={() => setCurrentView('chat')}
             onReady={registerTerminalWrite}
             isConnected={wsState() === 'connected'}
+            isVisible={currentView() === 'terminal'}
           />
         </div>
 

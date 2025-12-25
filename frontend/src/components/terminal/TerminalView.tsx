@@ -21,6 +21,7 @@ interface TerminalViewProps {
     deviceHint: 'iphone' | 'ipad' | 'desktop';
   }) => void;
   isConnected?: boolean;
+  isVisible?: boolean;
 }
 
 // Touch scroll physics configuration
@@ -662,6 +663,19 @@ export function TerminalView(props: TerminalViewProps) {
       // Send resize with a delay to ensure connection is fully ready
       // A single 300ms delay is sufficient - the server will receive and apply it
       setTimeout(doFitAndResize, 300);
+    }
+  });
+
+  // Re-fit when terminal becomes visible (e.g., switching from chat tab)
+  // This fixes the issue where terminal mounts with display:none and gets wrong dimensions
+  createEffect(() => {
+    if (props.isVisible) {
+      // Use double RAF to ensure layout is fully computed after display:none → flex
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          doFitAndResize();
+        });
+      });
     }
   });
 
