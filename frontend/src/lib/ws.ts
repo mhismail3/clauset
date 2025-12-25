@@ -153,9 +153,14 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     lastAckedSeq: 0,
     ackTimer: null,
     gapRecoveryTimer: null,
-    terminalCols: 80,
-    terminalRows: 24,
+    // Start with 0x0 to indicate dimensions are unknown
+    // Initial sync will be deferred until dimensions are set
+    terminalCols: 0,
+    terminalRows: 0,
   };
+
+  // Track if initial sync has been sent (deferred until dimensions known)
+  let initialSyncSent = false;
 
   // Heartbeat state
   const heartbeatState: HeartbeatState = {
@@ -317,7 +322,15 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
         startHeartbeat();
 
         // Send SyncRequest to get current state and any missed chunks
-        sendSyncRequest();
+        // IMPORTANT: Only send if dimensions are known (non-zero)
+        // If dimensions are 0x0, defer until setTerminalDimensions is called
+        // This prevents creating PTY with wrong dimensions when terminal is hidden
+        if (streamState.terminalCols > 0 && streamState.terminalRows > 0) {
+          sendSyncRequest();
+          initialSyncSent = true;
+        } else {
+          console.log('Deferring initial sync until terminal dimensions are known');
+        }
 
         // Flush queued messages
         if (messageQueue.length > 0) {
@@ -606,6 +619,7 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     stopHeartbeat();
     clearStreamTimers();
     messageQueue = [];
+    initialSyncSent = false; // Reset so next connect can send initial sync
     ws?.close(1000, 'Client disconnect');
     ws = null;
     setState('initial');
@@ -634,6 +648,14 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
   function setTerminalDimensions(cols: number, rows: number) {
     streamState.terminalCols = cols;
     streamState.terminalRows = rows;
+
+    // If this is the first time dimensions are set and we're connected,
+    // send the deferred initial sync request now
+    if (!initialSyncSent && ws?.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
+      console.log(`Sending deferred initial sync with dimensions ${cols}x${rows}`);
+      sendSyncRequest();
+      initialSyncSent = true;
+    }
   }
 
   function getStreamState() {

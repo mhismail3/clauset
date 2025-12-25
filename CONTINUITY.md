@@ -140,15 +140,34 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
+- Initial prompt fix completed
+
+### Initial Prompt Fix (Just Completed)
+- **Problem**: Initial prompt in "Create Session" modal shows in terminal but doesn't execute (Enter key not triggering submit)
+- **Root cause**: Initial prompt used different code path than chat messages - wrote directly to PTY in spawn_terminal() reader thread
+- **Fix**: Route initial prompt through same code path as chat messages (send_input())
+- Files changed:
+  - `crates/clauset-core/src/process.rs` - Removed prompt field from SpawnOptions, removed direct PTY write in spawn_terminal()
+  - `crates/clauset-core/src/session.rs` - Added send_input() call after session starts with 1s delay for Claude TUI to be ready
+
+### Previous
 - Terminal width fix for chat-default mode completed
 
-### Terminal Width Fix for Chat-Default Mode (Just Completed)
-- **Problem**: When chat mode is the default tab, terminal displays at ~40 cols instead of full width
-- **Root cause**: Terminal mounts with `display:none` (chat is visible), so `clientWidth=0` during init, falling back to iPhone defaults (40 cols)
-- **Fix**: Added `isVisible` prop to TerminalView that triggers `doFitAndResize()` via double RAF when visibility changes to true
+### Terminal Width Fix for Chat-Default Mode (Comprehensive Fix)
+- **Problem**: When chat mode is the default tab, terminal displays at ~20-40 cols instead of full width
+- **Root cause**: Multiple issues:
+  1. `fitAddon.proposeDimensions()` returns minimum 20x5 for hidden containers
+  2. These wrong dimensions were sent to server immediately on WebSocket connect
+  3. PTY created with wrong dimensions, Claude Code renders welcome at that width
+- **Fix**: Three-part solution:
+  1. `terminalSizing.ts` - Don't trust fitAddon if container is hidden (clientWidth=0)
+  2. `TerminalView.tsx` - Don't send dimensions to server if container is hidden
+  3. `ws.ts` - Defer initial sync request until dimensions are known (non-zero)
 - Files changed:
-  - `frontend/src/components/terminal/TerminalView.tsx` - Added `isVisible` prop + createEffect
-  - `frontend/src/pages/Session.tsx` - Pass `isVisible={currentView() === 'terminal'}`, removed redundant `requestResync()` effect
+  - `frontend/src/lib/terminalSizing.ts` - Check container visibility before using fitAddon
+  - `frontend/src/components/terminal/TerminalView.tsx` - Check visibility before onResize, added isVisible prop/effect
+  - `frontend/src/lib/ws.ts` - Defer initial sync until dimensions set, default dims to 0x0
+  - `frontend/src/pages/Session.tsx` - Pass isVisible prop
 
 ### Previous
 - PWA viewport overscroll fix implemented

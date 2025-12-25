@@ -41,24 +41,32 @@ const DESKTOP_SAFE_DEFAULTS = { cols: 80, rows: 24 };
  */
 export function calculateDimensions(context: DimensionContext): TerminalDimensions {
   // Stage 1: FitAddon (highest confidence if font loaded correctly)
+  // IMPORTANT: Only trust fitAddon if container is actually visible (has dimensions)
+  // fitAddon.proposeDimensions() returns minimum values (20x5) for hidden containers
   if (context.fontLoaded && context.fitAddon && context.container) {
-    try {
-      const proposed = context.fitAddon.proposeDimensions();
-      if (proposed && proposed.cols && proposed.rows) {
-        const cols = clamp(proposed.cols, MIN_COLS, MAX_COLS);
-        const rows = clamp(proposed.rows, MIN_ROWS, MAX_ROWS);
+    const containerWidth = context.container.clientWidth;
+    const containerHeight = context.container.clientHeight;
 
-        return {
-          cols,
-          rows,
-          confidence: 'high',
-          source: 'fitaddon',
-          cellWidth: context.charWidth ?? undefined,
-          cellHeight: context.charHeight ?? undefined,
-        };
+    // Don't trust fitAddon if container is hidden (display:none makes clientWidth=0)
+    if (containerWidth > 0 && containerHeight > 0) {
+      try {
+        const proposed = context.fitAddon.proposeDimensions();
+        if (proposed && proposed.cols && proposed.rows) {
+          const cols = clamp(proposed.cols, MIN_COLS, MAX_COLS);
+          const rows = clamp(proposed.rows, MIN_ROWS, MAX_ROWS);
+
+          return {
+            cols,
+            rows,
+            confidence: 'high',
+            source: 'fitaddon',
+            cellWidth: context.charWidth ?? undefined,
+            cellHeight: context.charHeight ?? undefined,
+          };
+        }
+      } catch (e) {
+        console.warn('FitAddon calculation failed:', e);
       }
-    } catch (e) {
-      console.warn('FitAddon calculation failed:', e);
     }
   }
 

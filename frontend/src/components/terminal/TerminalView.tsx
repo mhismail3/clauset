@@ -612,7 +612,7 @@ export function TerminalView(props: TerminalViewProps) {
       console.log(`Dimensions calculated: ${dims.cols}x${dims.rows}, ` +
         `confidence=${dims.confidence}, source=${dims.source}`);
 
-      // Apply dimensions to terminal
+      // Apply dimensions to terminal (local only)
       if (terminal && (dims.cols !== terminal.cols || dims.rows !== terminal.rows)) {
         terminal.resize(dims.cols, dims.rows);
       }
@@ -620,19 +620,29 @@ export function TerminalView(props: TerminalViewProps) {
       setDimensions({ cols: dims.cols, rows: dims.rows });
 
       // Stage 3: Negotiate dimensions with server (if callback provided)
-      if (props.onNegotiateDimensions) {
-        props.onNegotiateDimensions({
-          cols: dims.cols,
-          rows: dims.rows,
-          confidence: dims.confidence,
-          source: dims.source,
-          cellWidth: dims.cellWidth,
-          fontLoaded,
-          deviceHint: getDeviceHint(),
-        });
+      // IMPORTANT: Only send dimensions to server if container is visible
+      // If hidden, the isVisible createEffect will send correct dimensions later
+      const containerWidth = containerRef?.clientWidth ?? 0;
+      const containerHeight = containerRef?.clientHeight ?? 0;
+      const isContainerVisible = containerWidth > 0 && containerHeight > 0;
+
+      if (isContainerVisible) {
+        if (props.onNegotiateDimensions) {
+          props.onNegotiateDimensions({
+            cols: dims.cols,
+            rows: dims.rows,
+            confidence: dims.confidence,
+            source: dims.source,
+            cellWidth: dims.cellWidth,
+            fontLoaded,
+            deviceHint: getDeviceHint(),
+          });
+        } else {
+          // Fall back to simple resize callback
+          props.onResize(dims.cols, dims.rows);
+        }
       } else {
-        // Fall back to simple resize callback
-        props.onResize(dims.cols, dims.rows);
+        console.log('Container hidden during init, deferring dimension sync until visible');
       }
 
       // NOW signal that we're ready to receive data
