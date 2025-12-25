@@ -162,9 +162,22 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
-- Testing Terminal mode session ID capture fix
+- Import from terminal now properly loads chat history
 
-### Terminal Mode Session ID Capture (Just Completed)
+### Import Session Enhancement (Just Completed)
+- **Problem**: Import from terminal created empty session shell - no chat history, status "Created" instead of "Stopped"
+- **Fix**:
+  1. Added `read_transcript()` method to `ClaudeSessionReader` to parse Claude's JSONL transcripts
+  2. Updated import endpoint to read transcript and store messages in chat_messages table
+  3. Set imported session status to "Stopped" (ready to resume)
+- Files changed:
+  - `crates/clauset-core/src/claude_sessions.rs` - Added `TranscriptMessage` type and `read_transcript()` method
+  - `crates/clauset-server/src/routes/sessions.rs` - Enhanced `import_session()` to import chat history
+
+### Previous
+- Terminal mode session ID capture fix completed
+
+### Terminal Mode Session ID Capture
 - **Problem**: Session ID capture only worked in StreamJson mode (via `ProcessEvent::Claude` events in websocket.rs)
 - **Root cause**: Terminal mode doesn't emit JSON events - only raw PTY output. The existing code in `websocket.rs` listened for `ProcessEvent::Claude(ClaudeEvent::System)` events which never arrive in Terminal mode.
 - **Fix**: Capture Claude's session ID from hook events (SessionStart, UserPromptSubmit, etc.) - every hook includes `claude_session_id`

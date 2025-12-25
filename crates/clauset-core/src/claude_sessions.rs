@@ -253,6 +253,149 @@ impl Default for ClaudeSessionReader {
     }
 }
 
+/// A message extracted from Claude's transcript.
+#[derive(Debug, Clone)]
+pub struct TranscriptMessage {
+    /// "user" or "assistant"
+    pub role: String,
+    /// The text content of the message
+    pub content: String,
+    /// Timestamp of the message
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Transcript entry types from Claude's JSONL format.
+#[derive(Debug, Deserialize)]
+struct TranscriptEntry {
+    #[serde(rename = "type")]
+    entry_type: String,
+    message: Option<TranscriptMessage_>,
+    timestamp: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TranscriptMessage_ {
+    role: Option<String>,
+    content: serde_json::Value,
+}
+
+impl ClaudeSessionReader {
+    /// Read messages from a Claude transcript file.
+    /// Returns user and assistant messages in chronological order.
+    pub fn read_transcript(&self, session_id: &str, project_path: &Path) -> Result<Vec<TranscriptMessage>> {
+        let transcript_path = self.get_transcript_path(session_id, project_path);
+
+        if !transcript_path.exists() {
+            debug!(
+                target: "clauset::claude_sessions",
+                "No transcript found at {:?}",
+                transcript_path
+            );
+            return Ok(Vec::new());
+        }
+
+        let file = File::open(&transcript_path)?;
+        let reader = BufReader::new(file);
+
+        let mut messages: Vec<TranscriptMessage> = Vec::new();
+
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+
+            let entry: TranscriptEntry = match serde_json::from_str(&line) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            // Only process user and assistant messages
+            if entry.entry_type != "user" && entry.entry_type != "assistant" {
+                continue;
+            }
+
+            let message = match entry.message {
+                Some(m) => m,
+                None => continue,
+            };
+
+            let role = message.role.unwrap_or_else(|| entry.entry_type.clone());
+
+            // Extract text content from the message
+            let content = extract_text_content(&message.content);
+            if content.is_empty() {
+                continue;
+            }
+
+            // Parse timestamp
+            let timestamp = entry
+                .timestamp
+                .and_then(|ts| DateTime::parse_from_rfc3339(&ts).ok())
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(Utc::now);
+
+            messages.push(TranscriptMessage {
+                role,
+                content,
+                timestamp,
+            });
+        }
+
+        debug!(
+            target: "clauset::claude_sessions",
+            "Read {} messages from transcript for session {}",
+            messages.len(),
+            session_id
+        );
+
+        Ok(messages)
+    }
+
+    /// Get the path to a transcript file.
+    fn get_transcript_path(&self, session_id: &str, project_path: &Path) -> PathBuf {
+        // Encode project path (replace / with -)
+        let encoded_path = project_path
+            .to_string_lossy()
+            .replace('/', "-");
+
+        self.claude_dir
+            .join("projects")
+            .join(encoded_path)
+            .join(format!("{}.jsonl", session_id))
+    }
+}
+
+/// Extract text content from a message content value.
+/// Handles both string content and array of content blocks.
+fn extract_text_content(content: &serde_json::Value) -> String {
+    match content {
+        // Simple string content
+        serde_json::Value::String(s) => s.clone(),
+
+        // Array of content blocks (Claude's format)
+        serde_json::Value::Array(blocks) => {
+            let mut text_parts: Vec<String> = Vec::new();
+
+            for block in blocks {
+                // Check for text blocks
+                if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
+                    if block_type == "text" {
+                        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                            text_parts.push(text.to_string());
+                        }
+                    }
+                    // Skip tool_use, tool_result, thinking blocks
+                }
+            }
+
+            text_parts.join("\n\n")
+        }
+
+        _ => String::new(),
+    }
+}
+
 /// Truncate preview text to a reasonable length.
 fn truncate_preview(s: &str) -> String {
     const MAX_LEN: usize = 100;
@@ -271,5 +414,21 @@ mod tests {
     fn test_reader_creation() {
         let reader = ClaudeSessionReader::new();
         assert!(reader.claude_dir.ends_with(".claude"));
+    }
+
+    #[test]
+    fn test_extract_text_content_string() {
+        let content = serde_json::json!("Hello world");
+        assert_eq!(extract_text_content(&content), "Hello world");
+    }
+
+    #[test]
+    fn test_extract_text_content_array() {
+        let content = serde_json::json!([
+            {"type": "text", "text": "First part"},
+            {"type": "tool_use", "name": "Read"},
+            {"type": "text", "text": "Second part"}
+        ]);
+        assert_eq!(extract_text_content(&content), "First part\n\nSecond part");
     }
 }

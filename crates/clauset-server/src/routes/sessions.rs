@@ -7,11 +7,11 @@ use axum::{
     Json,
 };
 use clauset_core::{ClaudeSessionReader, CreateSessionOptions};
-use clauset_types::{SessionMode, SessionSummary};
+use clauset_types::{SessionMode, SessionStatus, SessionSummary};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -289,7 +289,8 @@ pub struct ImportSessionResponse {
 }
 
 /// Import a session from ~/.claude into Clauset.
-/// Creates a new Clauset session that references the existing Claude session.
+/// Creates a new Clauset session that references the existing Claude session,
+/// imports the chat history from the transcript, and sets status to Stopped.
 pub async fn import_session(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ImportSessionRequest>,
@@ -312,8 +313,8 @@ pub async fn import_session(
     let session = state
         .session_manager
         .create_session(CreateSessionOptions {
-            project_path: req.project_path,
-            prompt: claude_session.preview,
+            project_path: req.project_path.clone(),
+            prompt: claude_session.preview.clone(),
             model: None, // Will use default model
             mode: SessionMode::Terminal,
             resume_session_id: Some(claude_uuid),
@@ -321,11 +322,64 @@ pub async fn import_session(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // Import chat history from the transcript
+    let transcript_messages = reader
+        .read_transcript(&req.claude_session_id, &req.project_path)
+        .unwrap_or_else(|e| {
+            warn!(
+                target: "clauset::session",
+                "Failed to read transcript for {}: {}",
+                req.claude_session_id, e
+            );
+            Vec::new()
+        });
+
+    // Insert messages into chat_messages table
+    let store = state.interaction_processor.store();
+    for (seq, msg) in transcript_messages.iter().enumerate() {
+        let chat_msg = clauset_types::ChatMessage {
+            id: format!("imported-{}-{}", session.id, seq),
+            session_id: session.id,
+            role: if msg.role == "user" {
+                clauset_types::ChatRole::User
+            } else {
+                clauset_types::ChatRole::Assistant
+            },
+            content: msg.content.clone(),
+            tool_calls: Vec::new(),
+            is_streaming: false,
+            is_complete: true,
+            timestamp: msg.timestamp.timestamp_millis() as u64,
+        };
+
+        if let Err(e) = store.save_chat_message(&chat_msg) {
+            warn!(
+                target: "clauset::session",
+                "Failed to import message {} for session {}: {}",
+                seq, session.id, e
+            );
+        }
+    }
+
     info!(
         target: "clauset::session",
-        "Imported Claude session {} as Clauset session {}",
-        req.claude_session_id,
+        "Imported {} messages from transcript for session {}",
+        transcript_messages.len(),
         session.id
+    );
+
+    // Set status to Stopped (since this is an imported session, not a running one)
+    state
+        .session_manager
+        .update_status(session.id, SessionStatus::Stopped)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    info!(
+        target: "clauset::session",
+        "Imported Claude session {} as Clauset session {} ({} messages)",
+        req.claude_session_id,
+        session.id,
+        transcript_messages.len()
     );
 
     Ok(Json(ImportSessionResponse {
