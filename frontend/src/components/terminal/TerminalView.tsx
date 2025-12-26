@@ -322,16 +322,16 @@ function createTouchScroller(getViewport: () => HTMLElement | null) {
 }
 
 // Special keys for mobile keyboard toolbar
-// Order: / (commands), esc, tab, arrows, enter, ctrl (modifier last)
+// Order: / (commands), esc, tab, enter, arrows, ctrl (modifier last)
 const SPECIAL_KEYS = [
   { label: '/', code: '/' },
   { label: 'esc', code: '\x1b' },
   { label: 'tab', code: '\t' },
+  { label: 'enter', code: '\r' },
   { label: '↑', code: '\x1b[A' },
   { label: '↓', code: '\x1b[B' },
   { label: '←', code: '\x1b[D' },
   { label: '→', code: '\x1b[C' },
-  { label: 'enter', code: '\r' },
   { label: 'ctrl', code: null, isModifier: true },
 ] as const;
 
