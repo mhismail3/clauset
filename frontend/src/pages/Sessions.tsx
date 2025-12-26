@@ -149,7 +149,7 @@ export default function Sessions() {
             }}
           >
             <img
-              src="/logo.svg"
+              src="/icons/header-logo.png"
               alt="Clauset logo"
               style={{ width: '34px', height: '34px' }}
             />
