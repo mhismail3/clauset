@@ -428,33 +428,12 @@ export function TerminalView(props: TerminalViewProps) {
     savedScrollState = null;
   }
 
-  // Write data to terminal while preserving scroll position during keyboard transitions
+  // Write data to terminal
+  // Scroll handling is done by keyboard transition callbacks (saveScrollPosition/restoreScrollPosition)
+  // We don't manipulate scroll here to avoid fighting with TUI applications like Claude Code's autocomplete
   function writeToTerminal(data: Uint8Array) {
     if (!terminal) return;
-
-    // Track if we were at bottom before write
-    const wasAtBottom = isAtBottom();
-
-    // If keyboard is transitioning and we weren't at bottom, save position
-    const viewport = getViewport();
-    const scrollBefore = viewport?.scrollTop ?? 0;
-
-    // Write the data
     terminal.write(data);
-
-    // If keyboard is visible and we weren't at bottom, restore position
-    // This prevents the scroll-to-top issue when submenu items appear
-    if (keyboardVisible() && !wasAtBottom && viewport) {
-      // Use RAF to restore after xterm's internal scroll
-      requestAnimationFrame(() => {
-        if (viewport && !isKeyboardTransitioning()) {
-          viewport.scrollTop = scrollBefore;
-        }
-      });
-    } else if (wasAtBottom) {
-      // If we were at bottom, stay at bottom (follow new content)
-      requestAnimationFrame(scrollToBottom);
-    }
   }
 
   // iOS keyboard handling - follows visualViewport in real-time (no animation delay)

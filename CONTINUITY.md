@@ -162,6 +162,21 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
+- Terminal glitch fix complete
+
+### Terminal Glitch Fix (Just Completed)
+- **Problem**: Terminal flickered/glitched when Claude Code's slash command autocomplete appeared
+- **Root cause**: `writeToTerminal()` was manipulating scroll position on EVERY write when keyboard visible
+  - Claude Code rapidly updates screen when showing autocomplete
+  - Each write triggered scroll restoration → fought with Claude Code's cursor positioning
+  - Result: visual flickering as scroll position jumped back and forth
+- **Fix**: Removed scroll manipulation from `writeToTerminal()` entirely
+  - Scroll handling is now only in keyboard transition callbacks (saveScrollPosition/restoreScrollPosition)
+  - This prevents fighting with TUI applications that manage their own screen layout
+- Files changed:
+  - `frontend/src/components/terminal/TerminalView.tsx` - Simplified `writeToTerminal()` to just write data
+
+### Previous
 - Terminal dimension calculation fix complete
 
 ### Terminal Dimension Fix (Just Completed)
