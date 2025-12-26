@@ -687,16 +687,30 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     return state;
   }
 
+  // Debounce timer for dimension updates
+  let dimensionUpdateTimer: number | null = null;
+  const DIMENSION_UPDATE_DEBOUNCE_MS = 150;
+
   function setTerminalDimensions(cols: number, rows: number) {
     const changed = cols !== streamState.terminalCols || rows !== streamState.terminalRows;
     streamState.terminalCols = cols;
     streamState.terminalRows = rows;
 
     // If dimensions changed and we're connected, send updated dimensions via resync
-    // This handles the case where terminal becomes visible and we have accurate measurements
+    // Debounce to coalesce rapid dimension changes (e.g., during keyboard animation)
+    // This prevents flickering from multiple PTY resizes in quick succession
     if (changed && ws?.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
-      console.log(`Sending dimension update: ${cols}x${rows}`);
-      sendSyncRequest();
+      if (dimensionUpdateTimer) {
+        clearTimeout(dimensionUpdateTimer);
+      }
+      dimensionUpdateTimer = window.setTimeout(() => {
+        dimensionUpdateTimer = null;
+        // Re-check connection state after debounce
+        if (ws?.readyState === WebSocket.OPEN) {
+          console.log(`Sending dimension update: ${cols}x${rows}`);
+          sendSyncRequest();
+        }
+      }, DIMENSION_UPDATE_DEBOUNCE_MS);
     }
   }
 

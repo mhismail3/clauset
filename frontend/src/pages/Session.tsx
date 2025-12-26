@@ -509,14 +509,10 @@ export default function SessionPage() {
     terminalDimensions = { cols, rows };
 
     // Update ws manager's terminal dimensions
+    // setTerminalDimensions already sends sync request if dimensions changed
+    // Don't call requestResync separately - it causes double syncs and flickering
     if (wsManager) {
       wsManager.setTerminalDimensions(cols, rows);
-    }
-
-    // If connected, request resync with new dimensions
-    // The reliable streaming protocol handles buffer replay via SyncRequest
-    if (wsManager && wsState() === 'connected') {
-      wsManager.requestResync();
     }
   }
 

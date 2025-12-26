@@ -448,8 +448,10 @@ export function TerminalView(props: TerminalViewProps) {
       saveScrollPosition();
     },
     // Resize terminal and restore scroll AFTER keyboard animation settles
+    // Use handleResize (debounced) instead of doFitAndResize (immediate)
+    // to coalesce rapid resize events during keyboard animation
     onShow: () => {
-      doFitAndResize();
+      handleResize();
       requestAnimationFrame(() => {
         restoreScrollPosition();
         // Clear transition flag after a delay to allow scroll to settle
@@ -457,7 +459,7 @@ export function TerminalView(props: TerminalViewProps) {
       });
     },
     onHide: () => {
-      doFitAndResize();
+      handleResize();
       requestAnimationFrame(() => {
         restoreScrollPosition();
         setTimeout(() => { setIsKeyboardTransitioning(false); }, 100);
