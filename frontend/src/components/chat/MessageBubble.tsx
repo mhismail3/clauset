@@ -64,7 +64,7 @@ export function MessageBubble(props: MessageBubbleProps) {
         style={{
           "max-width": '85%',
           "border-radius": '14px',
-          padding: '12px 16px',
+          padding: '6px 10px',
           // Retro styling - user bubbles use muted orange, assistant uses elevated bg
           background: isUser() ? '#9a4a2e' : 'var(--color-bg-elevated)',
           color: isUser() ? '#f0ebe3' : 'var(--color-text-primary)',
@@ -121,7 +121,7 @@ export function MessageBubble(props: MessageBubbleProps) {
 
         {/* Tool Calls */}
         <Show when={props.message.toolCalls?.length}>
-          <div style={{ display: 'flex', "flex-direction": 'column', gap: '8px', "margin-bottom": '12px' }}>
+          <div style={{ display: 'flex', "flex-direction": 'column', gap: '6px', "margin-bottom": '8px' }}>
             <For each={props.message.toolCalls}>
               {(toolCall) => <ToolCallView toolCall={toolCall} />}
             </For>
@@ -565,7 +565,7 @@ function ToolCallView(props: { toolCall: ToolCall }) {
           display: 'flex',
           "align-items": 'center',
           gap: '8px',
-          padding: '8px 12px',
+          padding: '6px 10px',
           "text-align": 'left',
           "font-size": '13px',
           background: 'transparent',
@@ -616,7 +616,7 @@ function ToolCallView(props: { toolCall: ToolCall }) {
       <Show when={expanded()}>
         <div
           style={{
-            padding: '10px 12px',
+            padding: '8px 10px',
             "border-top": '1px solid var(--color-bg-overlay)',
             "font-size": '12px',
           }}
@@ -870,7 +870,7 @@ function MarkdownContent(props: { content: string }) {
     return {
       "font-size": sizes[level] || '1em',
       "font-weight": '600',
-      "margin": '12px 0 6px 0',
+      "margin": '8px 0 4px 0',
       "line-height": '1.3',
     };
   };
@@ -887,8 +887,8 @@ function MarkdownContent(props: { content: string }) {
                     background: 'var(--color-code-bg)',
                     border: '1px solid var(--color-code-border)',
                     "border-radius": '10px',
-                    padding: '12px',
-                    margin: '8px 0',
+                    padding: '10px',
+                    margin: '6px 0',
                     "overflow-x": 'auto',
                     "font-family": 'var(--font-mono)',
                     "font-size": '13px',
@@ -907,10 +907,10 @@ function MarkdownContent(props: { content: string }) {
               );
             case 'ul':
               return (
-                <ul style={{ margin: '8px 0', "padding-left": '20px', "list-style-type": 'disc' }}>
+                <ul style={{ margin: '4px 0', "padding-left": '20px', "list-style-type": 'disc' }}>
                   <For each={block.items}>
                     {(item) => (
-                      <li style={{ margin: '4px 0' }}>
+                      <li style={{ margin: '2px 0' }}>
                         <InlineMarkdown text={item} />
                       </li>
                     )}
@@ -919,10 +919,10 @@ function MarkdownContent(props: { content: string }) {
               );
             case 'ol':
               return (
-                <ol style={{ margin: '8px 0', "padding-left": '20px', "list-style-type": 'decimal' }}>
+                <ol style={{ margin: '4px 0', "padding-left": '20px', "list-style-type": 'decimal' }}>
                   <For each={block.items}>
                     {(item) => (
-                      <li style={{ margin: '4px 0' }}>
+                      <li style={{ margin: '2px 0' }}>
                         <InlineMarkdown text={item} />
                       </li>
                     )}
@@ -931,7 +931,7 @@ function MarkdownContent(props: { content: string }) {
               );
             case 'paragraph':
               return (
-                <p style={{ margin: '8px 0', "white-space": 'pre-wrap' }}>
+                <p style={{ margin: '4px 0', "white-space": 'pre-wrap' }}>
                   <InlineMarkdown text={block.content} />
                 </p>
               );
