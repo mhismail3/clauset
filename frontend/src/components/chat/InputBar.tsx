@@ -1,5 +1,12 @@
 import { createSignal, createEffect } from 'solid-js';
 import { useKeyboard } from '../../lib/keyboard';
+import { CommandPicker } from '../commands/CommandPicker';
+import { Command } from '../../lib/api';
+import {
+  selectNext,
+  selectPrevious,
+  getSelectedCommand,
+} from '../../stores/commands';
 
 interface InputBarProps {
   onSend: (message: string) => void;
@@ -16,10 +23,25 @@ export function InputBar(props: InputBarProps) {
   const [message, setMessage] = createSignal('');
   const [focused, setFocused] = createSignal(false);
   const [rows, setRows] = createSignal(1);
+  const [showCommandPicker, setShowCommandPicker] = createSignal(false);
+  const [commandQuery, setCommandQuery] = createSignal('');
   let textareaRef: HTMLTextAreaElement | undefined;
 
   // iOS keyboard handling - adjust bottom padding when keyboard visible
   const { isVisible: keyboardVisible } = useKeyboard();
+
+  // Detect "/" trigger for command picker
+  createEffect(() => {
+    const text = message();
+    // Show picker if starts with "/" and no space yet (still typing command)
+    if (text.startsWith('/') && !text.includes(' ')) {
+      setShowCommandPicker(true);
+      setCommandQuery(text.slice(1)); // Remove leading "/"
+    } else {
+      setShowCommandPicker(false);
+      setCommandQuery('');
+    }
+  });
 
   // Calculate rows based on content
   createEffect(() => {
@@ -61,7 +83,59 @@ export function InputBar(props: InputBarProps) {
     }
   }
 
+  function handleCommandSelect(cmd: Command) {
+    setShowCommandPicker(false);
+    if (cmd.argument_hint) {
+      // Has arguments - insert command and let user add args
+      setMessage(`${cmd.display_name} `);
+      textareaRef?.focus();
+    } else {
+      // No arguments - send immediately
+      props.onSend(cmd.display_name);
+      setMessage('');
+      setRows(1);
+    }
+  }
+
   function handleKeyDown(e: KeyboardEvent) {
+    // Handle command picker navigation
+    if (showCommandPicker()) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectNext();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectPrevious();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const cmd = getSelectedCommand();
+        if (cmd) {
+          handleCommandSelect(cmd);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowCommandPicker(false);
+        setMessage('');
+        return;
+      }
+      if (e.key === 'Tab') {
+        // Tab completes the selected command
+        e.preventDefault();
+        const cmd = getSelectedCommand();
+        if (cmd) {
+          setMessage(`${cmd.display_name} `);
+        }
+        return;
+      }
+    }
+
+    // Normal Enter handling for send
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
@@ -71,8 +145,26 @@ export function InputBar(props: InputBarProps) {
   const canSend = () => !props.disabled && message().trim();
   const shouldScroll = () => rows() >= MAX_ROWS;
 
+  // Calculate anchor bottom for command picker (above input bar)
+  const inputBarHeight = () => {
+    const textareaHeight = rows() * LINE_HEIGHT + VERTICAL_PADDING;
+    const padding = 24; // 12px top + 12px bottom
+    const safeArea = keyboardVisible() ? 0 : 20; // approximate safe area
+    return textareaHeight + padding + safeArea;
+  };
+
   return (
-    <form
+    <>
+      {/* Command Picker */}
+      <CommandPicker
+        isOpen={showCommandPicker()}
+        query={commandQuery()}
+        onSelect={handleCommandSelect}
+        onClose={() => setShowCommandPicker(false)}
+        anchorBottom={inputBarHeight()}
+      />
+
+      <form
       onSubmit={handleSubmit}
       class="flex-none glass"
       style={{
@@ -174,5 +266,6 @@ export function InputBar(props: InputBarProps) {
         </button>
       </div>
     </form>
+    </>
   );
 }

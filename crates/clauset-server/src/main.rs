@@ -173,6 +173,8 @@ async fn main() -> Result<()> {
         // Prompt Library
         .route("/prompts", get(routes::prompts::list_prompts))
         .route("/prompts/{id}", get(routes::prompts::get_prompt))
+        // Command discovery
+        .route("/commands", get(routes::commands::list_commands))
         // Other routes
         .route("/history", get(routes::history::list))
         .route("/projects", get(routes::projects::list).post(routes::projects::create))

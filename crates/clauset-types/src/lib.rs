@@ -2,6 +2,7 @@
 
 mod chat;
 mod claude;
+mod command;
 mod hooks;
 mod interaction;
 mod prompt;
@@ -10,6 +11,7 @@ mod ws;
 
 pub use chat::*;
 pub use claude::*;
+pub use command::*;
 pub use hooks::*;
 pub use interaction::*;
 pub use prompt::*;

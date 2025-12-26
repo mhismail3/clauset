@@ -2,6 +2,8 @@
 // Phase 1: Sequence numbers, ACKs, gap recovery
 // Phase 2: Extended states, heartbeat, iOS lifecycle
 
+import { getRecommendedFontSize } from './fonts';
+
 export type ConnectionState =
   | 'initial'      // Never connected
   | 'connecting'   // Active connection attempt
@@ -140,23 +142,33 @@ const MAX_QUEUE_AGE_MS = 5 * 60 * 1000;
 
 // Calculate dimensions based on actual screen size
 // These are sent immediately on connect before terminal is visible
+// IMPORTANT: Be conservative - better to start smaller and grow than start too big
+// If initial estimate is too large, content wraps incorrectly (e.g., Claude Code welcome box)
 function getDeviceDefaultDimensions(): { cols: number; rows: number } {
   // Use visualViewport if available (more accurate on mobile), fallback to window
   const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
   const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
 
   // Terminal font settings (must match TerminalView.tsx)
-  const fontSize = 14; // Default font size
-  const estimatedCharWidth = fontSize * 0.6;  // ~8.4px for 14px font
-  const estimatedCharHeight = fontSize * 1.25; // ~17.5px for 14px font
+  const fontSize = getRecommendedFontSize();
+  const estimatedCharWidth = fontSize * 0.6;
+  // Use 1.3 multiplier (actual measured is ~1.3125 for JetBrains Mono with lineHeight 1.25)
+  const estimatedCharHeight = fontSize * 1.3;
 
   // Estimate UI chrome that reduces available terminal space:
+  // Be conservative to avoid initial dimensions being too large
   // - Header: ~60px
-  // - Keyboard helper bar (esc/tab/ctrl): ~50px
-  // - Safe areas (notch, home indicator): ~50px total estimate
-  // - Terminal container padding: 24px horizontal, 16px vertical
-  const uiChromeHeight = 60 + 50 + 50 + 16; // ~176px
-  const horizontalPadding = 24;
+  // - Keyboard toolbar: ~70px (main row + safe area padding)
+  // - Safe areas (notch, home indicator): ~80px total
+  // - TerminalView padding: 16px vertical (8px top/bottom)
+  // - terminalSizing effectiveHeight reduction: 16px
+  const uiChromeHeight = 60 + 70 + 80 + 16 + 16; // ~242px
+
+  // Horizontal padding includes:
+  // - TerminalView outer padding: 24px (12px each side)
+  // - terminalSizing effectiveWidth reduction: 24px (12px each side for xterm)
+  // - Extra safety margin: 12px
+  const horizontalPadding = 24 + 24 + 12; // 60px total
 
   const availableWidth = viewportWidth - horizontalPadding;
   const availableHeight = viewportHeight - uiChromeHeight;

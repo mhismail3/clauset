@@ -1,5 +1,6 @@
 //! HTTP route handlers.
 
+pub mod commands;
 pub mod history;
 pub mod hooks;
 pub mod interactions;

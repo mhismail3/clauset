@@ -162,7 +162,87 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
-- Fixed copy button in Prompt Library modal - needs frontend rebuild
+- Terminal dimension calculation fix complete
+
+### Terminal Dimension Fix (Just Completed)
+- **Problem**: Initial terminal dimensions too large, causing Claude Code welcome box to render incorrectly (wrapped/broken borders)
+- **Root cause**: `ws.ts` `getDeviceDefaultDimensions()` didn't account for all padding layers:
+  - TerminalView outer padding: 24px horizontal (12px each side)
+  - terminalSizing effectiveWidth reduction: 24px (12px each side)
+  - Result: Initial estimate 43 cols, actual container only 41 cols → 2 column mismatch
+- **Fix**: Made initial estimates more conservative (better to start smaller and grow):
+  - `horizontalPadding`: 24px → 60px (accounts for TerminalView padding + terminalSizing reduction + safety margin)
+  - `uiChromeHeight`: 176px → 242px (more accurate accounting of header, toolbar, safe areas)
+  - `estimatedCharHeight`: fontSize * 1.25 → fontSize * 1.3 (matches actual measured height)
+  - Also uses dynamic `getRecommendedFontSize()` instead of hardcoded 14
+- **Result**: Initial estimate now slightly smaller than actual (39 cols vs 41), content fits correctly
+- Files changed:
+  - `frontend/src/lib/ws.ts` - Updated `getDeviceDefaultDimensions()` with conservative padding estimates
+
+### Terminal Toolbar Improvements (Just Completed)
+- **Fix 1**: Toolbar not scrollable (horizontal swipe blocked)
+  - Root cause: `preventOverscroll.ts` only checked `overflowY`, blocked all horizontal touch moves
+  - Fix: Added horizontal scroll detection - checks `overflowX` and `scrollWidth > clientWidth`
+  - Now properly allows horizontal scrolling in elements with `overflow-x: auto`
+- **Fix 2**: Added "/" button to toolbar for quick command access
+- **Fix 3**: Reordered toolbar buttons: /, esc, tab, ↑, ↓, ←, →, enter, ctrl (modifier last)
+- **Fix 4**: Increased default terminal font sizes for better readability
+  - iPhone SE/mini: 14px (was 11px)
+  - Standard phones: 15px (was 12px)
+  - Tablets/desktop: 16px (was 13px)
+- **Fix 5**: Removed font resize buttons (A-/A+) - fixed font size only
+  - Removed `adjustFontSize()` function
+  - Changed `fontSize` from signal to constant
+- Files changed:
+  - `frontend/src/lib/preventOverscroll.ts` - Added horizontal scroll support
+  - `frontend/src/lib/fonts.ts` - Increased font sizes in `getRecommendedFontSize()`
+  - `frontend/src/components/terminal/TerminalView.tsx` - Updated toolbar layout
+
+### Terminal Fixes (Previous Session)
+- **Issue 1**: Terminal scrolls to top when slash commands show submenu with keyboard visible
+  - Added `writeToTerminal()` wrapper that preserves scroll position during keyboard transitions
+  - Tracks if we were at bottom before write, restores position after xterm's internal scroll
+  - Uses `isKeyboardTransitioning` signal to coordinate with keyboard open/close
+- **Issue 2**: Terminal flickering with keyboard visible
+  - Added `will-change: height` during keyboard transitions for GPU optimization
+  - Added `contain: layout size` to prevent layout thrashing
+- **Issue 3**: Added "enter" button to toolbar
+  - Added `{ label: 'enter', code: '\r' }` to SPECIAL_KEYS array
+- **Issue 4**: Toolbar buttons bringing up keyboard
+  - Removed `terminal?.focus()` calls from `sendSpecialKey()` and `sendCtrlKey()`
+  - Added `onTouchStart` with `e.preventDefault()` to all toolbar buttons
+
+### Slash Command Picker (Just Implemented)
+- **Goal**: Implement Claude Code slash command picker in chat interface
+- **Trigger**: Type "/" in chat input or use "/" button
+- **Features**:
+  - Discovers all commands: built-in (~40), user commands, skills, plugin commands
+  - Keyboard navigation: arrow keys, Enter to select, Escape to cancel, Tab to complete
+  - Search/filter as you type (e.g., "/com" shows /commit, /compact)
+  - Commands with arguments insert + cursor for args
+  - Commands without arguments execute immediately
+  - Output streams in chat view (uses existing infrastructure)
+- **Backend files created**:
+  - `crates/clauset-types/src/command.rs` - Command, CommandCategory, CommandFrontmatter types
+  - `crates/clauset-core/src/command_discovery.rs` - Discovery logic with 30-second cache
+  - `crates/clauset-server/src/routes/commands.rs` - GET /api/commands endpoint
+- **Backend files modified**:
+  - `crates/clauset-types/src/lib.rs` - Export command module
+  - `crates/clauset-core/src/lib.rs` - Export CommandDiscovery
+  - `crates/clauset-core/Cargo.toml` - Add serde_yaml dependency
+  - `Cargo.toml` - Add serde_yaml to workspace dependencies
+  - `crates/clauset-server/src/state.rs` - Add CommandDiscovery to AppState
+  - `crates/clauset-server/src/main.rs` - Register /api/commands route
+  - `crates/clauset-server/src/routes/mod.rs` - Export commands module
+- **Frontend files created**:
+  - `frontend/src/stores/commands.ts` - Commands store with filtering, navigation
+  - `frontend/src/components/commands/CommandPicker.tsx` - Picker UI component
+- **Frontend files modified**:
+  - `frontend/src/lib/api.ts` - Command types and API endpoint
+  - `frontend/src/components/chat/InputBar.tsx` - "/" trigger, keyboard handling, picker integration
+
+### Previous
+- Prompt Library feature complete and committed (commit b6e6bfa)
 
 ### Prompt Library Fixes (Just Completed)
 - **Issue 1**: HTTP 404 on `/api/prompts` endpoint

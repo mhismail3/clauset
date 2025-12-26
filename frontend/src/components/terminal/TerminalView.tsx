@@ -322,14 +322,17 @@ function createTouchScroller(getViewport: () => HTMLElement | null) {
 }
 
 // Special keys for mobile keyboard toolbar
+// Order: / (commands), esc, tab, arrows, enter, ctrl (modifier last)
 const SPECIAL_KEYS = [
+  { label: '/', code: '/' },
   { label: 'esc', code: '\x1b' },
   { label: 'tab', code: '\t' },
-  { label: 'ctrl', code: null, isModifier: true },
   { label: '↑', code: '\x1b[A' },
   { label: '↓', code: '\x1b[B' },
   { label: '←', code: '\x1b[D' },
   { label: '→', code: '\x1b[C' },
+  { label: 'enter', code: '\r' },
+  { label: 'ctrl', code: null, isModifier: true },
 ] as const;
 
 const CTRL_SHORTCUTS = [
@@ -351,7 +354,8 @@ export function TerminalView(props: TerminalViewProps) {
   let charWidth: number | null = null;
   let charHeight: number | null = null;
 
-  const [fontSize, setFontSize] = createSignal(getRecommendedFontSize());
+  // Fixed font size based on device (no user adjustment)
+  const fontSize = getRecommendedFontSize();
   const [ctrlActive, setCtrlActive] = createSignal(false);
   const [dimensions, setDimensions] = createSignal({ cols: 80, rows: 24 });
 
@@ -363,9 +367,27 @@ export function TerminalView(props: TerminalViewProps) {
     wasAtBottom: boolean;
   } | null = null;
 
+  // Track if we're in a keyboard transition to prevent scroll jumping
+  const [isKeyboardTransitioning, setIsKeyboardTransitioning] = createSignal(false);
+
   // Helper to get xterm viewport element
   function getViewport(): HTMLElement | null {
     return containerRef?.querySelector('.xterm-viewport') as HTMLElement | null;
+  }
+
+  // Check if we're currently at the bottom of the scroll
+  function isAtBottom(): boolean {
+    const viewport = getViewport();
+    if (!viewport) return true;
+    const maxScroll = viewport.scrollHeight - viewport.clientHeight;
+    return maxScroll <= 0 || viewport.scrollTop >= maxScroll - 10;
+  }
+
+  // Scroll to bottom of terminal
+  function scrollToBottom() {
+    const viewport = getViewport();
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight - viewport.clientHeight;
   }
 
   // Save scroll position BEFORE any height changes
@@ -406,19 +428,61 @@ export function TerminalView(props: TerminalViewProps) {
     savedScrollState = null;
   }
 
+  // Write data to terminal while preserving scroll position during keyboard transitions
+  function writeToTerminal(data: Uint8Array) {
+    if (!terminal) return;
+
+    // Track if we were at bottom before write
+    const wasAtBottom = isAtBottom();
+
+    // If keyboard is transitioning and we weren't at bottom, save position
+    const viewport = getViewport();
+    const scrollBefore = viewport?.scrollTop ?? 0;
+
+    // Write the data
+    terminal.write(data);
+
+    // If keyboard is visible and we weren't at bottom, restore position
+    // This prevents the scroll-to-top issue when submenu items appear
+    if (keyboardVisible() && !wasAtBottom && viewport) {
+      // Use RAF to restore after xterm's internal scroll
+      requestAnimationFrame(() => {
+        if (viewport && !isKeyboardTransitioning()) {
+          viewport.scrollTop = scrollBefore;
+        }
+      });
+    } else if (wasAtBottom) {
+      // If we were at bottom, stay at bottom (follow new content)
+      requestAnimationFrame(scrollToBottom);
+    }
+  }
+
   // iOS keyboard handling - follows visualViewport in real-time (no animation delay)
   const { isVisible: keyboardVisible, viewportHeight } = useKeyboard({
     // Save scroll position BEFORE keyboard state changes
-    onBeforeShow: saveScrollPosition,
-    onBeforeHide: saveScrollPosition,
+    onBeforeShow: () => {
+      setIsKeyboardTransitioning(true);
+      saveScrollPosition();
+    },
+    onBeforeHide: () => {
+      setIsKeyboardTransitioning(true);
+      saveScrollPosition();
+    },
     // Resize terminal and restore scroll AFTER keyboard animation settles
     onShow: () => {
       doFitAndResize();
-      requestAnimationFrame(restoreScrollPosition);
+      requestAnimationFrame(() => {
+        restoreScrollPosition();
+        // Clear transition flag after a delay to allow scroll to settle
+        setTimeout(() => { setIsKeyboardTransitioning(false); }, 100);
+      });
     },
     onHide: () => {
       doFitAndResize();
-      requestAnimationFrame(restoreScrollPosition);
+      requestAnimationFrame(() => {
+        restoreScrollPosition();
+        setTimeout(() => { setIsKeyboardTransitioning(false); }, 100);
+      });
     },
   });
 
@@ -440,7 +504,8 @@ export function TerminalView(props: TerminalViewProps) {
 
     props.onInput(encoder.encode(code));
     setCtrlActive(false);
-    terminal?.focus();
+    // Don't focus terminal - this would bring up the keyboard on mobile
+    // User can tap the terminal directly if they want to type
   }
 
   function sendCtrlKey(char: string) {
@@ -449,7 +514,7 @@ export function TerminalView(props: TerminalViewProps) {
     const code = String.fromCharCode(charCode - 64);
     props.onInput(encoder.encode(code));
     setCtrlActive(false);
-    terminal?.focus();
+    // Don't focus terminal - this would bring up the keyboard on mobile
   }
 
   function doFitAndResize() {
@@ -522,7 +587,7 @@ export function TerminalView(props: TerminalViewProps) {
         brightWhite: '#ffffff',
       },
       fontFamily: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace',
-      fontSize: fontSize(),
+      fontSize: fontSize,
       fontWeight: '400',
       fontWeightBold: '600',
       lineHeight: 1.25,
@@ -572,7 +637,7 @@ export function TerminalView(props: TerminalViewProps) {
       // Stage 1: Load fonts with robust timeout handling
       const fontResult = await loadTerminalFont({
         timeout: 2000,
-        fontSize: fontSize(),
+        fontSize: fontSize,
       });
 
       fontLoaded = fontResult.loaded;
@@ -606,7 +671,7 @@ export function TerminalView(props: TerminalViewProps) {
         charWidth,
         charHeight,
         fontLoaded,
-        fontSize: fontSize(),
+        fontSize: fontSize,
       });
 
       console.log(`Dimensions calculated: ${dims.cols}x${dims.rows}, ` +
@@ -646,9 +711,10 @@ export function TerminalView(props: TerminalViewProps) {
       }
 
       // NOW signal that we're ready to receive data
+      // Use writeToTerminal to preserve scroll position during keyboard transitions
       if (props.onReady) {
         props.onReady((data: Uint8Array) => {
-          terminal?.write(data);
+          writeToTerminal(data);
         });
       }
     };
@@ -689,18 +755,6 @@ export function TerminalView(props: TerminalViewProps) {
     }
   });
 
-  function adjustFontSize(delta: number) {
-    const newSize = Math.max(9, Math.min(20, fontSize() + delta));
-    setFontSize(newSize);
-    if (terminal) {
-      terminal.options.fontSize = newSize;
-      // Delay fit to allow font change to take effect
-      requestAnimationFrame(() => {
-        doFitAndResize();
-      });
-    }
-  }
-
   return (
     <div
       style={{
@@ -711,6 +765,10 @@ export function TerminalView(props: TerminalViewProps) {
         width: '100%',
         background: '#0d0d0d',
         overflow: 'hidden',
+        // Hint to browser about upcoming changes to reduce flicker
+        "will-change": isKeyboardTransitioning() ? 'height' : 'auto',
+        // Contain layout recalculations to this element
+        contain: 'layout size',
       }}
     >
       {/* Terminal area with padding for visual spacing */}
@@ -769,6 +827,8 @@ export function TerminalView(props: TerminalViewProps) {
           <For each={CTRL_SHORTCUTS}>
             {(shortcut) => (
               <button
+                onMouseDown={(e) => e.preventDefault()}
+                onTouchStart={(e) => e.preventDefault()}
                 onClick={() => sendCtrlKey(shortcut.label)}
                 class="key-button"
                 style={{
@@ -800,12 +860,17 @@ export function TerminalView(props: TerminalViewProps) {
             "padding-bottom": keyboardVisible()
               ? '10px'
               : 'calc(max(env(safe-area-inset-bottom, 0px), 12px) + 16px)',
-            // No CSS transition - animation timing is controlled by keyboard hook's JS animation
+            // Explicit overflow for scrollability
+            "overflow-x": 'auto',
+            "overflow-y": 'hidden',
+            "-webkit-overflow-scrolling": 'touch',
           }}
         >
           <For each={SPECIAL_KEYS}>
             {(key) => (
               <button
+                onMouseDown={(e) => e.preventDefault()}
+                onTouchStart={(e) => e.preventDefault()}
                 onClick={() => sendSpecialKey(key)}
                 class="key-button"
                 style={{
@@ -834,41 +899,6 @@ export function TerminalView(props: TerminalViewProps) {
               </button>
             )}
           </For>
-
-          {/* Spacer - but with min-width so it shrinks on narrow screens */}
-          <div style={{ "flex-grow": '1', "min-width": '8px' }} />
-
-          {/* Font size controls */}
-          <button
-            onClick={() => adjustFontSize(-1)}
-            class="key-button"
-            style={{
-              width: '38px',
-              "flex-shrink": '0',
-              height: '38px',
-              display: 'flex',
-              "align-items": 'center',
-              "justify-content": 'center',
-              color: 'var(--color-text-muted)',
-            }}
-          >
-            <span style={{ "font-size": '11px' }}>A−</span>
-          </button>
-          <button
-            onClick={() => adjustFontSize(1)}
-            class="key-button"
-            style={{
-              width: '38px',
-              "flex-shrink": '0',
-              height: '38px',
-              display: 'flex',
-              "align-items": 'center',
-              "justify-content": 'center',
-              color: 'var(--color-text-muted)',
-            }}
-          >
-            <span style={{ "font-size": '14px' }}>A+</span>
-          </button>
         </div>
       </div>
     </div>

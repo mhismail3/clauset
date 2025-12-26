@@ -253,6 +253,32 @@ export interface ImportSessionResponse {
   ws_url: string;
 }
 
+// Command types
+export type CommandCategory = 'built_in' | 'user' | 'skill' | 'plugin';
+
+export interface Command {
+  name: string;
+  display_name: string;
+  description: string;
+  category: CommandCategory;
+  argument_hint?: string;
+  source: string;
+  plugin_name?: string;
+}
+
+export interface CommandCounts {
+  built_in: number;
+  user: number;
+  skill: number;
+  plugin: number;
+  total: number;
+}
+
+export interface CommandsResponse {
+  commands: Command[];
+  counts: CommandCounts;
+}
+
 // Prompt Library types
 export interface Prompt {
   id: string;
@@ -426,5 +452,12 @@ export const api = {
       fetchJSON<PromptsListResponse>(`/prompts?limit=${limit}&offset=${offset}`),
 
     get: (id: string) => fetchJSON<Prompt>(`/prompts/${id}`),
+  },
+
+  commands: {
+    list: (category?: CommandCategory) => {
+      const params = category ? `?category=${category}` : '';
+      return fetchJSON<CommandsResponse>(`/commands${params}`);
+    },
   },
 };

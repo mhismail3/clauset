@@ -3,6 +3,7 @@
 mod buffer;
 mod chat_processor;
 mod claude_sessions;
+mod command_discovery;
 mod db;
 mod diff;
 mod error;
@@ -16,6 +17,7 @@ mod sizing;
 
 pub use buffer::{AppendResult, RecentAction, SequencedChunk, SessionActivity, SessionBuffers};
 pub use chat_processor::ChatProcessor;
+pub use command_discovery::CommandDiscovery;
 pub use claude_sessions::{ClaudeSession, ClaudeSessionReader, TranscriptMessage};
 pub use db::{SessionStore, TerminalBufferData};
 pub use diff::{compute_diff, generate_unified_diff, DiffChangeType, DiffHunk, DiffLine, FileDiff};

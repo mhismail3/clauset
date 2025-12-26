@@ -220,25 +220,25 @@ function timeoutPromise(ms: number): Promise<false> {
 
 /**
  * Get device-specific font size recommendations.
- * Smaller screens may benefit from smaller fonts.
+ * Larger fonts for better readability on mobile.
  */
 export function getRecommendedFontSize(): number {
   const screenWidth = window.screen.width;
   const pixelRatio = window.devicePixelRatio || 1;
   const logicalWidth = screenWidth / pixelRatio;
 
-  // iPhone SE, iPhone mini: smaller font
+  // iPhone SE, iPhone mini: slightly smaller
   if (logicalWidth <= 375) {
-    return 11;
+    return 14;
   }
 
   // Standard iPhones, most phones
   if (logicalWidth <= 430) {
-    return 12;
+    return 15;
   }
 
   // Tablets, desktops
-  return 13;
+  return 16;
 }
 
 /**
