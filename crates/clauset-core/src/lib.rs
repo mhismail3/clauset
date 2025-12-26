@@ -10,6 +10,7 @@ mod history;
 mod interaction_store;
 mod parser;
 mod process;
+mod prompt_indexer;
 mod session;
 mod sizing;
 
@@ -27,6 +28,7 @@ pub use interaction_store::{
 };
 pub use parser::OutputParser;
 pub use process::{ProcessEvent, ProcessManager, SpawnOptions};
+pub use prompt_indexer::{BackfillStats, PromptIndexer};
 pub use session::{CreateSessionOptions, SessionManager, SessionManagerConfig};
 pub use sizing::{
     validate_dimensions, ConfidenceLevel, DeviceHint, DimensionError, DimensionSource,

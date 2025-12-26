@@ -106,5 +106,7 @@ async fn process_event(state: &AppState, event: ProcessEvent) {
         ProcessEvent::Claude(_) => {}
         // Chat events are handled by WebSocket handlers for chat mode view
         ProcessEvent::Chat(_) => {}
+        // NewPrompt events are handled by global WebSocket for Prompt Library
+        ProcessEvent::NewPrompt(_) => {}
     }
 }

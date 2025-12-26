@@ -125,6 +125,9 @@ async fn main() -> Result<()> {
     event_processor::spawn_event_processor(state.clone());
     tracing::info!(target: "clauset::startup", "Started background event processor");
 
+    // Start prompt indexer backfill if needed (runs async, doesn't block startup)
+    spawn_prompt_backfill(state.clone());
+
     // Build router
     let api_routes = Router::new()
         // Session management
@@ -167,6 +170,9 @@ async fn main() -> Result<()> {
             "/analytics/storage",
             get(routes::interactions::get_storage_stats),
         )
+        // Prompt Library
+        .route("/prompts", get(routes::prompts::list_prompts))
+        .route("/prompts/{id}", get(routes::prompts::get_prompt))
         // Other routes
         .route("/history", get(routes::history::list))
         .route("/projects", get(routes::projects::list).post(routes::projects::create))
@@ -198,4 +204,34 @@ async fn main() -> Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Spawn prompt backfill task if needed.
+/// Runs asynchronously and doesn't block server startup.
+fn spawn_prompt_backfill(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        use clauset_core::PromptIndexer;
+
+        let store = state.interaction_processor.store().clone();
+        let indexer = PromptIndexer::new(store);
+
+        if indexer.needs_backfill() {
+            tracing::info!(target: "clauset::startup", "Starting prompt library backfill...");
+            match indexer.backfill().await {
+                Ok(stats) => {
+                    tracing::info!(
+                        target: "clauset::startup",
+                        "Prompt backfill complete: {} prompts indexed from {} sessions",
+                        stats.prompts_indexed,
+                        stats.sessions_scanned
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(target: "clauset::startup", "Prompt backfill failed: {}", e);
+                }
+            }
+        } else {
+            tracing::debug!(target: "clauset::startup", "Prompt library already populated, skipping backfill");
+        }
+    });
 }

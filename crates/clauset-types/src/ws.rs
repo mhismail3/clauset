@@ -252,6 +252,10 @@ pub enum WsServerMessage {
         /// All chat messages for the session (ordered by sequence)
         messages: Vec<crate::ChatMessage>,
     },
+    /// A new prompt was indexed (for Prompt Library real-time updates).
+    NewPrompt {
+        prompt: crate::PromptSummary,
+    },
 }
 
 /// A single action/step performed by Claude (for activity updates)

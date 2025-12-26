@@ -340,6 +340,30 @@ impl InteractionStore {
             "#,
         )?;
 
+        // Create prompts table for Prompt Library feature
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS prompts (
+                id TEXT PRIMARY KEY,
+                claude_session_id TEXT NOT NULL,
+                project_path TEXT NOT NULL,
+                content TEXT NOT NULL,
+                preview TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                word_count INTEGER NOT NULL,
+                char_count INTEGER NOT NULL,
+                content_hash TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_prompts_timestamp
+                ON prompts(timestamp DESC);
+            CREATE INDEX IF NOT EXISTS idx_prompts_session
+                ON prompts(claude_session_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_prompts_dedup
+                ON prompts(claude_session_id, content_hash);
+            "#,
+        )?;
+
         Ok(())
     }
 
@@ -2063,6 +2087,134 @@ impl InteractionStore {
             |row| row.get(0),
         )?;
         Ok(count as u32)
+    }
+
+    // =========================================================================
+    // Prompt Library methods
+    // =========================================================================
+
+    /// Insert a prompt into the library.
+    /// Uses UPSERT to handle deduplication by content_hash + session_id.
+    pub fn insert_prompt(&self, prompt: &clauset_types::Prompt) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let content_hash = prompt.content_hash();
+
+        conn.execute(
+            r#"
+            INSERT INTO prompts (id, claude_session_id, project_path, content, preview, timestamp, word_count, char_count, content_hash)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(claude_session_id, content_hash) DO NOTHING
+            "#,
+            params![
+                prompt.id.to_string(),
+                prompt.claude_session_id,
+                prompt.project_path.display().to_string(),
+                prompt.content,
+                prompt.preview,
+                prompt.timestamp as i64,
+                prompt.word_count as i64,
+                prompt.char_count as i64,
+                content_hash,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// List prompts with pagination, ordered by timestamp descending (newest first).
+    pub fn list_prompts(&self, limit: u32, offset: u32) -> Result<Vec<clauset_types::PromptSummary>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, preview, project_path, timestamp, word_count
+            FROM prompts
+            ORDER BY timestamp DESC
+            LIMIT ?1 OFFSET ?2
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![limit as i64, offset as i64], |row| {
+            let id: String = row.get(0)?;
+            let preview: String = row.get(1)?;
+            let project_path: String = row.get(2)?;
+            let timestamp: i64 = row.get(3)?;
+            let word_count: i64 = row.get(4)?;
+
+            // Extract project name from path
+            let project_name = std::path::Path::new(&project_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            Ok(clauset_types::PromptSummary {
+                id: Uuid::parse_str(&id).unwrap_or_default(),
+                preview,
+                project_name,
+                timestamp: timestamp as u64,
+                word_count: word_count as u32,
+            })
+        })?;
+
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| ClausetError::ParseError(e.to_string()))
+    }
+
+    /// Get a single prompt by ID.
+    pub fn get_prompt(&self, id: Uuid) -> Result<Option<clauset_types::Prompt>> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn.query_row(
+            r#"
+            SELECT id, claude_session_id, project_path, content, preview, timestamp, word_count, char_count
+            FROM prompts
+            WHERE id = ?1
+            "#,
+            params![id.to_string()],
+            |row| {
+                let id: String = row.get(0)?;
+                let claude_session_id: String = row.get(1)?;
+                let project_path: String = row.get(2)?;
+                let content: String = row.get(3)?;
+                let preview: String = row.get(4)?;
+                let timestamp: i64 = row.get(5)?;
+                let word_count: i64 = row.get(6)?;
+                let char_count: i64 = row.get(7)?;
+
+                Ok(clauset_types::Prompt {
+                    id: Uuid::parse_str(&id).unwrap_or_default(),
+                    claude_session_id,
+                    project_path: std::path::PathBuf::from(project_path),
+                    content,
+                    preview,
+                    timestamp: timestamp as u64,
+                    word_count: word_count as u32,
+                    char_count: char_count as u32,
+                })
+            },
+        );
+
+        match result {
+            Ok(prompt) => Ok(Some(prompt)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(ClausetError::ParseError(e.to_string())),
+        }
+    }
+
+    /// Get total count of prompts in the library.
+    pub fn get_prompt_count(&self) -> Result<u64> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM prompts", [], |row| row.get(0))?;
+        Ok(count as u64)
+    }
+
+    /// Check if the prompts table is empty (for backfill detection).
+    pub fn is_prompts_empty(&self) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM prompts LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count == 0)
     }
 
     // =========================================================================

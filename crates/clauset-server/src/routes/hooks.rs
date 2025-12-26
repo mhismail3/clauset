@@ -104,7 +104,12 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             let _ = state.session_manager.update_status(session_id, SessionStatus::Stopped);
         }
 
-        HookEvent::UserPromptSubmit { session_id, .. } => {
+        HookEvent::UserPromptSubmit {
+            session_id,
+            claude_session_id,
+            prompt,
+            cwd,
+        } => {
             debug!(target: "clauset::hooks", "User submitted prompt for session {}", session_id);
 
             // Mark session as busy (user sent input)
@@ -113,6 +118,24 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             // Update activity to "Thinking"
             let update = HookActivityUpdate::user_prompt_submit();
             update_activity_from_hook(&state, session_id, update).await;
+
+            // Index the prompt for Prompt Library
+            if let Some(cwd) = cwd {
+                let prompt_entry = clauset_types::Prompt::new(
+                    claude_session_id.clone(),
+                    std::path::PathBuf::from(&cwd),
+                    prompt.clone(),
+                    now_ms(),
+                );
+
+                if let Err(e) = state.interaction_processor.store().insert_prompt(&prompt_entry) {
+                    warn!(target: "clauset::hooks", "Failed to index prompt: {}", e);
+                }
+
+                // Broadcast for real-time UI update
+                let summary: clauset_types::PromptSummary = (&prompt_entry).into();
+                let _ = state.session_manager.broadcast_event(ProcessEvent::NewPrompt(summary));
+            }
         }
 
         HookEvent::PreToolUse {

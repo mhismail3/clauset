@@ -3,7 +3,8 @@
 
 import { createSignal } from 'solid-js';
 import { updateSessionFromActivity, updateSessionStatus } from '../stores/sessions';
-import type { Session } from './api';
+import { addNewPrompt } from '../stores/prompts';
+import type { Session, PromptSummary } from './api';
 
 export type GlobalWsState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
 
@@ -74,6 +75,18 @@ function handleMessage(event: MessageEvent) {
       }
       case 'error': {
         console.error('Global WS error:', data.message);
+        break;
+      }
+      case 'new_prompt': {
+        // Real-time prompt indexing update
+        const prompt: PromptSummary = {
+          id: data.prompt.id,
+          preview: data.prompt.preview,
+          project_name: data.prompt.project_name,
+          timestamp: data.prompt.timestamp,
+          word_count: data.prompt.word_count,
+        };
+        addNewPrompt(prompt);
         break;
       }
     }

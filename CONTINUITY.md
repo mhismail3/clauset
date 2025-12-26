@@ -162,7 +162,48 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
-- Import from terminal now properly loads chat history
+- Fixed copy button in Prompt Library modal - needs frontend rebuild
+
+### Prompt Library Fixes (Just Completed)
+- **Issue 1**: HTTP 404 on `/api/prompts` endpoint
+  - Root cause: Beta server running old binary without prompts routes
+  - Fix: Rebuilt server (multi-byte UTF-8 truncation bug also fixed)
+- **Issue 2**: Copy button not working in Prompt Library modal
+  - Root cause: Clipboard API requires HTTPS or localhost, fails over HTTP
+  - Fix: Added `execCommand` fallback for non-secure contexts in `prompts.ts`
+- Files changed:
+  - `crates/clauset-types/src/prompt.rs` - Fixed UTF-8 char boundary bug in truncate_preview
+  - `frontend/src/stores/prompts.ts` - Added clipboard API fallback
+
+### Prompt Library Feature (Previously Completed)
+- **Goal**: Index every prompt sent to Claude Code, display in chronological library with expand/copy
+- **UI**: FAB menu in bottom-right corner with "Prompt Library" and "New Session" options
+- **Implementation**:
+  1. Backend: Added `prompts` table with content hash deduplication
+  2. Backend: Added `PromptIndexer` for backfill from `~/.claude/` transcripts on first run
+  3. Backend: Added GET /api/prompts and GET /api/prompts/{id} endpoints
+  4. Backend: Prompt indexing on UserPromptSubmit hook with real-time broadcast
+  5. Frontend: Added prompts store with pagination/expand/copy functionality
+  6. Frontend: Created PromptLibraryModal component with infinite scroll
+  7. Frontend: Converted single FAB to expandable menu
+  8. WebSocket: Added NewPrompt event for real-time updates
+- Files created:
+  - `crates/clauset-types/src/prompt.rs` - Prompt and PromptSummary types
+  - `crates/clauset-core/src/prompt_indexer.rs` - Backfill logic
+  - `crates/clauset-server/src/routes/prompts.rs` - API routes
+  - `frontend/src/stores/prompts.ts` - SolidJS store
+  - `frontend/src/components/prompts/PromptLibraryModal.tsx` - Modal UI
+- Files modified:
+  - `crates/clauset-core/src/interaction_store.rs` - prompts table + CRUD
+  - `crates/clauset-types/src/hooks.rs` - Added cwd to UserPromptSubmit
+  - `crates/clauset-server/src/routes/hooks.rs` - Index prompts on hook
+  - `crates/clauset-types/src/ws.rs` - Added NewPrompt message
+  - `crates/clauset-server/src/global_ws.rs` - Forward NewPrompt events
+  - `frontend/src/lib/api.ts` - Prompt API types
+  - `frontend/src/lib/globalWs.ts` - Handle new_prompt events
+  - `frontend/src/pages/Sessions.tsx` - FAB menu + modal integration
+
+### Previous
 
 ### Import Session Enhancement (Just Completed)
 - **Problem**: Import from terminal created empty session shell - no chat history, status "Created" instead of "Stopped"

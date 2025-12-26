@@ -156,6 +156,7 @@ pub enum HookEvent {
         session_id: Uuid,
         claude_session_id: String,
         prompt: String,
+        cwd: Option<String>,
     },
 
     /// Tool is about to execute
@@ -233,6 +234,7 @@ impl TryFrom<HookEventPayload> for HookEvent {
                 session_id,
                 claude_session_id,
                 prompt: p.prompt.unwrap_or_default(),
+                cwd: p.cwd,
             }),
 
             "PreToolUse" => Ok(HookEvent::PreToolUse {

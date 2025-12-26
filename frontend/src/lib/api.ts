@@ -253,6 +253,32 @@ export interface ImportSessionResponse {
   ws_url: string;
 }
 
+// Prompt Library types
+export interface Prompt {
+  id: string;
+  claude_session_id: string;
+  project_path: string;
+  content: string;
+  preview: string;
+  timestamp: number;
+  word_count: number;
+  char_count: number;
+}
+
+export interface PromptSummary {
+  id: string;
+  preview: string;
+  project_name: string;
+  timestamp: number;
+  word_count: number;
+}
+
+export interface PromptsListResponse {
+  prompts: PromptSummary[];
+  total_count: number;
+  has_more: boolean;
+}
+
 const BASE_URL = '/api';
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
@@ -393,5 +419,12 @@ export const api = {
     },
 
     storage: () => fetchJSON<StorageStats>('/analytics/storage'),
+  },
+
+  prompts: {
+    list: (limit = 50, offset = 0) =>
+      fetchJSON<PromptsListResponse>(`/prompts?limit=${limit}&offset=${offset}`),
+
+    get: (id: string) => fetchJSON<Prompt>(`/prompts/${id}`),
   },
 };

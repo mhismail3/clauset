@@ -51,6 +51,8 @@ pub enum ProcessEvent {
     },
     /// Chat event for chat mode view.
     Chat(clauset_types::ChatEvent),
+    /// New prompt indexed for Prompt Library.
+    NewPrompt(clauset_types::PromptSummary),
 }
 
 /// Options for spawning a Claude process.

@@ -12,11 +12,14 @@ import {
 } from '../stores/sessions';
 import { NewSessionModal } from '../components/chat/NewSessionModal';
 import { SearchModal } from '../components/interactions/SearchModal';
+import { PromptLibraryModal } from '../components/prompts/PromptLibraryModal';
 import { api, Session } from '../lib/api';
 
 export default function Sessions() {
   const [showNewSession, setShowNewSession] = createSignal(false);
   const [showSearch, setShowSearch] = createSignal(false);
+  const [showPromptLibrary, setShowPromptLibrary] = createSignal(false);
+  const [fabOpen, setFabOpen] = createSignal(false);
   const [menuState, setMenuState] = createSignal<{
     session: Session;
     position: { top: number; bottom: number; right: number; openUpward: boolean };
@@ -357,33 +360,120 @@ export default function Sessions() {
         </div>
       </main>
 
-      {/* Floating Action Button */}
-      <button
-        onClick={() => setShowNewSession(true)}
-        class="card-pressable"
+      {/* FAB Menu */}
+      <div
         style={{
           position: 'fixed',
           bottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)',
           right: '24px',
-          width: '56px',
-          height: '56px',
+          'z-index': '30',
           display: 'flex',
-          "align-items": 'center',
-          "justify-content": 'center',
-          background: 'var(--color-bg-surface)',
-          border: '1.5px solid var(--color-bg-overlay)',
-          "border-radius": '18px',
-          color: 'var(--color-accent)',
-          cursor: 'pointer',
-          "box-shadow": '3px 3px 0px rgba(0, 0, 0, 0.4)',
-          "z-index": '30',
+          'flex-direction': 'column',
+          'align-items': 'flex-end',
+          gap: '12px',
         }}
       >
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <line x1="12" y1="5" x2="12" y2="19" />
-          <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-      </button>
+        {/* Menu items (shown when FAB is open) */}
+        <Show when={fabOpen()}>
+          {/* Prompt Library button */}
+          <button
+            onClick={() => {
+              setShowPromptLibrary(true);
+              setFabOpen(false);
+            }}
+            class="card-pressable"
+            style={{
+              display: 'flex',
+              'align-items': 'center',
+              gap: '10px',
+              padding: '10px 16px',
+              background: 'var(--color-bg-surface)',
+              border: '1.5px solid var(--color-bg-overlay)',
+              'border-radius': '12px',
+              color: 'var(--color-text-primary)',
+              cursor: 'pointer',
+              'box-shadow': '2px 2px 0px rgba(0, 0, 0, 0.3)',
+              'font-family': 'var(--font-mono)',
+              'font-size': '13px',
+              'white-space': 'nowrap',
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style={{ color: 'var(--color-accent)' }}>
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+            Prompt Library
+          </button>
+
+          {/* New Session button */}
+          <button
+            onClick={() => {
+              setShowNewSession(true);
+              setFabOpen(false);
+            }}
+            class="card-pressable"
+            style={{
+              display: 'flex',
+              'align-items': 'center',
+              gap: '10px',
+              padding: '10px 16px',
+              background: 'var(--color-bg-surface)',
+              border: '1.5px solid var(--color-bg-overlay)',
+              'border-radius': '12px',
+              color: 'var(--color-text-primary)',
+              cursor: 'pointer',
+              'box-shadow': '2px 2px 0px rgba(0, 0, 0, 0.3)',
+              'font-family': 'var(--font-mono)',
+              'font-size': '13px',
+              'white-space': 'nowrap',
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style={{ color: 'var(--color-secondary)' }}>
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            New Session
+          </button>
+        </Show>
+
+        {/* Main FAB button */}
+        <button
+          onClick={() => setFabOpen(!fabOpen())}
+          class="card-pressable"
+          style={{
+            width: '56px',
+            height: '56px',
+            display: 'flex',
+            'align-items': 'center',
+            'justify-content': 'center',
+            background: 'var(--color-bg-surface)',
+            border: '1.5px solid var(--color-bg-overlay)',
+            'border-radius': '18px',
+            color: 'var(--color-accent)',
+            cursor: 'pointer',
+            'box-shadow': '3px 3px 0px rgba(0, 0, 0, 0.4)',
+            transform: fabOpen() ? 'rotate(45deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s ease',
+          }}
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+      </div>
+
+      {/* FAB backdrop (closes FAB menu) */}
+      <Show when={fabOpen()}>
+        <div
+          style={{
+            position: 'fixed',
+            inset: '0',
+            'z-index': '29',
+          }}
+          onClick={() => setFabOpen(false)}
+        />
+      </Show>
 
       {/* Dropdown Menu */}
       <Show when={menuState()}>
@@ -651,6 +741,12 @@ export default function Sessions() {
       <SearchModal
         isOpen={showSearch()}
         onClose={() => setShowSearch(false)}
+      />
+
+      {/* Prompt Library Modal */}
+      <PromptLibraryModal
+        isOpen={showPromptLibrary()}
+        onClose={() => setShowPromptLibrary(false)}
       />
     </div>
   );

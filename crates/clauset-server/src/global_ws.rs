@@ -120,6 +120,11 @@ pub async fn handle_global_websocket(socket: WebSocket, state: Arc<AppState>) ->
                             Some(WsServerMessage::ChatEvent { event: chat_event.clone() })
                         }
 
+                        // Forward new prompts for Prompt Library real-time updates
+                        ProcessEvent::NewPrompt(prompt) => {
+                            Some(WsServerMessage::NewPrompt { prompt: prompt.clone() })
+                        }
+
                         _ => None,
                     };
 
