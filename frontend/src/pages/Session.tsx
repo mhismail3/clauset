@@ -738,39 +738,51 @@ export default function SessionPage() {
 
         {/* Resume prompt for stopped sessions */}
         <Show when={isSessionStopped()}>
-          <div
-            class="card-bordered"
-            style={{
-              margin: '16px',
-              padding: '24px',
-              "text-align": 'center',
-            }}
-          >
-            <div
-              style={{
-                width: '48px',
-                height: '48px',
-                margin: '0 auto 12px',
-                "border-radius": '50%',
-                background: 'var(--color-bg-elevated)',
-                display: 'flex',
-                "align-items": 'center',
-                "justify-content": 'center',
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-text-muted">
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
+          <div style={{
+            display: 'flex',
+            "align-items": 'center',
+            "justify-content": 'center',
+            flex: '1',
+            "min-height": '300px',
+          }}>
+            <div style={{ "text-align": 'center', padding: '24px' }}>
+              <p class="text-mono" style={{ color: 'var(--color-text-primary)', "font-size": '15px', "font-weight": '600', "margin-bottom": '8px' }}>
+                Session ended
+              </p>
+              <p style={{
+                color: 'var(--color-text-tertiary)',
+                "font-family": 'var(--font-serif)',
+                "font-size": '14px',
+                "margin-bottom": '24px'
+              }}>
+                Resume to continue where you left off
+              </p>
+              <button
+                onClick={handleResume}
+                disabled={resuming()}
+                style={{
+                  display: 'inline-flex',
+                  "align-items": 'center',
+                  gap: '8px',
+                  padding: '10px 18px',
+                  "border-radius": '6px',
+                  border: '1.5px solid var(--color-accent)',
+                  background: 'transparent',
+                  color: 'var(--color-accent)',
+                  "font-family": 'var(--font-mono)',
+                  "font-size": '13px',
+                  "font-weight": '600',
+                  cursor: resuming() ? 'default' : 'pointer',
+                  opacity: resuming() ? 0.6 : 1,
+                  transition: 'background 0.15s ease',
+                }}
+                onMouseEnter={(e) => !resuming() && (e.currentTarget.style.background = 'var(--color-accent-muted)')}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+              >
+                <span style={{ "font-size": '14px' }}>▸</span>
+                {resuming() ? 'Resuming...' : 'Resume'}
+              </button>
             </div>
-            <p style={{ color: 'var(--color-text-secondary)', "margin-bottom": '16px' }}>
-              Session ended. Resume to continue.
-            </p>
-            <Button
-              onClick={handleResume}
-              disabled={resuming()}
-            >
-              {resuming() ? 'Resuming...' : 'Resume'}
-            </Button>
           </div>
         </Show>
 
@@ -778,42 +790,27 @@ export default function SessionPage() {
         <Show when={currentView() === 'chat'}>
           <div class="flex-1 flex flex-col" style={{ "min-height": '0' }}>
             <main class="flex-1 scrollable p-4 space-y-4" style={{ "min-height": '0' }}>
-              {/* Empty state when no messages yet */}
-              <Show when={messages().length === 0 && !streamingContent()}>
-                <div
-                  style={{
-                    padding: '32px 24px',
-                    "text-align": 'center',
-                    background: 'var(--color-bg-surface)',
-                    border: '1.5px solid var(--color-bg-overlay)',
-                    "border-radius": '14px',
-                    "box-shadow": '3px 3px 0px rgba(0, 0, 0, 0.3)',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: '56px',
-                      height: '56px',
-                      margin: '0 auto 16px',
-                      "border-radius": '14px',
-                      background: 'var(--color-accent-muted)',
-                      border: '1px solid var(--color-accent)',
-                      display: 'flex',
-                      "align-items": 'center',
-                      "justify-content": 'center',
-                      "box-shadow": '2px 2px 0px rgba(0, 0, 0, 0.2)',
-                    }}
-                  >
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2">
-                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                    </svg>
+              {/* Empty state when no messages yet (only show when session is active) */}
+              <Show when={messages().length === 0 && !streamingContent() && !isSessionStopped()}>
+                <div style={{
+                  display: 'flex',
+                  "align-items": 'center',
+                  "justify-content": 'center',
+                  flex: '1',
+                  "min-height": '200px',
+                }}>
+                  <div style={{ "text-align": 'center', padding: '24px' }}>
+                    <p class="text-mono" style={{ color: 'var(--color-text-primary)', "font-size": '15px', "font-weight": '600', "margin-bottom": '8px' }}>
+                      No messages yet
+                    </p>
+                    <p style={{
+                      color: 'var(--color-text-tertiary)',
+                      "font-family": 'var(--font-serif)',
+                      "font-size": '14px',
+                    }}>
+                      Messages from Claude will appear here
+                    </p>
                   </div>
-                  <p class="text-mono" style={{ color: 'var(--color-text-primary)', "font-size": '15px', "font-weight": '600', "margin-bottom": '6px' }}>
-                    No messages yet
-                  </p>
-                  <p style={{ color: 'var(--color-text-tertiary)', "font-size": '13px' }}>
-                    Messages from Claude will appear here.
-                  </p>
                 </div>
               </Show>
 

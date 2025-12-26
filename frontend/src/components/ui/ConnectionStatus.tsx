@@ -12,7 +12,8 @@ export interface ConnectionStatusProps {
 
 export function ConnectionStatus(props: ConnectionStatusProps) {
   const showBanner = createMemo(() => {
-    // Don't show banner for normal states
+    // Don't show banner for normal states or if state is undefined
+    if (!props.state) return false;
     return props.state !== 'initial' && props.state !== 'connected';
   });
 
@@ -22,11 +23,13 @@ export function ConnectionStatus(props: ConnectionStatusProps) {
       'align-items': 'center',
       'justify-content': 'center',
       gap: '8px',
-      padding: '8px 16px',
+      padding: '16px 16px',
       'font-family': 'var(--font-mono)',
       'font-size': '12px',
       'font-weight': '500',
       'text-align': 'center' as const,
+      'backdrop-filter': 'blur(12px)',
+      '-webkit-backdrop-filter': 'blur(12px)',
     };
 
     switch (props.state) {
@@ -35,30 +38,30 @@ export function ConnectionStatus(props: ConnectionStatusProps) {
       case 'backoff':
         return {
           ...base,
-          background: 'rgba(212, 166, 68, 0.15)',
+          background: 'rgba(212, 166, 68, 0.25)',
           color: '#d4a644',
-          'border-bottom': '1px solid rgba(212, 166, 68, 0.3)',
+          'border-bottom': '1px solid rgba(212, 166, 68, 0.4)',
         };
       case 'stale':
         return {
           ...base,
-          background: 'rgba(212, 166, 68, 0.2)',
+          background: 'rgba(212, 166, 68, 0.3)',
           color: '#d4a644',
-          'border-bottom': '1px solid rgba(212, 166, 68, 0.4)',
+          'border-bottom': '1px solid rgba(212, 166, 68, 0.5)',
         };
       case 'failed':
         return {
           ...base,
-          background: 'rgba(196, 91, 55, 0.15)',
+          background: 'rgba(196, 91, 55, 0.25)',
           color: '#c45b37',
-          'border-bottom': '1px solid rgba(196, 91, 55, 0.3)',
+          'border-bottom': '1px solid rgba(196, 91, 55, 0.4)',
         };
       case 'suspended':
         return {
           ...base,
-          background: 'rgba(92, 88, 85, 0.15)',
+          background: 'rgba(92, 88, 85, 0.25)',
           color: '#9a9590',
-          'border-bottom': '1px solid rgba(92, 88, 85, 0.3)',
+          'border-bottom': '1px solid rgba(92, 88, 85, 0.4)',
         };
       default:
         return base;
