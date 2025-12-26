@@ -1,6 +1,5 @@
-import { Show, createSignal, createEffect, onMount, onCleanup, For } from 'solid-js';
+import { Show, createSignal, onMount, onCleanup, For } from 'solid-js';
 import { useParams, useNavigate } from '@solidjs/router';
-import { Button } from '../components/ui/Button';
 import { Spinner } from '../components/ui/Spinner';
 import { ConnectionStatus } from '../components/ui/ConnectionStatus';
 import { MessageBubble } from '../components/chat/MessageBubble';
@@ -256,7 +255,7 @@ export default function SessionPage() {
 
     switch (msg.type) {
       case 'text': {
-        const { message_id, content, is_complete } = msg as { message_id: string; content: string; is_complete: boolean };
+        const { message_id, content, is_complete } = msg as unknown as { message_id: string; content: string; is_complete: boolean };
         setCurrentStreamingId(message_id);
         appendToStreamingMessage(sessionId, message_id, content);
         if (is_complete) {
@@ -267,13 +266,13 @@ export default function SessionPage() {
         break;
       }
       case 'message_complete': {
-        const { message_id } = msg as { message_id: string };
+        const { message_id } = msg as unknown as { message_id: string };
         finalizeStreamingMessage(sessionId, message_id);
         setCurrentStreamingId(null);
         break;
       }
       case 'tool_use': {
-        const { message_id, tool_use_id, tool_name, input } = msg as {
+        const { message_id, tool_use_id, tool_name, input } = msg as unknown as {
           message_id: string;
           tool_use_id: string;
           tool_name: string;
@@ -288,7 +287,7 @@ export default function SessionPage() {
         break;
       }
       case 'tool_result': {
-        const { tool_use_id, output, is_error } = msg as {
+        const { tool_use_id, output, is_error } = msg as unknown as {
           tool_use_id: string;
           output: string;
           is_error: boolean;
@@ -301,14 +300,14 @@ export default function SessionPage() {
         break;
       }
       case 'error': {
-        const { message } = msg as { message: string };
+        const { message } = msg as unknown as { message: string };
         setError(message);
         break;
       }
       case 'terminal_buffer': {
         // DEPRECATED: Legacy message type. Server now uses sync_response via reliable streaming.
         // Kept for backward compatibility during transition.
-        const { data } = msg as { data: number[] };
+        const { data } = msg as unknown as { data: number[] };
         const bytes = new Uint8Array(data);
 
         // Clear localStorage for this session since server is source of truth
@@ -351,7 +350,7 @@ export default function SessionPage() {
       case 'terminal_output': {
         // DEPRECATED: Legacy message type. Server now uses terminal_chunk via reliable streaming.
         // Kept for backward compatibility during transition.
-        const { data } = msg as { data: number[] };
+        const { data } = msg as unknown as { data: number[] };
         const bytes = new Uint8Array(data);
         appendTerminalOutput(sessionId, bytes);
         if (terminalWriteFn) {
@@ -423,7 +422,7 @@ export default function SessionPage() {
       }
       case 'activity_update': {
         // Activity update from global broadcast - update local session state
-        const { model, cost, input_tokens, output_tokens, context_percent, current_step, recent_actions } = msg as {
+        const { model, cost, input_tokens, output_tokens, context_percent, current_step, recent_actions } = msg as unknown as {
           model: string;
           cost: number;
           input_tokens: number;
@@ -449,7 +448,7 @@ export default function SessionPage() {
       }
       case 'chat_history': {
         // Full chat history from backend (on connect)
-        const chatMessages = (msg as { messages: ChatMessage[] }).messages;
+        const chatMessages = (msg as unknown as { messages: ChatMessage[] }).messages;
         if (chatMessages && Array.isArray(chatMessages)) {
           handleChatHistory(params.id, chatMessages);
           scrollToBottom();
@@ -458,7 +457,7 @@ export default function SessionPage() {
       }
       case 'chat_event': {
         // Chat event from hook processing - update chat messages
-        const chatEvent = (msg as { event: ChatEvent }).event;
+        const chatEvent = (msg as unknown as { event: ChatEvent }).event;
         if (chatEvent) {
           handleChatEvent(chatEvent);
           scrollToBottom();

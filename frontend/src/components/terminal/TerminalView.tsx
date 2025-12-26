@@ -203,7 +203,7 @@ function createTouchScroller(getViewport: () => HTMLElement | null) {
     touchState.lastTime = now;
   }
 
-  function handleTouchEnd(e: TouchEvent) {
+  function handleTouchEnd(_e: TouchEvent) {
     if (!touchState) return;
     const viewport = getViewport();
     if (!viewport) return;
@@ -248,6 +248,8 @@ function createTouchScroller(getViewport: () => HTMLElement | null) {
       if (Math.abs(velocity) < MIN_VELOCITY) return;
 
       function momentumStep() {
+        // viewport was validated before entering this code path
+        if (!viewport) return;
         const bounds = getScrollBounds(viewport);
         const currentScroll = viewport.scrollTop;
 
@@ -354,6 +356,10 @@ export function TerminalView(props: TerminalViewProps) {
   let charWidth: number | null = null;
   let charHeight: number | null = null;
 
+  // Track last container dimensions to filter spurious ResizeObserver events
+  let lastContainerWidth: number = 0;
+  let lastContainerHeight: number = 0;
+
   // Fixed font size based on device (no user adjustment)
   const fontSize = getRecommendedFontSize();
   const [ctrlActive, setCtrlActive] = createSignal(false);
@@ -373,21 +379,6 @@ export function TerminalView(props: TerminalViewProps) {
   // Helper to get xterm viewport element
   function getViewport(): HTMLElement | null {
     return containerRef?.querySelector('.xterm-viewport') as HTMLElement | null;
-  }
-
-  // Check if we're currently at the bottom of the scroll
-  function isAtBottom(): boolean {
-    const viewport = getViewport();
-    if (!viewport) return true;
-    const maxScroll = viewport.scrollHeight - viewport.clientHeight;
-    return maxScroll <= 0 || viewport.scrollTop >= maxScroll - 10;
-  }
-
-  // Scroll to bottom of terminal
-  function scrollToBottom() {
-    const viewport = getViewport();
-    if (!viewport) return;
-    viewport.scrollTop = viewport.scrollHeight - viewport.clientHeight;
   }
 
   // Save scroll position BEFORE any height changes
@@ -468,13 +459,13 @@ export function TerminalView(props: TerminalViewProps) {
   });
 
   function sendSpecialKey(key: typeof SPECIAL_KEYS[number]) {
-    if (key.isModifier) {
+    if ('isModifier' in key && key.isModifier) {
       setCtrlActive(!ctrlActive());
       return;
     }
 
     const encoder = new TextEncoder();
-    let code = key.code!;
+    let code = key.code as string;
 
     if (ctrlActive() && code.length === 1) {
       const charCode = code.toUpperCase().charCodeAt(0);
@@ -535,6 +526,21 @@ export function TerminalView(props: TerminalViewProps) {
 
   // Debounced resize handler
   function handleResize() {
+    if (!containerRef) return;
+
+    // Filter spurious ResizeObserver events when container size hasn't changed
+    // This prevents flickering when Claude Code's TUI causes xterm viewport
+    // changes without actual container resize
+    const width = containerRef.clientWidth;
+    const height = containerRef.clientHeight;
+
+    if (width === lastContainerWidth && height === lastContainerHeight) {
+      return; // Container unchanged, ignore
+    }
+
+    lastContainerWidth = width;
+    lastContainerHeight = height;
+
     if (resizeTimeout) {
       clearTimeout(resizeTimeout);
     }
@@ -584,6 +590,10 @@ export function TerminalView(props: TerminalViewProps) {
     terminal.loadAddon(fitAddon);
 
     terminal.open(containerRef!);
+
+    // Initialize dimension tracking to current container size
+    lastContainerWidth = containerRef!.clientWidth;
+    lastContainerHeight = containerRef!.clientHeight;
 
     // Set up custom touch scrolling for smooth iOS experience
     const getViewport = () => containerRef?.querySelector('.xterm-viewport') as HTMLElement | null;
@@ -862,16 +872,16 @@ export function TerminalView(props: TerminalViewProps) {
                   display: 'flex',
                   "align-items": 'center',
                   "justify-content": 'center',
-                  background: key.isModifier && ctrlActive()
+                  background: 'isModifier' in key && key.isModifier && ctrlActive()
                     ? 'var(--color-accent)'
                     : 'var(--color-bg-elevated)',
-                  color: key.isModifier && ctrlActive()
+                  color: 'isModifier' in key && key.isModifier && ctrlActive()
                     ? '#ffffff'
                     : 'var(--color-text-primary)',
-                  "box-shadow": key.isModifier && ctrlActive()
+                  "box-shadow": 'isModifier' in key && key.isModifier && ctrlActive()
                     ? 'none'
                     : 'var(--shadow-retro-sm)',
-                  transform: key.isModifier && ctrlActive()
+                  transform: 'isModifier' in key && key.isModifier && ctrlActive()
                     ? 'translate(2px, 2px)'
                     : 'none',
                 }}

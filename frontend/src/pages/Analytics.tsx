@@ -9,7 +9,6 @@ import {
   formatTokens,
   formatBytes,
 } from '../stores/interactions';
-import { formatRelativeTime } from '../stores/sessions';
 import { api } from '../lib/api';
 import type { StorageStats } from '../lib/api';
 

@@ -1,7 +1,7 @@
-import { Show, For, createMemo } from 'solid-js';
+import { Show, For, createMemo, type JSX } from 'solid-js';
 import { A } from '@solidjs/router';
 import { Badge } from './ui/Badge';
-import { Session, RecentAction } from '../lib/api';
+import type { Session } from '../lib/api';
 import { getStatusVariant, getStatusLabel, formatRelativeTime } from '../stores/sessions';
 
 interface SessionCardProps {

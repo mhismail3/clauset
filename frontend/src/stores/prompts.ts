@@ -1,6 +1,6 @@
 import { createSignal } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import { api, PromptSummary, Prompt } from '../lib/api';
+import { api, PromptSummary } from '../lib/api';
 
 const PAGE_SIZE = 50;
 

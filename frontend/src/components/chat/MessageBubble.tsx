@@ -654,7 +654,7 @@ function ToolCallView(props: { toolCall: ToolCall }) {
               >
                 {props.toolCall.isError ? 'Error' : 'Output'}
               </div>
-              {formatToolOutput(props.toolCall.name, props.toolCall.output, !!props.toolCall.isError)}
+              {formatToolOutput(props.toolCall.name, props.toolCall.output ?? '', !!props.toolCall.isError)}
             </div>
           </Show>
         </div>

@@ -200,7 +200,8 @@ function DiffStats(props: { diff: FileDiff }) {
 }
 
 export function DiffViewer(props: DiffViewerProps) {
-  const [viewMode, setViewMode] = createSignal<'split' | 'unified'>('unified');
+  // View mode toggle planned for future - keeping unified for now
+  const [_viewMode, _setViewMode] = createSignal<'split' | 'unified'>('unified');
 
   createEffect(() => {
     computeDiff(

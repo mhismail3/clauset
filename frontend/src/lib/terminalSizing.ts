@@ -2,7 +2,7 @@
 // Phase 3.2: Ensures correct dimensions even with slow font loading
 
 import type { FitAddon } from '@xterm/addon-fit';
-import { isIOS, isPWA } from './fonts';
+import { isIOS } from './fonts';
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 

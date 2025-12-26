@@ -1,6 +1,5 @@
 import { For, Show, onMount, createSignal, onCleanup } from 'solid-js';
-import { useNavigate, A } from '@solidjs/router';
-import { Button } from '../components/ui/Button';
+import { A } from '@solidjs/router';
 import { Spinner } from '../components/ui/Spinner';
 import { SessionCard } from '../components/SessionCard';
 import {
@@ -27,7 +26,6 @@ export default function Sessions() {
   } | null>(null);
   const [renameValue, setRenameValue] = createSignal('');
   const [deleting, setDeleting] = createSignal(false);
-  const navigate = useNavigate();
 
   let menuRef: HTMLDivElement | undefined;
 

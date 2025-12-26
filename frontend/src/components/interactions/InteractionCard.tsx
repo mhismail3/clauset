@@ -1,4 +1,4 @@
-import { Show, For, createSignal } from 'solid-js';
+import { Show, For, createSignal, type JSX } from 'solid-js';
 import type { InteractionSummary, ToolInvocation, FileChangeWithDiff } from '../../lib/api';
 import { Badge } from '../ui/Badge';
 import { formatCost, formatTokens, formatDuration } from '../../stores/interactions';

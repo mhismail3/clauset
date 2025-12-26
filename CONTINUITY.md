@@ -162,19 +162,36 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
-- Terminal glitch fix complete
+- Terminal flicker fix for "/" command picker - DONE
 
-### Terminal Glitch Fix (Just Completed)
-- **Problem**: Terminal flickered/glitched when Claude Code's slash command autocomplete appeared
-- **Root cause**: `writeToTerminal()` was manipulating scroll position on EVERY write when keyboard visible
-  - Claude Code rapidly updates screen when showing autocomplete
-  - Each write triggered scroll restoration → fought with Claude Code's cursor positioning
-  - Result: visual flickering as scroll position jumped back and forth
-- **Fix**: Removed scroll manipulation from `writeToTerminal()` entirely
-  - Scroll handling is now only in keyboard transition callbacks (saveScrollPosition/restoreScrollPosition)
-  - This prevents fighting with TUI applications that manage their own screen layout
+### Terminal "/" Flicker Fix (Just Completed)
+- **Problem**: Terminal flickered when "/" was typed (both toolbar button and keyboard), continuing AFTER Claude Code's command picker appeared
+- **Root cause**: ResizeObserver fired for xterm internal viewport changes, triggering resize cascade even when container dimensions hadn't changed
+- **Fix**: Added dimension-based filtering to `handleResize()` - only process resize events when container width/height actually changed
+- **Files changed**:
+  - `frontend/src/components/terminal/TerminalView.tsx`:
+    - Added `lastContainerWidth` and `lastContainerHeight` tracking variables
+    - Modified `handleResize()` to check if container dimensions actually changed before triggering resize
+    - Initialize dimensions in `onMount()` after terminal.open()
+
+### Terminal Flicker Fix - Comprehensive (Just Completed)
+- **Problem**: Terminal still flickered when interacting with Claude Code's autocomplete
+- **Root causes identified**:
+  1. **Double sync requests**: `handleTerminalResize()` called both `setTerminalDimensions()` and `requestResync()` - double the server updates!
+  2. **No debouncing of dimension updates**: Rapid dimension changes (keyboard animation) each triggered immediate PTY resize
+  3. **Keyboard callbacks bypassed debounce**: `onShow`/`onHide` called `doFitAndResize()` directly instead of debounced `handleResize()`
+- **Fixes applied**:
+  1. **Session.tsx**: Removed duplicate `requestResync()` call - `setTerminalDimensions()` already handles sync
+  2. **ws.ts**: Added 150ms debounce to `setTerminalDimensions()` to coalesce rapid dimension changes
+  3. **TerminalView.tsx**: Keyboard callbacks now use debounced `handleResize()` instead of immediate `doFitAndResize()`
+- **Result**: Single debounced resize event instead of multiple rapid PTY resizes
 - Files changed:
-  - `frontend/src/components/terminal/TerminalView.tsx` - Simplified `writeToTerminal()` to just write data
+  - `frontend/src/pages/Session.tsx` - Removed duplicate resync
+  - `frontend/src/lib/ws.ts` - Added dimension update debouncing (150ms)
+  - `frontend/src/components/terminal/TerminalView.tsx` - Use debounced resize for keyboard callbacks
+
+### Previous Terminal Fixes
+- Removed scroll manipulation from `writeToTerminal()` to prevent fighting with TUI applications
 
 ### Previous
 - Terminal dimension calculation fix complete
