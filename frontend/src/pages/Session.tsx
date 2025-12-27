@@ -1,4 +1,4 @@
-import { Show, createSignal, onMount, onCleanup, For } from 'solid-js';
+import { Show, createSignal, createMemo, onMount, onCleanup, For } from 'solid-js';
 import { useParams, useNavigate } from '@solidjs/router';
 import { Spinner } from '../components/ui/Spinner';
 import { ConnectionStatus } from '../components/ui/ConnectionStatus';
@@ -7,6 +7,12 @@ import { InputBar } from '../components/chat/InputBar';
 import { TerminalView } from '../components/terminal/TerminalView';
 import { TimelineView } from '../components/interactions/TimelineView';
 import { DiffViewer } from '../components/interactions/DiffViewer';
+import { StatusBar } from '../components/session/StatusBar';
+import { TodoWidget, type TodoItem } from '../components/session/TodoWidget';
+import { SubagentPanel, type ActiveSubagent } from '../components/session/SubagentPanel';
+import { KeyboardShortcutsModal } from '../components/session/KeyboardShortcutsModal';
+import { SessionSettingsMenu } from '../components/session/SessionSettingsMenu';
+import { AllowedToolsPanel } from '../components/session/AllowedToolsPanel';
 import { api, Session } from '../lib/api';
 import { createWebSocketManager, WsMessage, SyncResponse, ConnectionState } from '../lib/ws';
 import { useKeyboard } from '../lib/keyboard';
@@ -132,6 +138,13 @@ export default function SessionPage() {
   const [resuming, setResuming] = createSignal(false);
   const [mode, setMode] = createSignal<'normal' | 'plan'>('normal');
   const [isProcessing, setIsProcessing] = createSignal(false);
+  const [activeSubagents, setActiveSubagents] = createSignal<ActiveSubagent[]>([]);
+  const [hookData, setHookData] = createSignal<{
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    allowedTools?: string[];
+  }>({});
+  const [showShortcuts, setShowShortcuts] = createSignal(false);
 
   // iOS keyboard handling for chat view (follows visualViewport in real-time)
   // offsetTop counters iOS's automatic page scroll when keyboard appears
@@ -491,6 +504,11 @@ export default function SessionPage() {
         // Subagent (Task tool) started
         const data = msg as unknown as { session_id: string; agent_id: string; agent_type: string };
         handleSubagentStarted(params.id, data.agent_id, data.agent_type);
+        // Track active subagent
+        setActiveSubagents((prev) => [
+          ...prev,
+          { agentId: data.agent_id, agentType: data.agent_type, startedAt: Date.now() },
+        ]);
         scrollToBottom();
         break;
       }
@@ -498,6 +516,8 @@ export default function SessionPage() {
         // Subagent (Task tool) completed
         const data = msg as unknown as { session_id: string; agent_id: string };
         handleSubagentStopped(params.id, data.agent_id);
+        // Remove from active subagents
+        setActiveSubagents((prev) => prev.filter((s) => s.agentId !== data.agent_id));
         scrollToBottom();
         break;
       }
@@ -546,9 +566,11 @@ export default function SessionPage() {
             input_tokens: data.input_tokens,
             output_tokens: data.output_tokens,
             context_percent: contextPercent,
-            // Store cache tokens in extended session state
-            cache_read_tokens: data.cache_read_tokens,
-            cache_creation_tokens: data.cache_creation_tokens,
+          });
+          // Store cache tokens in hookData
+          setHookData({
+            cacheReadTokens: data.cache_read_tokens,
+            cacheCreationTokens: data.cache_creation_tokens,
           });
         }
         break;
@@ -706,6 +728,27 @@ export default function SessionPage() {
     return id ? getStreamingContent(params.id, id) : '';
   };
 
+  // Extract current todos from the most recent TodoWrite tool call
+  const todos = createMemo((): TodoItem[] => {
+    const msgs = messages();
+    // Look backwards through messages to find most recent TodoWrite
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const msg = msgs[i];
+      if (msg.toolCalls) {
+        for (let j = msg.toolCalls.length - 1; j >= 0; j--) {
+          const tc = msg.toolCalls[j];
+          if (tc.name === 'TodoWrite' && tc.input) {
+            const input = tc.input as { todos?: TodoItem[] };
+            if (input.todos && Array.isArray(input.todos)) {
+              return input.todos;
+            }
+          }
+        }
+      }
+    }
+    return [];
+  });
+
   return (
     <div
       class="flex flex-col"
@@ -845,6 +888,13 @@ export default function SessionPage() {
               </button>
             ))}
           </div>
+
+          {/* Settings Menu */}
+          <SessionSettingsMenu
+            model={session()?.model}
+            mode={mode()}
+            onShowShortcuts={() => setShowShortcuts(true)}
+          />
         </div>
       </header>
 
@@ -924,6 +974,26 @@ export default function SessionPage() {
         {/* Chat View */}
         <Show when={currentView() === 'chat'}>
           <div class="flex-1 flex flex-col" style={{ "min-height": '0' }}>
+            {/* Status Bar - Token/Cost Display */}
+            <StatusBar
+              model={session()?.model}
+              cost={session()?.total_cost_usd}
+              inputTokens={session()?.input_tokens}
+              outputTokens={session()?.output_tokens}
+              cacheReadTokens={hookData().cacheReadTokens}
+              cacheCreationTokens={hookData().cacheCreationTokens}
+              contextPercent={session()?.context_percent}
+            />
+
+            {/* Active Subagents Panel */}
+            <SubagentPanel subagents={activeSubagents()} />
+
+            {/* Todo Widget */}
+            <TodoWidget todos={todos()} />
+
+            {/* Allowed Tools Panel */}
+            <AllowedToolsPanel allowedTools={hookData().allowedTools} />
+
             <main class="flex-1 scrollable p-4 space-y-4" style={{ "min-height": '0' }}>
               {/* Empty state when no messages yet (only show when session is active) */}
               <Show when={messages().length === 0 && !streamingContent() && !isSessionStopped()}>
@@ -1090,6 +1160,12 @@ export default function SessionPage() {
           </div>
         </Show>
       </Show>
+
+      {/* Keyboard Shortcuts Modal */}
+      <KeyboardShortcutsModal
+        isOpen={showShortcuts()}
+        onClose={() => setShowShortcuts(false)}
+      />
     </div>
   );
 }

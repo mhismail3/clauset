@@ -162,9 +162,56 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
-- Chat Mode Feature Parity - **COMPLETE**
+- Non-Critical Chat Mode Features - **COMPLETE**
 
-### Chat Mode Feature Parity (Just Completed)
+### Non-Critical Chat Mode Features (Just Completed)
+All non-critical features from the plan have been implemented:
+
+1. **StatusBar Component** (`frontend/src/components/session/StatusBar.tsx`)
+   - Displays: Model | $Cost | InputK/OutputK | Cache: Xr/Yw | Context %
+   - Color-coded context percentage (green < 60%, yellow 60-80%, red > 80%)
+   - Mini progress bar for visual context usage
+
+2. **TodoWidget Component** (`frontend/src/components/session/TodoWidget.tsx`)
+   - Extracts todos from most recent TodoWrite tool call in messages
+   - Shows pending/in_progress/completed counts in header
+   - Status icons: ○ pending, ◐ in_progress, ✓ completed
+   - Expandable/collapsible panel
+
+3. **SubagentPanel Component** (`frontend/src/components/session/SubagentPanel.tsx`)
+   - Tracks active subagents from subagent_started/subagent_stopped events
+   - Shows agent type and elapsed time
+   - Animated pulse indicator for active agents
+   - Expandable/collapsible panel
+
+4. **KeyboardShortcutsModal** (`frontend/src/components/session/KeyboardShortcutsModal.tsx`)
+   - Shows keyboard shortcuts grouped by category (Input, Navigation, Views, Terminal Mode)
+   - Opened from Settings menu or "?" button
+   - Escape key to close
+
+5. **SessionSettingsMenu** (`frontend/src/components/session/SessionSettingsMenu.tsx`)
+   - Gear icon in session header
+   - Shows current model and mode
+   - Quick access to keyboard shortcuts
+   - Tip about using "/" for commands
+
+6. **AllowedToolsPanel** (`frontend/src/components/session/AllowedToolsPanel.tsx`)
+   - UI ready for allowed tools display (backend data flow pending)
+   - Categorizes tools: Read, Write, Execute, Web, Other
+   - Color-coded by category
+   - Expandable/collapsible panel
+
+**Session.tsx Integration:**
+- Added imports for all 6 components
+- Added state: `activeSubagents`, `hookData` (cache tokens, allowed tools), `showShortcuts`
+- Added `todos` memo extracting from messages
+- StatusBar, SubagentPanel, TodoWidget, AllowedToolsPanel in chat view
+- KeyboardShortcutsModal at component root
+- SessionSettingsMenu in header
+
+**Note:** AllowedToolsPanel shows when `hookData().allowedTools` is populated. Currently no backend sends this data - component is ready for future enhancement.
+
+### Chat Mode Feature Parity (Previous)
 - **Goal**: Add missing affordances to bring chat mode to parity with CLI (permissions, interrupt, mode indicator)
 - **Plan file**: `~/.claude/plans/synthetic-strolling-fountain.md`
 
