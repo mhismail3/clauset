@@ -162,6 +162,91 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
+- Test Suite Implementation - **COMPLETE**
+
+### Test Suite Implementation Progress
+- **Goal**: 290+ tests for 100% Claude Code CLI parity verification
+- **Starting point**: 72 tests
+- **Final count**: 447 tests (520% increase, exceeds target by 54%)
+- **Plan file**: `~/.claude/plans/graceful-puzzling-russell.md`
+
+#### Completed Phases:
+1. **Phase 1: Foundation** - COMPLETE
+   - Backend test dependencies (proptest, tokio-test, axum-test, tempfile)
+   - Frontend test stack (vitest, @solidjs/testing-library, mock-socket)
+   - vitest.config.ts with SolidJS support
+   - Test setup file with localStorage, WebSocket, ResizeObserver mocks
+   - 12 hook event JSON fixtures
+
+2. **Phase 2: Backend Unit Tests** - COMPLETE (293 tests)
+   - clauset-core: 139 tests (buffer, session, chat_processor, interaction)
+   - clauset-types: 123 tests (ws serialization, hooks, interactive)
+   - clauset-server: 27 integration tests (hook→WS pipeline)
+   - Other: 4 tests
+
+3. **Phase 3: Frontend Unit Tests** - COMPLETE (154 tests)
+   - messages.test.ts: 44 tests (CRUD, streaming, tool calls, ChatEvent handling)
+   - ws.test.ts: 56 tests (connection state machine, sync protocol, sequence tracking, gap recovery, ACK batching, heartbeat, dimension updates)
+   - interactive.test.ts: 47 tests (prompt state, question navigation, multi-select, answer ordering)
+   - example.test.ts: 7 tests (infrastructure verification)
+
+4. **Phase 4: Integration Tests** - COMPLETE (27 tests)
+   - hook_pipeline.rs: All 12 hook event types tested
+   - Session lifecycle, context window extraction, tool events
+   - Concurrent events, performance, error handling
+
+#### Skipped (deferred):
+- Phase 5: Playwright E2E tests
+- Phase 6: GitHub Actions CI workflow
+
+### Previous Work
+- Claude Code CLI Parity Implementation - **COMPLETED**
+
+### Claude Code CLI Parity (Completed)
+- **Goal**: Full feature parity with Claude Code CLI in Clauset chat mode
+- **Approach**: Reverse-engineered cli.js (v2.0.76) to understand hook system, event types, JSON structures
+- **Plan file**: `~/.claude/plans/graceful-puzzling-russell.md` (612 lines of documentation)
+
+#### All Phases Completed:
+1. **Phase 1: Types** - Added ContextWindow, CurrentUsage, ModelInfo, WorkspaceInfo types to hooks.rs
+2. **Phase 1: SubagentStart** - Added SubagentStart hook event type with agent_id, agent_type fields
+3. **Phase 1: PostToolUseFailure** - Added hook event type with error, is_timeout, is_interrupt fields
+4. **Phase 2: Token Tracking** - Now using context_window from hooks for accurate token counts (replaces fragile regex parsing)
+5. **Phase 2: Event Broadcasting** - Added ProcessEvent and WsServerMessage variants for:
+   - SubagentStarted/SubagentStopped (Task tool tracking)
+   - ToolError (tool failure display)
+   - ContextCompacting (compaction notices)
+   - PermissionRequest (permission dialogs)
+   - ContextUpdate (accurate cache token stats)
+6. **Phase 3: WebSocket Events** - All new events forwarded to frontend via websocket.rs
+7. **Phase 4: Frontend Display** - Updated frontend to display new events:
+   - Added `system` role to Message interface with systemType and metadata
+   - Added handler functions: handleSubagentStarted, handleSubagentStopped, handleToolError, handleContextCompacting, handlePermissionRequest
+   - Updated Session.tsx to handle new WebSocket message types (including permission_request, context_update)
+   - Updated MessageBubble.tsx to render system messages as centered pills with icons:
+     - Tool errors: Red with ⚠ icon
+     - Context compacting: Yellow with ⟳ icon
+     - Subagent started: Blue with ▶ icon
+     - Subagent completed: Green with ✓ icon
+     - Permission request: Purple with 🔐 icon
+8. **Phase 5: Regex Removal** - Added `hook_context_received` flag to buffer.rs; skip regex parsing when hook data is available
+9. **Phase 6: TodoWrite Visualization** - Added TodoWrite tool rendering in ToolCallView with status icons (○ pending, ◐ in_progress, ✓ completed)
+10. **Phase 7: Permission Request Display** - PermissionRequest events broadcast from hooks and display as purple system messages
+11. **Phase 8: Plan Mode Indicator** - Added EnterPlanMode/ExitPlanMode tool rendering with plan mode icons
+12. **Phase 9: MCP Tool Display** - Added MCP tool parsing (mcp__{server}__{tool}), purple accent color, special icons, shortened display names
+13. **Phase 10: Cache Token Stats** - ContextUpdate events include cache_read_tokens and cache_creation_tokens, stored in session state
+
+#### Key Files Modified:
+- `crates/clauset-types/src/hooks.rs` - Added ContextWindow, new event types
+- `crates/clauset-types/src/ws.rs` - Added new WsServerMessage variants
+- `crates/clauset-core/src/process.rs` - Added new ProcessEvent variants
+- `crates/clauset-core/src/buffer.rs` - Added `update_context_from_hook()`
+- `crates/clauset-core/src/session.rs` - Added `update_context_from_hook()`
+- `crates/clauset-server/src/routes/hooks.rs` - Use context_window, broadcast new events
+- `crates/clauset-server/src/websocket.rs` - Forward new events to frontend
+- `crates/clauset-server/src/event_processor.rs` - Handle new event variants
+
+### Previous Work
 - Interactive slash command support - multi-question carousel IMPLEMENTED
 
 ### Interactive Slash Command Support with Multi-Question Carousel (Just Implemented)

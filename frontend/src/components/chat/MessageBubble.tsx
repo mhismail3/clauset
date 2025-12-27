@@ -51,12 +51,89 @@ interface MessageBubbleProps {
 
 export function MessageBubble(props: MessageBubbleProps) {
   const isUser = () => props.message.role === 'user';
+  const isSystem = () => props.message.role === 'system';
   const isThinking = () =>
     !isUser() &&
+    !isSystem() &&
     props.message.isStreaming &&
     !props.message.content &&
     !props.message.toolCalls?.length;
   const hasContent = () => props.message.content || props.message.toolCalls?.length;
+
+  // System message styling based on event type
+  const getSystemStyles = () => {
+    const systemType = props.message.systemType;
+    switch (systemType) {
+      case 'tool_error':
+        return {
+          background: 'rgba(220, 38, 38, 0.15)',
+          border: '1px solid rgba(220, 38, 38, 0.4)',
+          color: '#ef4444',
+          icon: '⚠',
+        };
+      case 'context_compacting':
+        return {
+          background: 'rgba(234, 179, 8, 0.15)',
+          border: '1px solid rgba(234, 179, 8, 0.4)',
+          color: '#eab308',
+          icon: '⟳',
+        };
+      case 'subagent_started':
+        return {
+          background: 'rgba(59, 130, 246, 0.15)',
+          border: '1px solid rgba(59, 130, 246, 0.4)',
+          color: '#3b82f6',
+          icon: '▶',
+        };
+      case 'subagent_stopped':
+        return {
+          background: 'rgba(34, 197, 94, 0.15)',
+          border: '1px solid rgba(34, 197, 94, 0.4)',
+          color: '#22c55e',
+          icon: '✓',
+        };
+      case 'permission_request':
+        return {
+          background: 'rgba(168, 85, 247, 0.15)',
+          border: '1px solid rgba(168, 85, 247, 0.4)',
+          color: '#a855f7',
+          icon: '🔐',
+        };
+      default:
+        return {
+          background: 'rgba(100, 116, 139, 0.15)',
+          border: '1px solid rgba(100, 116, 139, 0.4)',
+          color: 'var(--color-text-muted)',
+          icon: '•',
+        };
+    }
+  };
+
+  // Render system message
+  if (isSystem()) {
+    const styles = getSystemStyles();
+    return (
+      <div class="flex justify-center">
+        <div
+          style={{
+            display: 'flex',
+            'align-items': 'center',
+            gap: '6px',
+            padding: '4px 12px',
+            'border-radius': '16px',
+            background: styles.background,
+            border: styles.border,
+            'font-size': '12px',
+            'font-family': 'var(--font-mono)',
+            color: styles.color,
+          }}
+        >
+          <span>{styles.icon}</span>
+          <span>{props.message.content}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div class={`flex ${isUser() ? 'justify-end' : 'justify-start'}`}>
@@ -296,6 +373,116 @@ function formatToolInput(name: string, input: Record<string, unknown>): JSX.Elem
         </div>
       );
     }
+    case 'TodoWrite': {
+      const todos = input.todos as Array<{ content: string; status: string; activeForm?: string }> | undefined;
+      if (!todos?.length) {
+        return <span style={{ color: 'var(--color-text-muted)', "font-size": '12px' }}>No todos</span>;
+      }
+      return (
+        <div style={{ display: 'flex', "flex-direction": 'column', gap: '4px' }}>
+          <For each={todos}>
+            {(todo) => {
+              const statusIcon = () => {
+                switch (todo.status) {
+                  case 'completed': return '✓';
+                  case 'in_progress': return '◐';
+                  default: return '○';
+                }
+              };
+              const statusColor = () => {
+                switch (todo.status) {
+                  case 'completed': return '#22c55e';
+                  case 'in_progress': return '#3b82f6';
+                  default: return 'var(--color-text-muted)';
+                }
+              };
+              return (
+                <div style={{ display: 'flex', "align-items": 'flex-start', gap: '6px', "font-size": '12px' }}>
+                  <span style={{ color: statusColor(), "flex-shrink": '0' }}>{statusIcon()}</span>
+                  <span style={{ color: todo.status === 'completed' ? 'var(--color-text-muted)' : 'var(--color-text-primary)' }}>
+                    {todo.status === 'in_progress' ? (todo.activeForm || todo.content) : todo.content}
+                  </span>
+                </div>
+              );
+            }}
+          </For>
+        </div>
+      );
+    }
+    case 'EnterPlanMode': {
+      return (
+        <div style={{ display: 'flex', "align-items": 'center', gap: '6px', color: 'var(--color-accent)', "font-size": '12px' }}>
+          <span>📋</span>
+          <span>Entering plan mode...</span>
+        </div>
+      );
+    }
+    case 'ExitPlanMode': {
+      return (
+        <div style={{ display: 'flex', "align-items": 'center', gap: '6px', color: 'var(--color-secondary)', "font-size": '12px' }}>
+          <span>✓</span>
+          <span>Exiting plan mode</span>
+        </div>
+      );
+    }
+    case 'Skill': {
+      const skill = String(input.skill || '');
+      const args = input.args as string | undefined;
+      return (
+        <div style={{ display: 'flex', "flex-direction": 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', "align-items": 'center', gap: '6px' }}>
+            <span style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>Skill:</span>
+            <code style={{ color: 'var(--color-accent)', "font-size": '12px', background: 'var(--color-code-bg)', padding: '2px 6px', "border-radius": '4px' }}>
+              /{skill}
+            </code>
+          </div>
+          <Show when={args}>
+            <div style={{ color: 'var(--color-text-muted)', "font-size": '11px' }}>
+              Args: {args}
+            </div>
+          </Show>
+        </div>
+      );
+    }
+    case 'AskUserQuestion': {
+      const questions = input.questions as Array<{ question: string; header?: string; options?: Array<{ label: string }> }> | undefined;
+      if (!questions?.length) {
+        return <span style={{ color: 'var(--color-text-muted)', "font-size": '12px' }}>Asking question...</span>;
+      }
+      return (
+        <div style={{ display: 'flex', "flex-direction": 'column', gap: '6px' }}>
+          <For each={questions}>
+            {(q) => (
+              <div style={{ display: 'flex', "flex-direction": 'column', gap: '4px' }}>
+                <Show when={q.header}>
+                  <span style={{ color: 'var(--color-text-muted)', "font-size": '10px', "text-transform": 'uppercase', "letter-spacing": '0.05em' }}>
+                    {q.header}
+                  </span>
+                </Show>
+                <span style={{ color: 'var(--color-text-primary)', "font-size": '12px' }}>{q.question}</span>
+                <Show when={q.options?.length}>
+                  <div style={{ display: 'flex', "flex-wrap": 'wrap', gap: '4px' }}>
+                    <For each={q.options}>
+                      {(opt) => (
+                        <span style={{
+                          background: 'var(--color-bg-overlay)',
+                          padding: '2px 8px',
+                          "border-radius": '12px',
+                          "font-size": '11px',
+                          color: 'var(--color-text-secondary)',
+                        }}>
+                          {opt.label}
+                        </span>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+            )}
+          </For>
+        </div>
+      );
+    }
     case 'WebFetch': {
       const url = String(input.url || '');
       return (
@@ -494,8 +681,40 @@ function formatToolOutput(name: string, output: string, isError: boolean): JSX.E
 function ToolCallView(props: { toolCall: ToolCall }) {
   const [expanded, setExpanded] = createSignal(false);
 
+  // Parse MCP tool names: mcp__{server}__{tool}
+  const parseMcpTool = (name: string): { server: string; tool: string } | null => {
+    const match = name.match(/^mcp__(.+?)__(.+)$/);
+    if (match) {
+      return { server: match[1], tool: match[2] };
+    }
+    return null;
+  };
+
+  const mcpInfo = () => parseMcpTool(props.toolCall.name);
+  const isMcp = () => mcpInfo() !== null;
+  const displayName = () => {
+    const mcp = mcpInfo();
+    if (mcp) {
+      // Shorten common MCP server names
+      const serverShort = mcp.server.replace('plugin_', '').replace('claude-in-chrome', 'chrome');
+      return `${serverShort}:${mcp.tool}`;
+    }
+    return props.toolCall.name;
+  };
+
   const icon = () => {
-    switch (props.toolCall.name) {
+    const name = props.toolCall.name;
+
+    // MCP tools get special icons based on tool type
+    if (isMcp()) {
+      const mcp = mcpInfo()!;
+      if (mcp.tool.includes('browser') || mcp.tool.includes('navigate')) return '🌐';
+      if (mcp.tool.includes('screenshot')) return '📸';
+      if (mcp.tool.includes('click') || mcp.tool.includes('type')) return '👆';
+      return '🔌';
+    }
+
+    switch (name) {
       case 'Read': return '📄';
       case 'Grep': return '🔍';
       case 'Edit': return '✏️';
@@ -505,45 +724,88 @@ function ToolCallView(props: { toolCall: ToolCall }) {
       case 'Task': return '🚀';
       case 'WebFetch': return '🌐';
       case 'WebSearch': return '🔎';
+      case 'TodoWrite': return '☑';
+      case 'EnterPlanMode': return '📋';
+      case 'ExitPlanMode': return '✅';
+      case 'Skill': return '⚡';
+      case 'AskUserQuestion': return '❓';
+      case 'NotebookEdit': return '📓';
+      case 'KillShell': return '🛑';
+      case 'TaskOutput': return '📤';
       default: return '🔧';
     }
   };
 
   // Color for left accent bar based on tool type
   const accentColor = () => {
-    switch (props.toolCall.name) {
+    const name = props.toolCall.name;
+
+    // MCP tools get a purple accent
+    if (isMcp()) return '#a855f7';
+
+    switch (name) {
       case 'Bash': return 'var(--color-accent)'; // Orange for terminal
       case 'Edit':
       case 'Write': return 'var(--color-secondary)'; // Teal for file writes
       case 'Read':
       case 'Glob':
       case 'Grep': return 'var(--color-text-muted)'; // Gray for reads
+      case 'TodoWrite': return '#3b82f6'; // Blue for todos
+      case 'EnterPlanMode':
+      case 'ExitPlanMode': return '#eab308'; // Yellow for plan mode
+      case 'Skill': return '#f97316'; // Orange for skills
+      case 'AskUserQuestion': return '#8b5cf6'; // Purple for questions
       default: return 'var(--color-accent)';
     }
   };
 
   const summary = () => {
     const input = props.toolCall.input as Record<string, unknown>;
-    if (props.toolCall.name === 'Read' && input.file_path) {
-      return String(input.file_path).split('/').pop();
+    const name = props.toolCall.name;
+
+    // Handle MCP tools
+    if (isMcp()) {
+      const mcp = mcpInfo()!;
+      // For browser tools, show URL or element
+      if (input.url) return truncate(String(input.url), 30);
+      if (input.element) return truncate(String(input.element), 30);
+      if (input.text) return truncate(String(input.text), 30);
+      return mcp.tool;
     }
-    if (props.toolCall.name === 'Grep' && input.pattern) {
-      return `"${input.pattern}"`;
+
+    switch (name) {
+      case 'Read':
+        return input.file_path ? String(input.file_path).split('/').pop() : '';
+      case 'Grep':
+        return input.pattern ? `"${input.pattern}"` : '';
+      case 'Bash': {
+        const cmd = String(input.command || '');
+        return cmd.length > 30 ? cmd.slice(0, 30) + '...' : cmd;
+      }
+      case 'Edit':
+      case 'Write':
+        return input.file_path ? String(input.file_path).split('/').pop() : '';
+      case 'Task':
+        return input.description ? String(input.description) : '';
+      case 'TodoWrite': {
+        const todos = input.todos as Array<{ status: string }> | undefined;
+        if (todos) {
+          const inProgress = todos.filter(t => t.status === 'in_progress').length;
+          const completed = todos.filter(t => t.status === 'completed').length;
+          return `${completed}/${todos.length} done${inProgress ? `, ${inProgress} active` : ''}`;
+        }
+        return '';
+      }
+      case 'Skill':
+        return input.skill ? `/${input.skill}` : '';
+      case 'AskUserQuestion': {
+        const questions = input.questions as Array<{ header?: string }> | undefined;
+        if (questions?.[0]?.header) return questions[0].header;
+        return questions ? `${questions.length} question(s)` : '';
+      }
+      default:
+        return '';
     }
-    if (props.toolCall.name === 'Bash' && input.command) {
-      const cmd = String(input.command);
-      return cmd.length > 30 ? cmd.slice(0, 30) + '...' : cmd;
-    }
-    if (props.toolCall.name === 'Edit' && input.file_path) {
-      return String(input.file_path).split('/').pop();
-    }
-    if (props.toolCall.name === 'Write' && input.file_path) {
-      return String(input.file_path).split('/').pop();
-    }
-    if (props.toolCall.name === 'Task' && input.description) {
-      return String(input.description);
-    }
-    return '';
   };
 
   return (
@@ -578,8 +840,8 @@ function ToolCallView(props: { toolCall: ToolCall }) {
         onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
       >
         <span style={{ "flex-shrink": '0' }}>{icon()}</span>
-        <span class="text-mono" style={{ "font-weight": '600', color: 'var(--color-text-primary)' }}>
-          {props.toolCall.name}
+        <span class="text-mono" style={{ "font-weight": '600', color: isMcp() ? '#a855f7' : 'var(--color-text-primary)', "font-size": isMcp() ? '11px' : '13px' }}>
+          {displayName()}
         </span>
         <span
           class="text-mono"

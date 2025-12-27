@@ -55,6 +55,44 @@ pub enum ProcessEvent {
     NewPrompt(clauset_types::PromptSummary),
     /// Interactive event for native UI rendering.
     Interactive(clauset_types::InteractiveEvent),
+    /// Subagent (Task tool) started.
+    SubagentStarted {
+        session_id: Uuid,
+        agent_id: String,
+        agent_type: String,
+    },
+    /// Subagent (Task tool) stopped.
+    SubagentStopped {
+        session_id: Uuid,
+        agent_id: String,
+    },
+    /// Tool execution failed.
+    ToolError {
+        session_id: Uuid,
+        tool_name: String,
+        error: String,
+        is_timeout: bool,
+    },
+    /// Context compaction starting.
+    ContextCompacting {
+        session_id: Uuid,
+        trigger: String,
+    },
+    /// Permission request shown.
+    PermissionRequest {
+        session_id: Uuid,
+        tool_name: String,
+        tool_input: serde_json::Value,
+    },
+    /// Context token update from hook data.
+    ContextUpdate {
+        session_id: Uuid,
+        input_tokens: u64,
+        output_tokens: u64,
+        cache_read_tokens: u64,
+        cache_creation_tokens: u64,
+        context_window_size: u64,
+    },
 }
 
 /// Options for spawning a Claude process.

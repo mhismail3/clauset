@@ -602,6 +602,50 @@ impl SessionManager {
             });
         }
     }
+
+    /// Update context window information from hook data.
+    ///
+    /// This uses the accurate context_window data from Claude's hook input,
+    /// replacing the fragile regex parsing of terminal output.
+    pub async fn update_context_from_hook(
+        &self,
+        session_id: Uuid,
+        input_tokens: u64,
+        output_tokens: u64,
+        context_window_size: u64,
+        model: Option<String>,
+    ) {
+        if let Some(activity) = self.buffers.update_context_from_hook(
+            session_id,
+            input_tokens,
+            output_tokens,
+            context_window_size,
+            model,
+        ).await {
+            tracing::debug!(
+                target: "clauset::hooks",
+                "Broadcasting context update from hook: session={}, model='{}', tokens={}K/{}K, ctx={}%",
+                session_id,
+                activity.model,
+                activity.input_tokens / 1000,
+                activity.output_tokens / 1000,
+                activity.context_percent
+            );
+
+            // Broadcast the updated activity
+            let _ = self.event_tx.send(ProcessEvent::ActivityUpdate {
+                session_id,
+                model: activity.model,
+                cost: activity.cost,
+                input_tokens: activity.input_tokens,
+                output_tokens: activity.output_tokens,
+                context_percent: activity.context_percent,
+                current_activity: activity.current_activity,
+                current_step: activity.current_step,
+                recent_actions: activity.recent_actions,
+            });
+        }
+    }
 }
 
 fn truncate_preview(s: &str) -> String {

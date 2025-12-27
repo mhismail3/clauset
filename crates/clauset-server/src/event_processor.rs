@@ -110,5 +110,14 @@ async fn process_event(state: &AppState, event: ProcessEvent) {
         ProcessEvent::NewPrompt(_) => {}
         // Interactive events are handled by WebSocket handlers for native UI
         ProcessEvent::Interactive(_) => {}
+        // Subagent and error events are handled by WebSocket handlers
+        ProcessEvent::SubagentStarted { .. } => {}
+        ProcessEvent::SubagentStopped { .. } => {}
+        ProcessEvent::ToolError { .. } => {}
+        ProcessEvent::ContextCompacting { .. } => {}
+        // Permission request events are handled by WebSocket handlers
+        ProcessEvent::PermissionRequest { .. } => {}
+        // Context update events are handled by WebSocket handlers
+        ProcessEvent::ContextUpdate { .. } => {}
     }
 }

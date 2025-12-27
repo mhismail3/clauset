@@ -1,0 +1,20 @@
+{
+  "clauset_session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": "abc123def456",
+  "hook_event_name": "Notification",
+  "message": "Context limit approaching (85% used)",
+  "notification_type": "warning",
+  "cwd": "/Users/test/projects/myapp",
+  "context_window": {
+    "total_input_tokens": 170000,
+    "total_output_tokens": 20000,
+    "context_window_size": 200000,
+    "current_usage": {
+      "input_tokens": 170000,
+      "output_tokens": 1000,
+      "cache_creation_input_tokens": 50000,
+      "cache_read_input_tokens": 100000
+    }
+  },
+  "version": "2.0.76"
+}

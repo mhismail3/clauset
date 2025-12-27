@@ -134,6 +134,7 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             claude_session_id,
             prompt,
             cwd,
+            context_window,
         } => {
             debug!(target: "clauset::hooks", "User submitted prompt for session {}", session_id);
 
@@ -143,6 +144,32 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             // Update activity to "Thinking"
             let update = HookActivityUpdate::user_prompt_submit();
             update_activity_from_hook(&state, session_id, update).await;
+
+            // Update context window from accurate hook data (replaces regex parsing)
+            if let Some(ref ctx) = context_window {
+                state.session_manager.update_context_from_hook(
+                    session_id,
+                    ctx.total_input_tokens,
+                    ctx.total_output_tokens,
+                    ctx.context_window_size,
+                    None, // Model info is separate
+                ).await;
+
+                // Broadcast context update with cache token info to frontend
+                let (cache_read, cache_creation) = if let Some(ref usage) = ctx.current_usage {
+                    (usage.cache_read_input_tokens, usage.cache_creation_input_tokens)
+                } else {
+                    (0, 0)
+                };
+                let _ = state.session_manager.broadcast_event(ProcessEvent::ContextUpdate {
+                    session_id,
+                    input_tokens: ctx.total_input_tokens,
+                    output_tokens: ctx.total_output_tokens,
+                    cache_read_tokens: cache_read,
+                    cache_creation_tokens: cache_creation,
+                    context_window_size: ctx.context_window_size,
+                });
+            }
 
             // Index the prompt for Prompt Library
             if let Some(cwd) = cwd {
@@ -168,6 +195,7 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             tool_name,
             tool_input,
             cwd: _,
+            context_window,
             ..
         } => {
             debug!(
@@ -175,6 +203,17 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 "Pre-tool use {} for session {}",
                 tool_name, session_id
             );
+
+            // Update context window from accurate hook data
+            if let Some(ref ctx) = context_window {
+                state.session_manager.update_context_from_hook(
+                    session_id,
+                    ctx.total_input_tokens,
+                    ctx.total_output_tokens,
+                    ctx.context_window_size,
+                    None,
+                ).await;
+            }
 
             let update = HookActivityUpdate::pre_tool_use(tool_name, tool_input);
             update_activity_from_hook(&state, session_id, update).await;
@@ -185,6 +224,7 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             tool_name,
             tool_input,
             tool_response,
+            context_window,
             ..
         } => {
             debug!(
@@ -192,6 +232,17 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 "Post-tool use {} for session {}",
                 tool_name, session_id
             );
+
+            // Update context window from accurate hook data
+            if let Some(ref ctx) = context_window {
+                state.session_manager.update_context_from_hook(
+                    session_id,
+                    ctx.total_input_tokens,
+                    ctx.total_output_tokens,
+                    ctx.context_window_size,
+                    None,
+                ).await;
+            }
 
             let update = HookActivityUpdate::post_tool_use(tool_name, tool_input, tool_response);
             if update.is_error {
@@ -204,6 +255,7 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             session_id,
             stop_hook_active,
             transcript_path,
+            context_window,
             ..
         } => {
             debug!(
@@ -211,6 +263,17 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 "Claude stopped for session {} (continuing: {}, transcript: {:?})",
                 session_id, stop_hook_active, transcript_path
             );
+
+            // Update context window from accurate hook data (replaces regex parsing)
+            if let Some(ref ctx) = context_window {
+                state.session_manager.update_context_from_hook(
+                    session_id,
+                    ctx.total_input_tokens,
+                    ctx.total_output_tokens,
+                    ctx.context_window_size,
+                    None,
+                ).await;
+            }
 
             if !stop_hook_active {
                 // Claude finished responding - mark as ready
@@ -229,7 +292,13 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 "Subagent stopped for session {} (continuing: {})",
                 session_id, stop_hook_active
             );
-            // Could track subagent completion separately if needed
+
+            // Broadcast subagent stop to frontend
+            // Note: SubagentStop doesn't include agent_id, using empty string
+            let _ = state.session_manager.broadcast_event(ProcessEvent::SubagentStopped {
+                session_id,
+                agent_id: String::new(), // Not provided in SubagentStop hook
+            });
         }
 
         HookEvent::Notification {
@@ -249,10 +318,82 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
         }
 
         HookEvent::PreCompact {
-            session_id, ..
+            session_id,
+            trigger,
+            ..
         } => {
-            debug!(target: "clauset::hooks", "Pre-compact for session {}", session_id);
-            // Could show "Compacting context..." in UI
+            debug!(target: "clauset::hooks", "Pre-compact for session {} (trigger: {})", session_id, trigger);
+
+            // Broadcast context compaction to frontend
+            let _ = state.session_manager.broadcast_event(ProcessEvent::ContextCompacting {
+                session_id,
+                trigger,
+            });
+        }
+
+        HookEvent::PostToolUseFailure {
+            session_id,
+            tool_name,
+            error,
+            is_timeout,
+            is_interrupt,
+            ..
+        } => {
+            warn!(
+                target: "clauset::hooks",
+                "Tool {} failed for session {}: {:?} (timeout: {}, interrupt: {})",
+                tool_name, session_id, error, is_timeout, is_interrupt
+            );
+
+            // Broadcast tool error to frontend for display
+            let _ = state.session_manager.broadcast_event(ProcessEvent::ToolError {
+                session_id,
+                tool_name,
+                error: error.unwrap_or_else(|| "Unknown error".to_string()),
+                is_timeout,
+            });
+        }
+
+        HookEvent::SubagentStart {
+            session_id,
+            agent_id,
+            agent_type,
+            ..
+        } => {
+            debug!(
+                target: "clauset::hooks",
+                "Subagent started for session {}: {} (type: {})",
+                session_id, agent_id, agent_type
+            );
+
+            // Broadcast subagent start to frontend
+            let _ = state.session_manager.broadcast_event(ProcessEvent::SubagentStarted {
+                session_id,
+                agent_id,
+                agent_type,
+            });
+            // TODO: Track subagent in session state
+        }
+
+        HookEvent::PermissionRequest {
+            session_id,
+            tool_name,
+            tool_input,
+            tool_use_id,
+            ..
+        } => {
+            debug!(
+                target: "clauset::hooks",
+                "Permission request for session {}: {} ({})",
+                session_id, tool_name, tool_use_id
+            );
+
+            // Broadcast permission request to frontend for display
+            let _ = state.session_manager.broadcast_event(ProcessEvent::PermissionRequest {
+                session_id,
+                tool_name,
+                tool_input,
+            });
         }
     }
 
@@ -519,6 +660,9 @@ fn extract_claude_session_id(event: &HookEvent) -> String {
         HookEvent::SubagentStop { claude_session_id, .. } => claude_session_id.clone(),
         HookEvent::Notification { claude_session_id, .. } => claude_session_id.clone(),
         HookEvent::PreCompact { claude_session_id, .. } => claude_session_id.clone(),
+        HookEvent::PostToolUseFailure { claude_session_id, .. } => claude_session_id.clone(),
+        HookEvent::SubagentStart { claude_session_id, .. } => claude_session_id.clone(),
+        HookEvent::PermissionRequest { claude_session_id, .. } => claude_session_id.clone(),
     }
 }
 

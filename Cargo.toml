@@ -55,6 +55,12 @@ zstd = "0.13"
 # Diff computation
 similar = "2.6"
 
+# Testing
+proptest = "1.4"
+tokio-test = "0.4"
+axum-test = "16.0"
+tempfile = "3.15"
+
 # Internal crates
 clauset-types = { path = "crates/clauset-types" }
 clauset-core = { path = "crates/clauset-core" }

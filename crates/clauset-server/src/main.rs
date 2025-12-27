@@ -1,15 +1,7 @@
 //! Clauset server - HTTP/WebSocket server for Claude Code session management.
 
-mod config;
-mod event_processor;
-mod global_ws;
-mod interaction_processor;
-mod logging;
-mod routes;
-mod state;
-mod websocket;
-
 use anyhow::Result;
+use clauset_server::{config, event_processor, global_ws, logging, routes, state};
 use axum::{
     extract::{
         ws::{WebSocket, WebSocketUpgrade},

@@ -1,0 +1,13 @@
+{
+  "clauset_session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": "abc123def456",
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": false,
+  "cwd": "/Users/test/projects/myapp",
+  "context_window": {
+    "total_input_tokens": 32000,
+    "total_output_tokens": 7500,
+    "context_window_size": 200000
+  },
+  "version": "2.0.76"
+}

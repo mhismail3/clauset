@@ -1,0 +1,19 @@
+{
+  "clauset_session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": "abc123def456",
+  "hook_event_name": "PreCompact",
+  "trigger": "auto",
+  "cwd": "/Users/test/projects/myapp",
+  "context_window": {
+    "total_input_tokens": 190000,
+    "total_output_tokens": 25000,
+    "context_window_size": 200000,
+    "current_usage": {
+      "input_tokens": 190000,
+      "output_tokens": 1500,
+      "cache_creation_input_tokens": 60000,
+      "cache_read_input_tokens": 110000
+    }
+  },
+  "version": "2.0.76"
+}

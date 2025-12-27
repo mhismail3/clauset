@@ -6,11 +6,23 @@ const MAX_STORAGE_SIZE = 500000; // 500KB per session
 
 export interface Message {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   toolCalls?: ToolCall[];
   timestamp: number;
   isStreaming?: boolean;
+  /** System event type for system messages */
+  systemType?: 'subagent_started' | 'subagent_stopped' | 'tool_error' | 'context_compacting' | 'permission_request';
+  /** Additional metadata for system messages */
+  metadata?: {
+    agentId?: string;
+    agentType?: string;
+    toolName?: string;
+    toolInput?: unknown;
+    error?: string;
+    isTimeout?: boolean;
+    trigger?: string;
+  };
 }
 
 export interface ToolCall {
@@ -107,6 +119,93 @@ export function addMessage(sessionId: string, message: Message) {
     saveToStorage(sessionId, sessionMessages);
     return newMap;
   });
+}
+
+/**
+ * Add a system event message to the chat.
+ */
+export function addSystemMessage(
+  sessionId: string,
+  systemType: Message['systemType'],
+  content: string,
+  metadata?: Message['metadata']
+) {
+  const message: Message = {
+    id: `system-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    role: 'system',
+    content,
+    timestamp: Date.now(),
+    systemType,
+    metadata,
+  };
+  addMessage(sessionId, message);
+}
+
+/**
+ * Handle subagent started event.
+ */
+export function handleSubagentStarted(sessionId: string, agentId: string, agentType: string) {
+  const typeLabel = agentType === 'general-purpose' ? 'Agent' : agentType;
+  addSystemMessage(
+    sessionId,
+    'subagent_started',
+    `${typeLabel} started`,
+    { agentId, agentType }
+  );
+}
+
+/**
+ * Handle subagent stopped event.
+ */
+export function handleSubagentStopped(sessionId: string, agentId: string) {
+  addSystemMessage(
+    sessionId,
+    'subagent_stopped',
+    'Subagent completed',
+    { agentId }
+  );
+}
+
+/**
+ * Handle tool error event.
+ */
+export function handleToolError(sessionId: string, toolName: string, error: string, isTimeout: boolean) {
+  const content = isTimeout
+    ? `${toolName} timed out`
+    : `${toolName} failed: ${error}`;
+  addSystemMessage(
+    sessionId,
+    'tool_error',
+    content,
+    { toolName, error, isTimeout }
+  );
+}
+
+/**
+ * Handle context compacting event.
+ */
+export function handleContextCompacting(sessionId: string, trigger: string) {
+  const content = trigger === 'auto'
+    ? 'Context automatically compacting...'
+    : 'Compacting context...';
+  addSystemMessage(
+    sessionId,
+    'context_compacting',
+    content,
+    { trigger }
+  );
+}
+
+/**
+ * Handle permission request event.
+ */
+export function handlePermissionRequest(sessionId: string, toolName: string, toolInput: unknown) {
+  addSystemMessage(
+    sessionId,
+    'permission_request',
+    `Permission required: ${toolName}`,
+    { toolName, toolInput }
+  );
 }
 
 export function setSessionMessages(sessionId: string, msgs: Message[]) {

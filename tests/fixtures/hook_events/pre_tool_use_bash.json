@@ -1,0 +1,24 @@
+{
+  "clauset_session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": "abc123def456",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cargo test --workspace",
+    "description": "Run all workspace tests"
+  },
+  "tool_use_id": "toolu_02DEF456ABC",
+  "cwd": "/Users/test/projects/myapp",
+  "context_window": {
+    "total_input_tokens": 20000,
+    "total_output_tokens": 5000,
+    "context_window_size": 200000,
+    "current_usage": {
+      "input_tokens": 20000,
+      "output_tokens": 300,
+      "cache_creation_input_tokens": 6000,
+      "cache_read_input_tokens": 12000
+    }
+  },
+  "version": "2.0.76"
+}

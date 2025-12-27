@@ -1,0 +1,26 @@
+{
+  "clauset_session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": "abc123def456",
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "cwd": "/Users/test/projects/myapp",
+  "permission_mode": "default",
+  "context_window": {
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "context_window_size": 200000,
+    "current_usage": null
+  },
+  "model": {
+    "id": "claude-sonnet-4-20250514",
+    "display_name": "Claude Sonnet 4"
+  },
+  "workspace": {
+    "current_dir": "/Users/test/projects/myapp",
+    "project_dir": "/Users/test/projects/myapp"
+  },
+  "output_style": {
+    "name": "default"
+  },
+  "version": "2.0.76"
+}

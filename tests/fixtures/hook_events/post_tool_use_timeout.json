@@ -1,0 +1,23 @@
+{
+  "clauset_session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": "abc123def456",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "sleep 300",
+    "description": "Long running command",
+    "timeout": 120000
+  },
+  "tool_use_id": "toolu_04JKL012GHI",
+  "error": "Command timed out after 120 seconds",
+  "error_type": "timeout",
+  "is_timeout": true,
+  "is_interrupt": false,
+  "cwd": "/Users/test/projects/myapp",
+  "context_window": {
+    "total_input_tokens": 26000,
+    "total_output_tokens": 6200,
+    "context_window_size": 200000
+  },
+  "version": "2.0.76"
+}

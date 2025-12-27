@@ -1,0 +1,25 @@
+{
+  "clauset_session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": "abc123def456",
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "/Users/test/projects/myapp/src/auth.rs",
+    "content": "pub mod auth {\n    pub fn authenticate() -> bool {\n        true\n    }\n}"
+  },
+  "tool_use_id": "toolu_05MNO345JKL",
+  "cwd": "/Users/test/projects/myapp",
+  "permission_mode": "default",
+  "context_window": {
+    "total_input_tokens": 40000,
+    "total_output_tokens": 9000,
+    "context_window_size": 200000,
+    "current_usage": {
+      "input_tokens": 40000,
+      "output_tokens": 800,
+      "cache_creation_input_tokens": 12000,
+      "cache_read_input_tokens": 24000
+    }
+  },
+  "version": "2.0.76"
+}

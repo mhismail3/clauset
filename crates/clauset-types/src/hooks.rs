@@ -2,10 +2,80 @@
 //!
 //! These types represent the structured data sent by Claude Code hooks
 //! to the Clauset dashboard for real-time activity tracking.
+//!
+//! Based on reverse-engineering of Claude Code CLI v2.0.76 (cli.js).
+//! The base hook input is created by the `aF()` function in cli.js.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+
+/// Context window token usage information.
+///
+/// This comes directly from Claude Code's hook input and provides
+/// accurate token counts (unlike regex parsing from terminal output).
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct ContextWindow {
+    /// Total input tokens used in session (cumulative)
+    #[serde(default)]
+    pub total_input_tokens: u64,
+    /// Total output tokens used in session (cumulative)
+    #[serde(default)]
+    pub total_output_tokens: u64,
+    /// Context window size for current model (e.g., 200000)
+    #[serde(default)]
+    pub context_window_size: u64,
+    /// Token usage from last API call (null if no messages yet)
+    #[serde(default)]
+    pub current_usage: Option<CurrentUsage>,
+}
+
+/// Token usage from the last API call.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct CurrentUsage {
+    /// Input tokens for current context
+    #[serde(default)]
+    pub input_tokens: u64,
+    /// Output tokens generated
+    #[serde(default)]
+    pub output_tokens: u64,
+    /// Tokens written to cache
+    #[serde(default)]
+    pub cache_creation_input_tokens: u64,
+    /// Tokens read from cache
+    #[serde(default)]
+    pub cache_read_input_tokens: u64,
+}
+
+/// Model information from the hook input.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct ModelInfo {
+    /// Model ID (e.g., "claude-3-5-sonnet-20241022")
+    #[serde(default)]
+    pub id: String,
+    /// Display name (e.g., "Claude 3.5 Sonnet")
+    #[serde(default)]
+    pub display_name: String,
+}
+
+/// Workspace information from the hook input.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct WorkspaceInfo {
+    /// Current working directory path
+    #[serde(default)]
+    pub current_dir: String,
+    /// Project root directory path
+    #[serde(default)]
+    pub project_dir: String,
+}
+
+/// Output style information.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct OutputStyle {
+    /// Style name (e.g., "default", "Explanatory", "Learning")
+    #[serde(default)]
+    pub name: String,
+}
 
 /// Payload received from Claude Code hooks via HTTP POST.
 ///
@@ -84,6 +154,62 @@ pub struct HookEventPayload {
     /// Type of notification
     #[serde(default)]
     pub notification_type: Option<String>,
+
+    // NEW: Context and metadata from cli.js aF() function
+
+    /// Context window token usage (accurate source for token counts)
+    #[serde(default)]
+    pub context_window: Option<ContextWindow>,
+
+    /// Model information
+    #[serde(default)]
+    pub model: Option<ModelInfo>,
+
+    /// Workspace information
+    #[serde(default)]
+    pub workspace: Option<WorkspaceInfo>,
+
+    /// Output style
+    #[serde(default)]
+    pub output_style: Option<OutputStyle>,
+
+    /// Claude Code version (e.g., "2.0.76")
+    #[serde(default)]
+    pub version: Option<String>,
+
+    // NEW: SubagentStart/SubagentStop fields
+
+    /// Agent ID for Task tool subagents
+    #[serde(default)]
+    pub agent_id: Option<String>,
+
+    /// Agent type (e.g., "Explore", "Plan", "general-purpose")
+    #[serde(default)]
+    pub agent_type: Option<String>,
+
+    // NEW: PostToolUseFailure fields
+
+    /// Error message when tool execution fails
+    #[serde(default)]
+    pub error: Option<String>,
+
+    /// Error type classification
+    #[serde(default)]
+    pub error_type: Option<String>,
+
+    /// Whether the tool timed out
+    #[serde(default)]
+    pub is_timeout: Option<bool>,
+
+    /// Whether the tool was interrupted
+    #[serde(default)]
+    pub is_interrupt: Option<bool>,
+
+    // NEW: PreCompact fields
+
+    /// Compaction trigger (manual, auto)
+    #[serde(default)]
+    pub trigger: Option<String>,
 }
 
 /// Enumeration of Claude Code hook event types.
@@ -98,10 +224,14 @@ pub enum HookEventType {
     UserPromptSubmit,
     /// Before a tool is executed
     PreToolUse,
-    /// After a tool completes
+    /// After a tool completes successfully
     PostToolUse,
+    /// After a tool execution fails
+    PostToolUseFailure,
     /// Claude finished responding
     Stop,
+    /// Subagent (Task tool) started
+    SubagentStart,
     /// Subagent (Task tool) finished
     SubagentStop,
     /// System notification
@@ -121,7 +251,9 @@ impl HookEventType {
             "UserPromptSubmit" => Some(Self::UserPromptSubmit),
             "PreToolUse" => Some(Self::PreToolUse),
             "PostToolUse" => Some(Self::PostToolUse),
+            "PostToolUseFailure" => Some(Self::PostToolUseFailure),
             "Stop" => Some(Self::Stop),
+            "SubagentStart" => Some(Self::SubagentStart),
             "SubagentStop" => Some(Self::SubagentStop),
             "Notification" => Some(Self::Notification),
             "PreCompact" => Some(Self::PreCompact),
@@ -142,6 +274,8 @@ pub enum HookEvent {
         claude_session_id: String,
         source: String,
         cwd: Option<String>,
+        context_window: Option<ContextWindow>,
+        model: Option<ModelInfo>,
     },
 
     /// Session ended
@@ -157,6 +291,7 @@ pub enum HookEvent {
         claude_session_id: String,
         prompt: String,
         cwd: Option<String>,
+        context_window: Option<ContextWindow>,
     },
 
     /// Tool is about to execute
@@ -167,9 +302,10 @@ pub enum HookEvent {
         tool_input: Value,
         tool_use_id: String,
         cwd: Option<String>,
+        context_window: Option<ContextWindow>,
     },
 
-    /// Tool finished executing
+    /// Tool finished executing successfully
     PostToolUse {
         session_id: Uuid,
         claude_session_id: String,
@@ -177,6 +313,21 @@ pub enum HookEvent {
         tool_input: Value,
         tool_response: Value,
         tool_use_id: String,
+        context_window: Option<ContextWindow>,
+    },
+
+    /// Tool execution failed
+    PostToolUseFailure {
+        session_id: Uuid,
+        claude_session_id: String,
+        tool_name: String,
+        tool_input: Value,
+        tool_use_id: String,
+        error: Option<String>,
+        error_type: Option<String>,
+        is_timeout: bool,
+        is_interrupt: bool,
+        context_window: Option<ContextWindow>,
     },
 
     /// Claude finished responding
@@ -185,6 +336,15 @@ pub enum HookEvent {
         claude_session_id: String,
         stop_hook_active: bool,
         transcript_path: Option<String>,
+        context_window: Option<ContextWindow>,
+    },
+
+    /// Subagent (Task tool) started
+    SubagentStart {
+        session_id: Uuid,
+        claude_session_id: String,
+        agent_id: String,
+        agent_type: String,
     },
 
     /// Subagent finished
@@ -206,6 +366,16 @@ pub enum HookEvent {
     PreCompact {
         session_id: Uuid,
         claude_session_id: String,
+        trigger: String,
+    },
+
+    /// Permission dialog shown
+    PermissionRequest {
+        session_id: Uuid,
+        claude_session_id: String,
+        tool_name: String,
+        tool_input: Value,
+        tool_use_id: String,
     },
 }
 
@@ -214,7 +384,7 @@ impl TryFrom<HookEventPayload> for HookEvent {
 
     fn try_from(p: HookEventPayload) -> Result<Self, Self::Error> {
         let session_id = p.clauset_session_id;
-        let claude_session_id = p.session_id;
+        let claude_session_id = p.session_id.clone();
 
         match p.hook_event_name.as_str() {
             "SessionStart" => Ok(HookEvent::SessionStart {
@@ -222,6 +392,8 @@ impl TryFrom<HookEventPayload> for HookEvent {
                 claude_session_id,
                 source: p.source.unwrap_or_else(|| "startup".to_string()),
                 cwd: p.cwd,
+                context_window: p.context_window,
+                model: p.model,
             }),
 
             "SessionEnd" => Ok(HookEvent::SessionEnd {
@@ -235,6 +407,7 @@ impl TryFrom<HookEventPayload> for HookEvent {
                 claude_session_id,
                 prompt: p.prompt.unwrap_or_default(),
                 cwd: p.cwd,
+                context_window: p.context_window,
             }),
 
             "PreToolUse" => Ok(HookEvent::PreToolUse {
@@ -244,6 +417,7 @@ impl TryFrom<HookEventPayload> for HookEvent {
                 tool_input: p.tool_input.unwrap_or(Value::Null),
                 tool_use_id: p.tool_use_id.unwrap_or_default(),
                 cwd: p.cwd,
+                context_window: p.context_window,
             }),
 
             "PostToolUse" => Ok(HookEvent::PostToolUse {
@@ -253,6 +427,20 @@ impl TryFrom<HookEventPayload> for HookEvent {
                 tool_input: p.tool_input.unwrap_or(Value::Null),
                 tool_response: p.tool_response.unwrap_or(Value::Null),
                 tool_use_id: p.tool_use_id.unwrap_or_default(),
+                context_window: p.context_window,
+            }),
+
+            "PostToolUseFailure" => Ok(HookEvent::PostToolUseFailure {
+                session_id,
+                claude_session_id,
+                tool_name: p.tool_name.ok_or("missing tool_name")?,
+                tool_input: p.tool_input.unwrap_or(Value::Null),
+                tool_use_id: p.tool_use_id.unwrap_or_default(),
+                error: p.error,
+                error_type: p.error_type,
+                is_timeout: p.is_timeout.unwrap_or(false),
+                is_interrupt: p.is_interrupt.unwrap_or(false),
+                context_window: p.context_window,
             }),
 
             "Stop" => Ok(HookEvent::Stop {
@@ -260,6 +448,14 @@ impl TryFrom<HookEventPayload> for HookEvent {
                 claude_session_id,
                 stop_hook_active: p.stop_hook_active.unwrap_or(false),
                 transcript_path: p.transcript_path,
+                context_window: p.context_window,
+            }),
+
+            "SubagentStart" => Ok(HookEvent::SubagentStart {
+                session_id,
+                claude_session_id,
+                agent_id: p.agent_id.unwrap_or_default(),
+                agent_type: p.agent_type.unwrap_or_else(|| "unknown".to_string()),
             }),
 
             "SubagentStop" => Ok(HookEvent::SubagentStop {
@@ -278,6 +474,15 @@ impl TryFrom<HookEventPayload> for HookEvent {
             "PreCompact" => Ok(HookEvent::PreCompact {
                 session_id,
                 claude_session_id,
+                trigger: p.trigger.unwrap_or_else(|| "unknown".to_string()),
+            }),
+
+            "PermissionRequest" => Ok(HookEvent::PermissionRequest {
+                session_id,
+                claude_session_id,
+                tool_name: p.tool_name.ok_or("missing tool_name")?,
+                tool_input: p.tool_input.unwrap_or(Value::Null),
+                tool_use_id: p.tool_use_id.unwrap_or_default(),
             }),
 
             _ => Err("unknown hook event type"),
@@ -434,6 +639,22 @@ impl Default for HookEventPayload {
             stop_hook_active: None,
             message: None,
             notification_type: None,
+            // NEW fields from cli.js aF() function
+            context_window: None,
+            model: None,
+            workspace: None,
+            output_style: None,
+            version: None,
+            // SubagentStart/Stop fields
+            agent_id: None,
+            agent_type: None,
+            // PostToolUseFailure fields
+            error: None,
+            error_type: None,
+            is_timeout: None,
+            is_interrupt: None,
+            // PreCompact fields
+            trigger: None,
         }
     }
 }

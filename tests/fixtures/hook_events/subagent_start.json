@@ -1,0 +1,14 @@
+{
+  "clauset_session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": "abc123def456",
+  "hook_event_name": "SubagentStart",
+  "agent_id": "agent_xyz789",
+  "agent_type": "Explore",
+  "cwd": "/Users/test/projects/myapp",
+  "context_window": {
+    "total_input_tokens": 30000,
+    "total_output_tokens": 7000,
+    "context_window_size": 200000
+  },
+  "version": "2.0.76"
+}

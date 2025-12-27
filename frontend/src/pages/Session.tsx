@@ -20,6 +20,10 @@ import {
   updateToolCallResult,
   handleChatEvent,
   handleChatHistory,
+  handleSubagentStarted,
+  handleSubagentStopped,
+  handleToolError,
+  handleContextCompacting,
   type ChatEvent,
   type ChatMessage,
 } from '../stores/messages';
@@ -477,6 +481,72 @@ export default function SessionPage() {
         if (interactiveEvent) {
           handleInteractiveEvent(interactiveEvent);
           scrollToBottom();
+        }
+        break;
+      }
+      case 'subagent_started': {
+        // Subagent (Task tool) started
+        const data = msg as unknown as { session_id: string; agent_id: string; agent_type: string };
+        handleSubagentStarted(params.id, data.agent_id, data.agent_type);
+        scrollToBottom();
+        break;
+      }
+      case 'subagent_stopped': {
+        // Subagent (Task tool) completed
+        const data = msg as unknown as { session_id: string; agent_id: string };
+        handleSubagentStopped(params.id, data.agent_id);
+        scrollToBottom();
+        break;
+      }
+      case 'tool_error': {
+        // Tool execution failed
+        const data = msg as unknown as { session_id: string; tool_name: string; error: string; is_timeout: boolean };
+        handleToolError(params.id, data.tool_name, data.error, data.is_timeout);
+        scrollToBottom();
+        break;
+      }
+      case 'context_compacting': {
+        // Context being compacted
+        const data = msg as unknown as { session_id: string; trigger: string };
+        handleContextCompacting(params.id, data.trigger);
+        scrollToBottom();
+        break;
+      }
+      case 'permission_request': {
+        // Permission request for tool
+        const data = msg as unknown as { session_id: string; tool_name: string; tool_input: unknown };
+        // Import handlePermissionRequest when needed
+        import('../stores/messages').then(({ handlePermissionRequest }) => {
+          handlePermissionRequest(params.id, data.tool_name, data.tool_input);
+          scrollToBottom();
+        });
+        break;
+      }
+      case 'context_update': {
+        // Context token update from hook data (accurate counts)
+        const data = msg as unknown as {
+          session_id: string;
+          input_tokens: number;
+          output_tokens: number;
+          cache_read_tokens: number;
+          cache_creation_tokens: number;
+          context_window_size: number;
+        };
+        const currentSession = session();
+        if (currentSession) {
+          // Calculate context percent
+          const contextPercent = data.context_window_size > 0
+            ? Math.round((data.input_tokens / data.context_window_size) * 100)
+            : 0;
+          setSession({
+            ...currentSession,
+            input_tokens: data.input_tokens,
+            output_tokens: data.output_tokens,
+            context_percent: contextPercent,
+            // Store cache tokens in extended session state
+            cache_read_tokens: data.cache_read_tokens,
+            cache_creation_tokens: data.cache_creation_tokens,
+          });
         }
         break;
       }

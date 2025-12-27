@@ -1,0 +1,26 @@
+{
+  "clauset_session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": "abc123def456",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/Users/test/projects/myapp/src/main.rs"
+  },
+  "tool_response": {
+    "content": "fn main() {\n    println!(\"Hello, world!\");\n}"
+  },
+  "tool_use_id": "toolu_01ABC123XYZ",
+  "cwd": "/Users/test/projects/myapp",
+  "context_window": {
+    "total_input_tokens": 17000,
+    "total_output_tokens": 3400,
+    "context_window_size": 200000,
+    "current_usage": {
+      "input_tokens": 17000,
+      "output_tokens": 200,
+      "cache_creation_input_tokens": 5500,
+      "cache_read_input_tokens": 9500
+    }
+  },
+  "version": "2.0.76"
+}

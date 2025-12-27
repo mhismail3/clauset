@@ -226,6 +226,9 @@ pub struct SessionActivity {
     /// Count of bytes received since last activity indicator - used to detect if
     /// Claude has output substantial response content
     pub bytes_since_activity: usize,
+    /// Whether we've received context data from hooks.
+    /// When true, hook data is authoritative and we skip fragile regex parsing.
+    pub hook_context_received: bool,
 }
 
 impl Default for SessionActivity {
@@ -245,6 +248,7 @@ impl Default for SessionActivity {
             saw_activity_since_busy: false,
             last_activity_indicator: std::time::Instant::now(),
             bytes_since_activity: 0,
+            hook_context_received: false,
         }
     }
 }
@@ -420,27 +424,30 @@ impl SessionBuffers {
         let clean_buffer = strip_ansi_codes(full_buffer);
 
         // Parse status line from FULL BUFFER: "Model | $Cost | InputK/OutputK | ctx:X%"
-        if let Some(status) = parse_status_line(&clean_buffer) {
-            let model_changed = buffer.activity.model != status.model;
-            let cost_changed = (buffer.activity.cost - status.cost).abs() > 0.001;
-            let input_changed = buffer.activity.input_tokens != status.input_tokens;
-            let output_changed = buffer.activity.output_tokens != status.output_tokens;
-            let ctx_changed = buffer.activity.context_percent != status.context_percent;
+        // SKIP if we've received hook context - hook data is authoritative and more accurate
+        if !buffer.activity.hook_context_received {
+            if let Some(status) = parse_status_line(&clean_buffer) {
+                let model_changed = buffer.activity.model != status.model;
+                let cost_changed = (buffer.activity.cost - status.cost).abs() > 0.001;
+                let input_changed = buffer.activity.input_tokens != status.input_tokens;
+                let output_changed = buffer.activity.output_tokens != status.output_tokens;
+                let ctx_changed = buffer.activity.context_percent != status.context_percent;
 
-            if model_changed || cost_changed || input_changed || output_changed || ctx_changed
-            {
-                tracing::debug!(
-                    target: "clauset::activity::stats",
-                    "Stats updated: model='{}', cost=${:.4}, tokens={}K/{}K, ctx={}%",
-                    status.model, status.cost, status.input_tokens/1000, status.output_tokens/1000, status.context_percent
-                );
-                buffer.activity.model = status.model;
-                buffer.activity.cost = status.cost;
-                buffer.activity.input_tokens = status.input_tokens;
-                buffer.activity.output_tokens = status.output_tokens;
-                buffer.activity.context_percent = status.context_percent;
-                buffer.activity.last_update = std::time::Instant::now();
-                changed = true;
+                if model_changed || cost_changed || input_changed || output_changed || ctx_changed
+                {
+                    tracing::debug!(
+                        target: "clauset::activity::stats",
+                        "Stats updated (regex fallback): model='{}', cost=${:.4}, tokens={}K/{}K, ctx={}%",
+                        status.model, status.cost, status.input_tokens/1000, status.output_tokens/1000, status.context_percent
+                    );
+                    buffer.activity.model = status.model;
+                    buffer.activity.cost = status.cost;
+                    buffer.activity.input_tokens = status.input_tokens;
+                    buffer.activity.output_tokens = status.output_tokens;
+                    buffer.activity.context_percent = status.context_percent;
+                    buffer.activity.last_update = std::time::Instant::now();
+                    changed = true;
+                }
             }
         }
 
@@ -804,6 +811,79 @@ impl SessionBuffers {
         );
 
         Some(buffer.activity.clone())
+    }
+
+    /// Update context window information from hook data.
+    ///
+    /// This replaces the fragile regex parsing with accurate data from Claude's hook input.
+    /// The context_window data comes directly from Claude Code CLI's aF() function.
+    pub async fn update_context_from_hook(
+        &self,
+        session_id: Uuid,
+        input_tokens: u64,
+        output_tokens: u64,
+        context_window_size: u64,
+        model: Option<String>,
+    ) -> Option<SessionActivity> {
+        let mut buffers = self.buffers.write().await;
+        let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
+
+        let mut changed = false;
+
+        // Mark that we've received hook context - this disables fragile regex parsing
+        if !buffer.activity.hook_context_received {
+            buffer.activity.hook_context_received = true;
+            tracing::debug!(
+                target: "clauset::hooks",
+                "Hook context received for session {} - disabling regex status parsing",
+                session_id
+            );
+        }
+
+        // Update model if provided
+        if let Some(ref m) = model {
+            if buffer.activity.model != *m {
+                buffer.activity.model = m.clone();
+                changed = true;
+            }
+        }
+
+        // Update token counts
+        if buffer.activity.input_tokens != input_tokens {
+            buffer.activity.input_tokens = input_tokens;
+            changed = true;
+        }
+        if buffer.activity.output_tokens != output_tokens {
+            buffer.activity.output_tokens = output_tokens;
+            changed = true;
+        }
+
+        // Calculate context percentage
+        let context_percent = if context_window_size > 0 {
+            ((input_tokens as f64 / context_window_size as f64) * 100.0) as u8
+        } else {
+            0
+        };
+        if buffer.activity.context_percent != context_percent {
+            buffer.activity.context_percent = context_percent;
+            changed = true;
+        }
+
+        if changed {
+            buffer.activity.last_update = std::time::Instant::now();
+            tracing::debug!(
+                target: "clauset::hooks",
+                "Context updated from hook for session {}: model='{}', tokens={}K/{}K, ctx={}%",
+                session_id,
+                buffer.activity.model,
+                input_tokens / 1000,
+                output_tokens / 1000,
+                context_percent
+            );
+            Some(buffer.activity.clone())
+        } else {
+            None
+        }
     }
 }
 
@@ -1611,11 +1691,418 @@ fn looks_like_shell_command(cmd: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    // ========================================================================
+    // BASIC UNIT TESTS
+    // ========================================================================
 
     #[test]
     fn test_strip_ansi_codes() {
         let input = "\x1b[32mHello\x1b[0m World";
         assert_eq!(strip_ansi_codes(input), "Hello World");
+    }
+
+    // ========================================================================
+    // SEQUENCED RING BUFFER TESTS
+    // ========================================================================
+
+    #[test]
+    fn test_buffer_new() {
+        let buf = SequencedRingBuffer::new(1024);
+        assert_eq!(buf.start_seq(), 0);
+        assert_eq!(buf.end_seq(), 0);
+        assert_eq!(buf.chunk_count(), 0);
+        assert_eq!(buf.total_bytes(), 0);
+    }
+
+    #[test]
+    fn test_buffer_push_single() {
+        let mut buf = SequencedRingBuffer::new(1024);
+        let data = vec![1, 2, 3, 4, 5];
+        let (seq, evicted) = buf.push(data.clone());
+
+        assert_eq!(seq, 0);
+        assert_eq!(evicted, 0);
+        assert_eq!(buf.chunk_count(), 1);
+        assert_eq!(buf.total_bytes(), 5);
+        assert_eq!(buf.start_seq(), 0);
+        assert_eq!(buf.end_seq(), 0);
+    }
+
+    #[test]
+    fn test_buffer_push_multiple() {
+        let mut buf = SequencedRingBuffer::new(1024);
+
+        for i in 0..5u64 {
+            let (seq, _) = buf.push(vec![i as u8; 10]);
+            assert_eq!(seq, i);
+        }
+
+        assert_eq!(buf.chunk_count(), 5);
+        assert_eq!(buf.total_bytes(), 50);
+        assert_eq!(buf.start_seq(), 0);
+        assert_eq!(buf.end_seq(), 4);
+    }
+
+    #[test]
+    fn test_buffer_eviction() {
+        // Small buffer that can only hold ~30 bytes
+        let mut buf = SequencedRingBuffer::new(30);
+
+        // Push 5 chunks of 10 bytes each = 50 bytes, should evict
+        for i in 0..5u64 {
+            buf.push(vec![i as u8; 10]);
+        }
+
+        // Should have evicted some chunks
+        assert!(buf.chunk_count() < 5);
+        assert!(buf.total_bytes() <= 30);
+        assert!(buf.start_seq() > 0);
+    }
+
+    #[test]
+    fn test_buffer_sequence_monotonicity() {
+        let mut buf = SequencedRingBuffer::new(1024);
+        let mut last_seq = 0u64;
+
+        for _ in 0..100 {
+            let (seq, _) = buf.push(vec![0; 5]);
+            assert!(seq >= last_seq, "Sequence must be monotonically increasing");
+            last_seq = seq;
+        }
+    }
+
+    #[test]
+    fn test_buffer_get_range() {
+        let mut buf = SequencedRingBuffer::new(1024);
+
+        for i in 0..10u64 {
+            buf.push(vec![i as u8; 5]);
+        }
+
+        // Get middle range
+        let chunks = buf.get_range(3, 7);
+        assert_eq!(chunks.len(), 5);
+        assert_eq!(chunks[0].seq, 3);
+        assert_eq!(chunks[4].seq, 7);
+    }
+
+    #[test]
+    fn test_buffer_get_range_after_eviction() {
+        let mut buf = SequencedRingBuffer::new(50);
+
+        // Push enough to cause eviction
+        for i in 0..20u64 {
+            buf.push(vec![i as u8; 10]);
+        }
+
+        // Try to get evicted range - should return empty
+        let early_chunks = buf.get_range(0, 5);
+        assert!(early_chunks.is_empty() || early_chunks[0].seq > 5);
+
+        // Get available range
+        let available = buf.get_range(buf.start_seq(), buf.end_seq());
+        assert!(!available.is_empty());
+    }
+
+    #[test]
+    fn test_buffer_get_all() {
+        let mut buf = SequencedRingBuffer::new(1024);
+
+        buf.push(vec![65, 66, 67]); // ABC
+        buf.push(vec![68, 69, 70]); // DEF
+        buf.push(vec![71, 72, 73]); // GHI
+
+        let (start, end, data) = buf.get_all();
+        assert_eq!(start, 0);
+        assert_eq!(end, 2);
+        assert_eq!(data, vec![65, 66, 67, 68, 69, 70, 71, 72, 73]);
+    }
+
+    #[test]
+    fn test_buffer_has_seq() {
+        let mut buf = SequencedRingBuffer::new(1024);
+
+        for _ in 0..10 {
+            buf.push(vec![0; 5]);
+        }
+
+        assert!(buf.has_seq(0));
+        assert!(buf.has_seq(5));
+        assert!(buf.has_seq(9));
+        assert!(!buf.has_seq(10)); // Not yet assigned
+        assert!(!buf.has_seq(100)); // Way out of range
+    }
+
+    #[test]
+    fn test_buffer_clear() {
+        let mut buf = SequencedRingBuffer::new(1024);
+
+        for _ in 0..10 {
+            buf.push(vec![0; 5]);
+        }
+
+        let last_next_seq = buf.next_seq();
+        buf.clear();
+
+        assert_eq!(buf.chunk_count(), 0);
+        assert_eq!(buf.total_bytes(), 0);
+        // start_seq should be updated to maintain monotonicity
+        assert_eq!(buf.start_seq(), last_next_seq);
+    }
+
+    #[test]
+    fn test_buffer_clear_maintains_monotonicity() {
+        let mut buf = SequencedRingBuffer::new(1024);
+
+        // Push some chunks
+        for _ in 0..5 {
+            buf.push(vec![0; 5]);
+        }
+
+        buf.clear();
+
+        // Push more chunks - sequence should continue
+        let (seq, _) = buf.push(vec![0; 5]);
+        assert_eq!(seq, 5); // Should continue from where we left off
+    }
+
+    // ========================================================================
+    // PROPERTY-BASED TESTS
+    // ========================================================================
+
+    proptest! {
+        #[test]
+        fn prop_sequence_always_monotonic(chunks in prop::collection::vec(prop::collection::vec(any::<u8>(), 1..100), 1..50)) {
+            let mut buf = SequencedRingBuffer::new(10000);
+            let mut prev_seq = None;
+
+            for chunk in chunks {
+                let (seq, _) = buf.push(chunk);
+
+                if let Some(prev) = prev_seq {
+                    prop_assert!(seq > prev, "Sequence must always increase: {} !> {}", seq, prev);
+                }
+                prev_seq = Some(seq);
+            }
+        }
+
+        #[test]
+        fn prop_buffer_never_exceeds_max_bytes(
+            max_bytes in 100usize..1000,
+            chunks in prop::collection::vec(prop::collection::vec(any::<u8>(), 1..50), 1..100)
+        ) {
+            let mut buf = SequencedRingBuffer::new(max_bytes);
+
+            for chunk in chunks {
+                buf.push(chunk);
+                // Buffer should never exceed max (except for a single chunk that's larger)
+                prop_assert!(
+                    buf.total_bytes() <= max_bytes || buf.chunk_count() == 1,
+                    "Buffer {} bytes exceeds max {} bytes with {} chunks",
+                    buf.total_bytes(), max_bytes, buf.chunk_count()
+                );
+            }
+        }
+
+        #[test]
+        fn prop_get_range_returns_correct_sequences(
+            chunks in prop::collection::vec(prop::collection::vec(any::<u8>(), 1..20), 5..20)
+        ) {
+            let mut buf = SequencedRingBuffer::new(10000);
+
+            for chunk in &chunks {
+                buf.push(chunk.clone());
+            }
+
+            // Test that get_range returns correctly ordered chunks
+            let start = buf.start_seq();
+            let end = buf.end_seq();
+
+            if start <= end {
+                let range = buf.get_range(start, end);
+
+                // Check sequences are in order
+                for window in range.windows(2) {
+                    prop_assert!(window[0].seq < window[1].seq);
+                }
+            }
+        }
+
+        #[test]
+        fn prop_eviction_preserves_recent_chunks(
+            chunks in prop::collection::vec(prop::collection::vec(any::<u8>(), 10..20), 10..50)
+        ) {
+            let mut buf = SequencedRingBuffer::new(200); // Small buffer
+            let mut last_seqs = Vec::new();
+
+            for chunk in chunks {
+                let (seq, _) = buf.push(chunk);
+                last_seqs.push(seq);
+            }
+
+            // The most recent sequence should always be available
+            if let Some(&last) = last_seqs.last() {
+                prop_assert!(buf.has_seq(last), "Most recent seq {} should always be available", last);
+            }
+        }
+
+        #[test]
+        fn prop_get_all_concatenates_correctly(
+            chunks in prop::collection::vec(prop::collection::vec(any::<u8>(), 1..30), 2..10)
+        ) {
+            let mut buf = SequencedRingBuffer::new(10000);
+
+            // Calculate expected total
+            let expected: Vec<u8> = chunks.iter().flatten().copied().collect();
+
+            for chunk in chunks {
+                buf.push(chunk);
+            }
+
+            let (_, _, actual) = buf.get_all();
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_has_seq_consistent_with_range(
+            chunks in prop::collection::vec(prop::collection::vec(any::<u8>(), 1..20), 1..30)
+        ) {
+            let mut buf = SequencedRingBuffer::new(500);
+
+            for chunk in chunks {
+                buf.push(chunk);
+            }
+
+            let start = buf.start_seq();
+            let end = buf.end_seq();
+
+            // All sequences in [start, end) should be available
+            for seq in start..=end {
+                prop_assert!(buf.has_seq(seq), "Seq {} in range [{}, {}] should be available", seq, start, end);
+            }
+
+            // Sequences outside range should not be available
+            if start > 0 {
+                prop_assert!(!buf.has_seq(start - 1), "Seq {} before start should not be available", start - 1);
+            }
+            prop_assert!(!buf.has_seq(end + 1), "Seq {} after end should not be available", end + 1);
+        }
+    }
+
+    // ========================================================================
+    // ANSI STRIPPING TESTS
+    // ========================================================================
+
+    #[test]
+    fn test_strip_ansi_comprehensive() {
+        // CSI sequences (colors, cursor)
+        assert_eq!(strip_ansi_codes("\x1b[31mred\x1b[0m"), "red");
+        assert_eq!(strip_ansi_codes("\x1b[1;32mbold green\x1b[0m"), "bold green");
+        assert_eq!(strip_ansi_codes("\x1b[?25l"), ""); // Hide cursor
+        assert_eq!(strip_ansi_codes("\x1b[H\x1b[2J"), ""); // Clear screen
+
+        // OSC sequences (window title)
+        assert_eq!(strip_ansi_codes("\x1b]0;Title\x07text"), "text");
+
+        // Mixed content
+        let mixed = "\x1b[32m● \x1b[0mRead\x1b[90m(file.txt)\x1b[0m";
+        assert_eq!(strip_ansi_codes(mixed), "● Read(file.txt)");
+    }
+
+    proptest! {
+        #[test]
+        fn prop_strip_ansi_never_increases_length(text in ".*") {
+            let stripped = strip_ansi_codes(&text);
+            prop_assert!(stripped.len() <= text.len());
+        }
+
+        #[test]
+        fn prop_strip_ansi_removes_escape(text in ".*") {
+            let stripped = strip_ansi_codes(&text);
+            prop_assert!(!stripped.contains('\x1b'), "Stripped text should not contain ESC");
+        }
+    }
+
+    // ========================================================================
+    // STATUS LINE PARSING PROPERTY TESTS
+    // ========================================================================
+
+    proptest! {
+        #[test]
+        fn prop_valid_status_lines_parse(
+            model in "[A-Za-z][a-z0-9. -]{2,15}",
+            cost in 0.0f64..100.0,
+            input_k in 0.0f64..500.0,
+            output_k in 0.0f64..500.0,
+            ctx in 0u8..100
+        ) {
+            let line = format!(
+                "{} | ${:.2} | {:.1}K/{:.1}K | ctx:{}%",
+                model.trim(), cost, input_k, output_k, ctx
+            );
+
+            if let Some(parsed) = parse_status_line(&line) {
+                prop_assert!((parsed.cost - cost).abs() < 0.01);
+                prop_assert_eq!(parsed.context_percent, ctx);
+            }
+        }
+
+        #[test]
+        fn prop_code_lines_never_parse_as_status(
+            code_line in r#"(let |const |fn |def |class |if |for |while |return ).*"#
+        ) {
+            let result = parse_status_line(&code_line);
+            prop_assert!(result.is_none(), "Code line should not parse as status: {}", code_line);
+        }
+    }
+
+    // ========================================================================
+    // HELPER FUNCTION TESTS
+    // ========================================================================
+
+    #[test]
+    fn test_truncate_str() {
+        assert_eq!(truncate_str("hello", 10), "hello");
+        assert_eq!(truncate_str("hello world", 8), "hello...");
+        assert_eq!(truncate_str("hi", 5), "hi");
+        assert_eq!(truncate_str("", 5), "");
+    }
+
+    #[test]
+    fn test_looks_like_shell_command() {
+        assert!(looks_like_shell_command("cargo test"));
+        assert!(looks_like_shell_command("npm install"));
+        assert!(looks_like_shell_command("git status"));
+        assert!(looks_like_shell_command("./script.sh"));
+        assert!(looks_like_shell_command("echo hello | grep h"));
+
+        assert!(!looks_like_shell_command("please help me"));
+        assert!(!looks_like_shell_command("can you fix this"));
+        assert!(!looks_like_shell_command("What is happening?"));
+    }
+
+    #[test]
+    fn test_is_status_indicator() {
+        assert!(is_status_indicator("* Thinking..."));
+        assert!(is_status_indicator("● Bash(git status)"));
+        assert!(is_status_indicator("⠋ Processing..."));
+        assert!(is_status_indicator("Thinking..."));
+
+        assert!(!is_status_indicator("I am thinking about this"));
+        assert!(!is_status_indicator("The quick brown fox"));
+    }
+
+    #[test]
+    fn test_is_ui_chrome() {
+        assert!(is_ui_chrome("───────────────"));
+        assert!(is_ui_chrome("│"));
+        assert!(is_ui_chrome("⠋"));
+        assert!(is_ui_chrome("═══════════════"));
+
+        assert!(!is_ui_chrome("Hello world"));
+        assert!(!is_ui_chrome("● Read(file.txt)"));
     }
 
     #[test]

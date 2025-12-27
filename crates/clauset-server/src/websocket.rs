@@ -245,6 +245,81 @@ pub async fn handle_websocket(
                                 None
                             }
                         }
+                        ProcessEvent::SubagentStarted { session_id: event_session_id, agent_id, agent_type } => {
+                            if *event_session_id == session_id {
+                                Some(WsServerMessage::SubagentStarted {
+                                    session_id: *event_session_id,
+                                    agent_id: agent_id.clone(),
+                                    agent_type: agent_type.clone(),
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        ProcessEvent::SubagentStopped { session_id: event_session_id, agent_id } => {
+                            if *event_session_id == session_id {
+                                Some(WsServerMessage::SubagentStopped {
+                                    session_id: *event_session_id,
+                                    agent_id: agent_id.clone(),
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        ProcessEvent::ToolError { session_id: event_session_id, tool_name, error, is_timeout } => {
+                            if *event_session_id == session_id {
+                                Some(WsServerMessage::ToolError {
+                                    session_id: *event_session_id,
+                                    tool_name: tool_name.clone(),
+                                    error: error.clone(),
+                                    is_timeout: *is_timeout,
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        ProcessEvent::ContextCompacting { session_id: event_session_id, trigger } => {
+                            if *event_session_id == session_id {
+                                Some(WsServerMessage::ContextCompacting {
+                                    session_id: *event_session_id,
+                                    trigger: trigger.clone(),
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        ProcessEvent::PermissionRequest { session_id: event_session_id, tool_name, tool_input } => {
+                            if *event_session_id == session_id {
+                                Some(WsServerMessage::PermissionRequest {
+                                    session_id: *event_session_id,
+                                    tool_name: tool_name.clone(),
+                                    tool_input: tool_input.clone(),
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        ProcessEvent::ContextUpdate {
+                            session_id: event_session_id,
+                            input_tokens,
+                            output_tokens,
+                            cache_read_tokens,
+                            cache_creation_tokens,
+                            context_window_size,
+                        } => {
+                            if *event_session_id == session_id {
+                                Some(WsServerMessage::ContextUpdate {
+                                    session_id: *event_session_id,
+                                    input_tokens: *input_tokens,
+                                    output_tokens: *output_tokens,
+                                    cache_read_tokens: *cache_read_tokens,
+                                    cache_creation_tokens: *cache_creation_tokens,
+                                    context_window_size: *context_window_size,
+                                })
+                            } else {
+                                None
+                            }
+                        }
                         _ => None,
                     };
 

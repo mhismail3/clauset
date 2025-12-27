@@ -29,3 +29,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 dirs.workspace = true
 dashmap.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tower = { workspace = true, features = ["util"] }
+axum-test.workspace = true

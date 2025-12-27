@@ -1,0 +1,28 @@
+{
+  "clauset_session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": "abc123def456",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "npm run build",
+    "description": "Build the project"
+  },
+  "tool_use_id": "toolu_03GHI789DEF",
+  "error": "Command failed with exit code 1: npm ERR! code ENOENT",
+  "error_type": "execution_error",
+  "is_timeout": false,
+  "is_interrupt": false,
+  "cwd": "/Users/test/projects/myapp",
+  "context_window": {
+    "total_input_tokens": 25000,
+    "total_output_tokens": 6000,
+    "context_window_size": 200000,
+    "current_usage": {
+      "input_tokens": 25000,
+      "output_tokens": 400,
+      "cache_creation_input_tokens": 7000,
+      "cache_read_input_tokens": 15000
+    }
+  },
+  "version": "2.0.76"
+}
