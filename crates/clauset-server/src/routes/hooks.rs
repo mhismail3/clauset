@@ -204,6 +204,15 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 tool_name, session_id
             );
 
+            // Detect Plan Mode entry
+            if tool_name == "EnterPlanMode" {
+                info!(target: "clauset::hooks", "Session {} entering Plan Mode", session_id);
+                let _ = state.session_manager.broadcast_event(ProcessEvent::ModeChange {
+                    session_id,
+                    mode: clauset_types::ChatMode::Plan,
+                });
+            }
+
             // Update context window from accurate hook data
             if let Some(ref ctx) = context_window {
                 state.session_manager.update_context_from_hook(
@@ -232,6 +241,15 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 "Post-tool use {} for session {}",
                 tool_name, session_id
             );
+
+            // Detect Plan Mode exit
+            if tool_name == "ExitPlanMode" {
+                info!(target: "clauset::hooks", "Session {} exiting Plan Mode", session_id);
+                let _ = state.session_manager.broadcast_event(ProcessEvent::ModeChange {
+                    session_id,
+                    mode: clauset_types::ChatMode::Normal,
+                });
+            }
 
             // Update context window from accurate hook data
             if let Some(ref ctx) = context_window {

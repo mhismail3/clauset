@@ -23,6 +23,8 @@ export interface Message {
     isTimeout?: boolean;
     trigger?: string;
   };
+  /** Whether a permission request has been responded to */
+  responded?: boolean;
 }
 
 export interface ToolCall {
@@ -206,6 +208,27 @@ export function handlePermissionRequest(sessionId: string, toolName: string, too
     `Permission required: ${toolName}`,
     { toolName, toolInput }
   );
+}
+
+/**
+ * Mark a permission request message as responded.
+ */
+export function markPermissionResponded(sessionId: string, messageId: string) {
+  setMessages((prev) => {
+    const newMap = new Map(prev);
+    const sessionMessages = newMap.get(sessionId) ?? [];
+
+    const updatedMessages = sessionMessages.map((msg) => {
+      if (msg.id === messageId && msg.systemType === 'permission_request') {
+        return { ...msg, responded: true };
+      }
+      return msg;
+    });
+
+    newMap.set(sessionId, updatedMessages);
+    saveToStorage(sessionId, updatedMessages);
+    return newMap;
+  });
 }
 
 export function setSessionMessages(sessionId: string, msgs: Message[]) {

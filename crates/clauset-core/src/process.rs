@@ -93,6 +93,11 @@ pub enum ProcessEvent {
         cache_creation_tokens: u64,
         context_window_size: u64,
     },
+    /// Session mode changed (e.g., entered/exited Plan Mode).
+    ModeChange {
+        session_id: Uuid,
+        mode: clauset_types::ChatMode,
+    },
 }
 
 /// Options for spawning a Claude process.

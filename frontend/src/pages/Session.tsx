@@ -24,6 +24,7 @@ import {
   handleSubagentStopped,
   handleToolError,
   handleContextCompacting,
+  markPermissionResponded,
   type ChatEvent,
   type ChatMessage,
 } from '../stores/messages';
@@ -129,6 +130,8 @@ export default function SessionPage() {
   const [diffState, setDiffState] = createSignal<{ interactionId: string; file: string } | null>(null);
   const [terminalData, setTerminalData] = createSignal<Uint8Array[]>([]);
   const [resuming, setResuming] = createSignal(false);
+  const [mode, setMode] = createSignal<'normal' | 'plan'>('normal');
+  const [isProcessing, setIsProcessing] = createSignal(false);
 
   // iOS keyboard handling for chat view (follows visualViewport in real-time)
   // offsetTop counters iOS's automatic page scroll when keyboard appears
@@ -550,6 +553,12 @@ export default function SessionPage() {
         }
         break;
       }
+      case 'mode_change': {
+        // Plan mode indicator from hook detection
+        const data = msg as unknown as { session_id: string; mode: 'normal' | 'plan' };
+        setMode(data.mode);
+        break;
+      }
     }
   }
 
@@ -630,6 +639,32 @@ export default function SessionPage() {
     const s = session();
     return s && (s.status === 'stopped' || s.status === 'error');
   };
+
+  // Check if Claude is actively processing (has a current step or streaming)
+  const isClaudeProcessing = () => {
+    const s = session();
+    if (!s) return false;
+    if (s.status === 'stopped' || s.status === 'error') return false;
+    // Processing if has current step or messages are streaming
+    const hasCurrentStep = s.current_step && s.current_step !== 'Ready' && s.current_step.length > 0;
+    const hasStreaming = currentStreamingId() !== null;
+    return hasCurrentStep || hasStreaming;
+  };
+
+  // Handle permission response (Allow/Deny/Allow All)
+  function handlePermissionResponse(messageId: string, response: 'y' | 'n' | 'a') {
+    if (wsManager && wsState() === 'connected') {
+      wsManager.send({ type: 'permission_response', response });
+      markPermissionResponded(params.id, messageId);
+    }
+  }
+
+  // Handle interrupt (Stop button)
+  function handleInterrupt() {
+    if (wsManager && wsState() === 'connected') {
+      wsManager.send({ type: 'interrupt' });
+    }
+  }
 
   function handleConnectionRetry() {
     wsManager?.retry();
@@ -754,6 +789,25 @@ export default function SessionPage() {
                   >
                     {s().project_path.split('/').pop()}
                   </span>
+                  {/* Plan Mode Badge */}
+                  <Show when={mode() === 'plan'}>
+                    <span
+                      class="text-mono"
+                      style={{
+                        background: '#8b5cf6',
+                        color: 'white',
+                        padding: '2px 8px',
+                        "border-radius": '4px',
+                        "font-size": '10px',
+                        "font-weight": '600',
+                        "text-transform": 'uppercase',
+                        "letter-spacing": '0.05em',
+                        "flex-shrink": '0',
+                      }}
+                    >
+                      Plan
+                    </span>
+                  </Show>
                 </>
               )}
             </Show>
@@ -896,7 +950,12 @@ export default function SessionPage() {
               </Show>
 
               <For each={messages()}>
-                {(message) => <MessageBubble message={message} />}
+                {(message) => (
+                  <MessageBubble
+                    message={message}
+                    onPermissionResponse={(response) => handlePermissionResponse(message.id, response)}
+                  />
+                )}
               </For>
 
               <Show when={streamingContent()}>
@@ -963,6 +1022,8 @@ export default function SessionPage() {
               onSend={handleSendMessage}
               disabled={wsState() !== 'connected' || getInteractiveState(params.id).type === 'prompt'}
               placeholder={session()?.mode === 'terminal' ? 'Type here (output in terminal)...' : 'Message Claude...'}
+              isProcessing={isClaudeProcessing()}
+              onInterrupt={handleInterrupt}
             />
           </div>
         </Show>

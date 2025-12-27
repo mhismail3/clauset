@@ -320,6 +320,16 @@ pub async fn handle_websocket(
                                 None
                             }
                         }
+                        ProcessEvent::ModeChange { session_id: event_session_id, mode } => {
+                            if *event_session_id == session_id {
+                                Some(WsServerMessage::ModeChange {
+                                    session_id: *event_session_id,
+                                    mode: *mode,
+                                })
+                            } else {
+                                None
+                            }
+                        }
                         _ => None,
                     };
 
@@ -615,6 +625,53 @@ pub async fn handle_websocket(
                                 .session_manager
                                 .send_terminal_input(session_id, &[0x03])
                                 .await;
+                        }
+
+                        // === Permission Response Protocol ===
+                        WsClientMessage::PermissionResponse { response } => {
+                            info!(target: "clauset::ws", "PermissionResponse for session {}: '{}'", session_id, response);
+
+                            // Validate response character
+                            if !['y', 'n', 'a'].contains(&response) {
+                                warn!(target: "clauset::ws", "Invalid permission response '{}' for session {}, must be 'y', 'n', or 'a'", response, session_id);
+                                continue;
+                            }
+
+                            // Send the response character to the PTY
+                            // Claude Code's permission prompt waits for 'y', 'n', or 'a'
+                            let response_bytes = [response as u8];
+                            if let Err(e) = state_clone
+                                .session_manager
+                                .send_terminal_input(session_id, &response_bytes)
+                                .await
+                            {
+                                warn!(target: "clauset::ws", "Failed to send permission response for session {}: {}", session_id, e);
+                                continue;
+                            }
+
+                            // Send Enter to confirm the response
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                            if let Err(e) = state_clone
+                                .session_manager
+                                .send_terminal_input(session_id, b"\r")
+                                .await
+                            {
+                                warn!(target: "clauset::ws", "Failed to send Enter after permission response for session {}: {}", session_id, e);
+                            }
+                        }
+
+                        // === Interrupt Protocol ===
+                        WsClientMessage::Interrupt => {
+                            info!(target: "clauset::ws", "Interrupt for session {}", session_id);
+
+                            // Send Ctrl+C (ETX, 0x03) to interrupt the current operation
+                            if let Err(e) = state_clone
+                                .session_manager
+                                .send_terminal_input(session_id, &[0x03])
+                                .await
+                            {
+                                warn!(target: "clauset::ws", "Failed to send interrupt for session {}: {}", session_id, e);
+                            }
                         }
 
                         WsClientMessage::NegotiateDimensions {

@@ -104,6 +104,21 @@ pub enum WsClientMessage {
     },
     /// User cancelled the interactive prompt.
     InteractiveCancel,
+
+    // === Permission Response Protocol ===
+
+    /// User responded to a permission request.
+    /// Sends the response character ('y', 'n', 'a') to the PTY.
+    PermissionResponse {
+        /// Response: 'y' for allow, 'n' for deny, 'a' for allow all session
+        response: char,
+    },
+
+    // === Interrupt Protocol ===
+
+    /// User wants to interrupt/cancel the current operation.
+    /// Sends Ctrl+C (SIGINT) to the PTY.
+    Interrupt,
 }
 
 /// Messages sent from server to client.
@@ -333,6 +348,25 @@ pub enum WsServerMessage {
         cache_creation_tokens: u64,
         context_window_size: u64,
     },
+
+    // === Mode Change Protocol ===
+
+    /// Session mode changed (e.g., entered/exited Plan Mode).
+    /// Notifies frontend to update mode indicator.
+    ModeChange {
+        session_id: Uuid,
+        mode: ChatMode,
+    },
+}
+
+/// Chat mode for session UI.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatMode {
+    /// Normal chat mode
+    Normal,
+    /// Plan mode - Claude is planning before implementing
+    Plan,
 }
 
 /// A single action/step performed by Claude (for activity updates)
@@ -868,6 +902,8 @@ mod serialization_tests {
                 response: "test".to_string(),
             }),
             ("interactive_cancel", WsClientMessage::InteractiveCancel),
+            ("permission_response", WsClientMessage::PermissionResponse { response: 'y' }),
+            ("interrupt", WsClientMessage::Interrupt),
         ];
 
         for (expected_type, msg) in messages {
@@ -922,5 +958,125 @@ mod serialization_tests {
         };
         let json = serde_json::to_string(&action).unwrap();
         assert!(json.contains(r#""action_type":"read""#));
+    }
+
+    // ========================================================================
+    // PERMISSION RESPONSE TESTS
+    // ========================================================================
+
+    #[test]
+    fn test_permission_response_y_serialization() {
+        let msg = WsClientMessage::PermissionResponse { response: 'y' };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"permission_response""#));
+        assert!(json.contains(r#""response":"y""#));
+    }
+
+    #[test]
+    fn test_permission_response_n_serialization() {
+        let msg = WsClientMessage::PermissionResponse { response: 'n' };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"permission_response""#));
+        assert!(json.contains(r#""response":"n""#));
+    }
+
+    #[test]
+    fn test_permission_response_a_serialization() {
+        let msg = WsClientMessage::PermissionResponse { response: 'a' };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"permission_response""#));
+        assert!(json.contains(r#""response":"a""#));
+    }
+
+    #[test]
+    fn test_permission_response_roundtrip() {
+        let original = WsClientMessage::PermissionResponse { response: 'y' };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: WsClientMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            WsClientMessage::PermissionResponse { response } => {
+                assert_eq!(response, 'y');
+            }
+            _ => panic!("Expected PermissionResponse"),
+        }
+    }
+
+    // ========================================================================
+    // INTERRUPT TESTS
+    // ========================================================================
+
+    #[test]
+    fn test_interrupt_serialization() {
+        let msg = WsClientMessage::Interrupt;
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"interrupt""#));
+    }
+
+    #[test]
+    fn test_interrupt_roundtrip() {
+        let original = WsClientMessage::Interrupt;
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: WsClientMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            WsClientMessage::Interrupt => {}
+            _ => panic!("Expected Interrupt"),
+        }
+    }
+
+    // ========================================================================
+    // MODE CHANGE TESTS
+    // ========================================================================
+
+    #[test]
+    fn test_mode_change_plan_serialization() {
+        let msg = WsServerMessage::ModeChange {
+            session_id: Uuid::nil(),
+            mode: ChatMode::Plan,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"mode_change""#));
+        assert!(json.contains(r#""mode":"plan""#));
+    }
+
+    #[test]
+    fn test_mode_change_normal_serialization() {
+        let msg = WsServerMessage::ModeChange {
+            session_id: Uuid::nil(),
+            mode: ChatMode::Normal,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"mode_change""#));
+        assert!(json.contains(r#""mode":"normal""#));
+    }
+
+    #[test]
+    fn test_chat_mode_enum_serialization() {
+        assert_eq!(serde_json::to_string(&ChatMode::Normal).unwrap(), r#""normal""#);
+        assert_eq!(serde_json::to_string(&ChatMode::Plan).unwrap(), r#""plan""#);
+    }
+
+    #[test]
+    fn test_chat_mode_enum_deserialization() {
+        let normal: ChatMode = serde_json::from_str(r#""normal""#).unwrap();
+        let plan: ChatMode = serde_json::from_str(r#""plan""#).unwrap();
+        assert_eq!(normal, ChatMode::Normal);
+        assert_eq!(plan, ChatMode::Plan);
+    }
+
+    #[test]
+    fn test_mode_change_roundtrip() {
+        let original = WsServerMessage::ModeChange {
+            session_id: Uuid::nil(),
+            mode: ChatMode::Plan,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: WsServerMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            WsServerMessage::ModeChange { session_id, mode } => {
+                assert_eq!(session_id, Uuid::nil());
+                assert_eq!(mode, ChatMode::Plan);
+            }
+            _ => panic!("Expected ModeChange"),
+        }
     }
 }

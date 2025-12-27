@@ -119,5 +119,7 @@ async fn process_event(state: &AppState, event: ProcessEvent) {
         ProcessEvent::PermissionRequest { .. } => {}
         // Context update events are handled by WebSocket handlers
         ProcessEvent::ContextUpdate { .. } => {}
+        // Mode change events are handled by WebSocket handlers
+        ProcessEvent::ModeChange { .. } => {}
     }
 }

@@ -162,7 +162,35 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
-- Test Suite Implementation - **COMPLETE**
+- Chat Mode Feature Parity - **COMPLETE**
+
+### Chat Mode Feature Parity (Just Completed)
+- **Goal**: Add missing affordances to bring chat mode to parity with CLI (permissions, interrupt, mode indicator)
+- **Plan file**: `~/.claude/plans/synthetic-strolling-fountain.md`
+
+#### Implemented Features:
+1. **Permission Approval UI** - Inline Allow/Deny/Allow All buttons on permission_request messages
+   - `MessageBubble.tsx` - Added permission buttons with green/red/blue styling
+   - `messages.ts` - Added `responded` field and `markPermissionResponded()` function
+   - `Session.tsx` - Added `handlePermissionResponse()` that sends WebSocket message
+
+2. **Stop/Interrupt Button** - Replace send button with red stop square when Claude is processing
+   - `InputBar.tsx` - Added `isProcessing` and `onInterrupt` props
+   - Shows stop button (■) when processing and no text entered
+   - `Session.tsx` - Added `isClaudeProcessing()` check and `handleInterrupt()` handler
+
+3. **Plan Mode Indicator** - Purple "Plan" badge in session header when in plan mode
+   - `Session.tsx` - Added `mode` signal, handles `mode_change` WebSocket message
+   - Badge appears next to project name when mode is 'plan'
+
+#### Backend Support (Previously Completed):
+- `crates/clauset-types/src/ws.rs` - Added `PermissionResponse`, `Interrupt` client messages, `ModeChange` server message
+- `crates/clauset-server/src/websocket.rs` - Handlers for PermissionResponse and Interrupt
+- `crates/clauset-server/src/routes/hooks.rs` - Mode detection from EnterPlanMode/ExitPlanMode tool use
+- `crates/clauset-core/src/process.rs` - Added `ProcessEvent::ModeChange`
+- All 87 backend tests pass
+
+### Test Suite Implementation - **COMPLETE**
 
 ### Test Suite Implementation Progress
 - **Goal**: 290+ tests for 100% Claude Code CLI parity verification

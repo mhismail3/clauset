@@ -47,6 +47,8 @@ function StreamingIndicator() {
 
 interface MessageBubbleProps {
   message: Message;
+  /** Callback to send permission response (for permission_request system messages) */
+  onPermissionResponse?: (response: 'y' | 'n' | 'a') => void;
 }
 
 export function MessageBubble(props: MessageBubbleProps) {
@@ -112,14 +114,18 @@ export function MessageBubble(props: MessageBubbleProps) {
   // Render system message
   if (isSystem()) {
     const styles = getSystemStyles();
+    const isPermissionRequest = () => props.message.systemType === 'permission_request';
+    const isResponded = () => props.message.responded;
+
     return (
       <div class="flex justify-center">
         <div
           style={{
             display: 'flex',
-            'align-items': 'center',
+            'flex-direction': isPermissionRequest() ? 'column' : 'row',
+            'align-items': isPermissionRequest() ? 'stretch' : 'center',
             gap: '6px',
-            padding: '4px 12px',
+            padding: isPermissionRequest() ? '8px 12px' : '4px 12px',
             'border-radius': '16px',
             background: styles.background,
             border: styles.border,
@@ -128,8 +134,87 @@ export function MessageBubble(props: MessageBubbleProps) {
             color: styles.color,
           }}
         >
-          <span>{styles.icon}</span>
-          <span>{props.message.content}</span>
+          <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
+            <span>{styles.icon}</span>
+            <span>{props.message.content}</span>
+          </div>
+
+          {/* Permission approval buttons */}
+          <Show when={isPermissionRequest() && !isResponded() && props.onPermissionResponse}>
+            <div style={{
+              display: 'flex',
+              gap: '8px',
+              'margin-top': '6px',
+              'justify-content': 'center',
+            }}>
+              <button
+                onClick={() => props.onPermissionResponse?.('y')}
+                style={{
+                  padding: '4px 12px',
+                  'border-radius': '6px',
+                  border: 'none',
+                  background: '#22c55e',
+                  color: 'white',
+                  'font-size': '11px',
+                  'font-weight': '600',
+                  'font-family': 'var(--font-mono)',
+                  cursor: 'pointer',
+                  transition: 'opacity 0.15s ease',
+                }}
+                class="pressable"
+              >
+                Allow
+              </button>
+              <button
+                onClick={() => props.onPermissionResponse?.('n')}
+                style={{
+                  padding: '4px 12px',
+                  'border-radius': '6px',
+                  border: 'none',
+                  background: '#ef4444',
+                  color: 'white',
+                  'font-size': '11px',
+                  'font-weight': '600',
+                  'font-family': 'var(--font-mono)',
+                  cursor: 'pointer',
+                  transition: 'opacity 0.15s ease',
+                }}
+                class="pressable"
+              >
+                Deny
+              </button>
+              <button
+                onClick={() => props.onPermissionResponse?.('a')}
+                style={{
+                  padding: '4px 12px',
+                  'border-radius': '6px',
+                  border: 'none',
+                  background: '#3b82f6',
+                  color: 'white',
+                  'font-size': '11px',
+                  'font-weight': '600',
+                  'font-family': 'var(--font-mono)',
+                  cursor: 'pointer',
+                  transition: 'opacity 0.15s ease',
+                }}
+                class="pressable"
+              >
+                Allow All
+              </button>
+            </div>
+          </Show>
+
+          {/* Show responded state */}
+          <Show when={isPermissionRequest() && isResponded()}>
+            <div style={{
+              'margin-top': '4px',
+              'font-size': '10px',
+              color: 'var(--color-text-muted)',
+              'text-align': 'center',
+            }}>
+              ✓ Response sent
+            </div>
+          </Show>
         </div>
       </div>
     );

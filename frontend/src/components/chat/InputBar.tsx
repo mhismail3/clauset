@@ -1,4 +1,4 @@
-import { createSignal, createEffect } from 'solid-js';
+import { createSignal, createEffect, Show } from 'solid-js';
 import { useKeyboard } from '../../lib/keyboard';
 import { CommandPicker } from '../commands/CommandPicker';
 import { Command } from '../../lib/api';
@@ -12,6 +12,10 @@ interface InputBarProps {
   onSend: (message: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  /** Whether Claude is currently processing (shows stop button) */
+  isProcessing?: boolean;
+  /** Callback when stop button is clicked */
+  onInterrupt?: () => void;
 }
 
 const MAX_ROWS = 10;
@@ -144,6 +148,8 @@ export function InputBar(props: InputBarProps) {
 
   const canSend = () => !props.disabled && message().trim();
   const shouldScroll = () => rows() >= MAX_ROWS;
+  // Show stop button when processing and no text entered
+  const showStopButton = () => props.isProcessing && !message().trim();
 
   // Calculate anchor bottom for command picker (above input bar)
   const inputBarHeight = () => {
@@ -215,55 +221,104 @@ export function InputBar(props: InputBarProps) {
           }}
         />
 
-        {/* Icon-only send button */}
-        <button
-          type="submit"
-          disabled={!canSend()}
-          style={{
-            width: `${SINGLE_ROW_HEIGHT}px`,
-            height: `${SINGLE_ROW_HEIGHT}px`,
-            "flex-shrink": '0',
-            display: 'flex',
-            "align-items": 'center',
-            "justify-content": 'center',
-            background: 'transparent',
-            color: canSend() ? 'var(--color-accent)' : 'var(--color-text-muted)',
-            border: 'none',
-            cursor: canSend() ? 'pointer' : 'default',
-            transition: 'color 0.15s ease, transform 0.1s ease',
-            opacity: canSend() ? 1 : 0.4,
-          }}
-          onMouseDown={(e) => {
-            if (canSend()) e.currentTarget.style.transform = 'scale(0.85)';
-          }}
-          onMouseUp={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-          }}
-          onTouchStart={(e) => {
-            if (canSend()) e.currentTarget.style.transform = 'scale(0.85)';
-          }}
-          onTouchEnd={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-          }}
+        {/* Send or Stop button */}
+        <Show
+          when={showStopButton()}
+          fallback={
+            <button
+              type="submit"
+              disabled={!canSend()}
+              style={{
+                width: `${SINGLE_ROW_HEIGHT}px`,
+                height: `${SINGLE_ROW_HEIGHT}px`,
+                "flex-shrink": '0',
+                display: 'flex',
+                "align-items": 'center',
+                "justify-content": 'center',
+                background: 'transparent',
+                color: canSend() ? 'var(--color-accent)' : 'var(--color-text-muted)',
+                border: 'none',
+                cursor: canSend() ? 'pointer' : 'default',
+                transition: 'color 0.15s ease, transform 0.1s ease',
+                opacity: canSend() ? 1 : 0.4,
+              }}
+              onMouseDown={(e) => {
+                if (canSend()) e.currentTarget.style.transform = 'scale(0.85)';
+              }}
+              onMouseUp={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+              onTouchStart={(e) => {
+                if (canSend()) e.currentTarget.style.transform = 'scale(0.85)';
+              }}
+              onTouchEnd={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              {/* Up arrow icon */}
+              <svg
+                width="26"
+                height="26"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <line x1="12" y1="19" x2="12" y2="5" />
+                <polyline points="5 12 12 5 19 12" />
+              </svg>
+            </button>
+          }
         >
-          {/* Up arrow icon */}
-          <svg
-            width="26"
-            height="26"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
+          {/* Stop button (red square) */}
+          <button
+            type="button"
+            onClick={() => props.onInterrupt?.()}
+            style={{
+              width: `${SINGLE_ROW_HEIGHT}px`,
+              height: `${SINGLE_ROW_HEIGHT}px`,
+              "flex-shrink": '0',
+              display: 'flex',
+              "align-items": 'center',
+              "justify-content": 'center',
+              background: 'transparent',
+              color: '#ef4444',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'color 0.15s ease, transform 0.1s ease',
+            }}
+            onMouseDown={(e) => {
+              e.currentTarget.style.transform = 'scale(0.85)';
+            }}
+            onMouseUp={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+            onTouchStart={(e) => {
+              e.currentTarget.style.transform = 'scale(0.85)';
+            }}
+            onTouchEnd={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
           >
-            <line x1="12" y1="19" x2="12" y2="5" />
-            <polyline points="5 12 12 5 19 12" />
-          </svg>
-        </button>
+            {/* Stop square icon */}
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+            >
+              <rect x="4" y="4" width="16" height="16" rx="2" />
+            </svg>
+          </button>
+        </Show>
       </div>
     </form>
     </>
