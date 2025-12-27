@@ -82,7 +82,7 @@ export function SessionSettingsMenu(props: SessionSettingsMenuProps) {
             'border-radius': '8px',
             'min-width': '180px',
             'box-shadow': '0 8px 24px rgba(0, 0, 0, 0.3)',
-            'z-index': '100',
+            'z-index': '1000',
             overflow: 'hidden',
           }}
         >

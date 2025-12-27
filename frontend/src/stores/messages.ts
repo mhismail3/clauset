@@ -12,7 +12,7 @@ export interface Message {
   timestamp: number;
   isStreaming?: boolean;
   /** System event type for system messages */
-  systemType?: 'subagent_started' | 'subagent_stopped' | 'tool_error' | 'context_compacting' | 'permission_request';
+  systemType?: 'subagent_started' | 'subagent_stopped' | 'subagent_completed' | 'tool_error' | 'context_compacting' | 'permission_request';
   /** Additional metadata for system messages */
   metadata?: {
     agentId?: string;
@@ -124,6 +124,20 @@ export function addMessage(sessionId: string, message: Message) {
 }
 
 /**
+ * Add a user message to the chat immediately.
+ * This ensures user input (including slash commands) always appears in chat.
+ */
+export function addUserMessage(sessionId: string, content: string) {
+  const message: Message = {
+    id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    role: 'user',
+    content,
+    timestamp: Date.now(),
+  };
+  addMessage(sessionId, message);
+}
+
+/**
  * Add a system event message to the chat.
  */
 export function addSystemMessage(
@@ -158,14 +172,39 @@ export function handleSubagentStarted(sessionId: string, agentId: string, agentT
 
 /**
  * Handle subagent stopped event.
+ * Note: This is now mostly superseded by handleSubagentCompleted which provides more detail.
  */
 export function handleSubagentStopped(sessionId: string, agentId: string) {
-  addSystemMessage(
-    sessionId,
-    'subagent_stopped',
-    'Subagent completed',
-    { agentId }
-  );
+  // Don't add a message here - wait for the subagent_completed event with details
+  // The subagent_completed event provides the actual output from the Task tool
+}
+
+/**
+ * Handle subagent completed event with detailed output.
+ * This creates an assistant-style message showing what the subagent accomplished.
+ */
+export function handleSubagentCompleted(
+  sessionId: string,
+  agentType: string,
+  description: string,
+  result: string
+) {
+  const typeLabel = agentType === 'general-purpose' ? 'Agent' : agentType;
+
+  // Create an assistant message with subagent details
+  // The content will be rendered in italics by MessageBubble
+  const message: Message = {
+    id: `subagent-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    role: 'assistant',
+    content: result,
+    timestamp: Date.now(),
+    systemType: 'subagent_completed',
+    metadata: {
+      agentType,
+      description,
+    },
+  };
+  addMessage(sessionId, message);
 }
 
 /**
@@ -393,6 +432,23 @@ export function handleChatEvent(event: ChatEvent) {
     case 'message': {
       const msg = event.message;
       console.log('[ChatEvent] Adding message:', msg.role, msg.id, 'streaming:', msg.is_streaming);
+
+      // Deduplicate user messages - they may have been added locally already
+      // Check if a recent message with same role and content exists
+      if (msg.role === 'user') {
+        const existing = messages().get(msg.session_id) ?? [];
+        const recentDuplicate = existing.some(
+          (m) =>
+            m.role === 'user' &&
+            m.content === msg.content &&
+            Math.abs(m.timestamp - msg.timestamp) < 5000 // Within 5 seconds
+        );
+        if (recentDuplicate) {
+          console.log('[ChatEvent] Skipping duplicate user message');
+          break;
+        }
+      }
+
       const message = convertChatMessage(msg);
       addMessage(msg.session_id, message);
       break;

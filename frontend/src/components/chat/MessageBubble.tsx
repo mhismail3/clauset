@@ -54,6 +54,7 @@ interface MessageBubbleProps {
 export function MessageBubble(props: MessageBubbleProps) {
   const isUser = () => props.message.role === 'user';
   const isSystem = () => props.message.role === 'system';
+  const isSubagentCompleted = () => props.message.systemType === 'subagent_completed';
   const isThinking = () =>
     !isUser() &&
     !isSystem() &&
@@ -110,6 +111,82 @@ export function MessageBubble(props: MessageBubbleProps) {
         };
     }
   };
+
+  // Render subagent completed message (assistant role but with special styling)
+  if (isSubagentCompleted()) {
+    const agentType = props.message.metadata?.agentType || 'Agent';
+    const description = props.message.metadata?.description || 'Task completed';
+    const typeLabel = agentType === 'general-purpose' ? 'Agent' : agentType;
+
+    return (
+      <div class="flex justify-start">
+        <div
+          style={{
+            "max-width": '85%',
+            "border-radius": '14px',
+            padding: '10px 14px',
+            background: 'var(--color-bg-elevated)',
+            color: 'var(--color-text-primary)',
+            border: '1.5px solid rgba(34, 197, 94, 0.3)',
+            "box-shadow": '2px 2px 0px rgba(0, 0, 0, 0.3)',
+          }}
+        >
+          {/* Agent header */}
+          <div
+            style={{
+              display: 'flex',
+              "align-items": 'center',
+              gap: '6px',
+              "margin-bottom": '8px',
+              "padding-bottom": '6px',
+              "border-bottom": '1px solid var(--color-bg-overlay)',
+            }}
+          >
+            <span style={{ color: '#22c55e' }}>✓</span>
+            <span
+              class="text-mono"
+              style={{
+                "font-size": '11px',
+                "font-weight": '600',
+                color: '#22c55e',
+                "text-transform": 'uppercase',
+                "letter-spacing": '0.05em',
+              }}
+            >
+              {typeLabel}
+            </span>
+            <span
+              style={{
+                flex: '1',
+                "font-size": '12px',
+                color: 'var(--color-text-muted)',
+                overflow: 'hidden',
+                "text-overflow": 'ellipsis',
+                "white-space": 'nowrap',
+              }}
+            >
+              {description}
+            </span>
+          </div>
+
+          {/* Result content in italics */}
+          <div
+            style={{
+              "font-style": 'italic',
+              "font-family": 'var(--font-serif)',
+              "font-size": '14px',
+              "line-height": '1.6',
+              color: 'var(--color-text-secondary)',
+              "white-space": 'pre-wrap',
+              "word-break": 'break-word',
+            }}
+          >
+            <MarkdownContent content={props.message.content} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Render system message
   if (isSystem()) {

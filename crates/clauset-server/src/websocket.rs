@@ -266,6 +266,18 @@ pub async fn handle_websocket(
                                 None
                             }
                         }
+                        ProcessEvent::SubagentCompleted { session_id: event_session_id, agent_type, description, result } => {
+                            if *event_session_id == session_id {
+                                Some(WsServerMessage::SubagentCompleted {
+                                    session_id: *event_session_id,
+                                    agent_type: agent_type.clone(),
+                                    description: description.clone(),
+                                    result: result.clone(),
+                                })
+                            } else {
+                                None
+                            }
+                        }
                         ProcessEvent::ToolError { session_id: event_session_id, tool_name, error, is_timeout } => {
                             if *event_session_id == session_id {
                                 Some(WsServerMessage::ToolError {
@@ -326,6 +338,18 @@ pub async fn handle_websocket(
                                     session_id: *event_session_id,
                                     mode: *mode,
                                 })
+                            } else {
+                                None
+                            }
+                        }
+                        ProcessEvent::TuiMenu(tui_event) => {
+                            // Forward TUI menu events for native UI rendering
+                            let event_session_id = match &tui_event {
+                                clauset_types::TuiMenuEvent::MenuPresented { session_id, .. } => *session_id,
+                                clauset_types::TuiMenuEvent::MenuDismissed { session_id, .. } => *session_id,
+                            };
+                            if event_session_id == session_id {
+                                Some(WsServerMessage::TuiMenu { event: tui_event.clone() })
                             } else {
                                 None
                             }
@@ -671,6 +695,61 @@ pub async fn handle_websocket(
                                 .await
                             {
                                 warn!(target: "clauset::ws", "Failed to send interrupt for session {}: {}", session_id, e);
+                            }
+                        }
+
+                        // === TUI Menu Selection Protocol ===
+                        WsClientMessage::TuiMenuSelect { menu_id, selected_index } => {
+                            info!(target: "clauset::ws", "TuiMenuSelect for session {}: menu={}, index={}", session_id, menu_id, selected_index);
+
+                            // TUI menus use arrow keys for navigation and Enter to confirm
+                            // Options are 0-indexed internally
+                            // To select option N, we need to send N Down arrows, then Enter
+                            //
+                            // ANSI escape codes:
+                            // Down arrow: ESC [ B  (0x1B 0x5B 0x42)
+                            // Enter: CR (0x0D or \r)
+
+                            let mut nav_bytes: Vec<u8> = Vec::new();
+
+                            // Navigate down to the selected option
+                            for _ in 0..selected_index {
+                                nav_bytes.extend_from_slice(b"\x1b[B"); // Down arrow
+                            }
+
+                            // Send navigation keys first (if any)
+                            if !nav_bytes.is_empty() {
+                                if let Err(e) = state_clone
+                                    .session_manager
+                                    .send_terminal_input(session_id, &nav_bytes)
+                                    .await
+                                {
+                                    warn!(target: "clauset::ws", "Failed to send TUI navigation for session {}: {}", session_id, e);
+                                }
+                            }
+
+                            // Wait for TUI to process navigation, then send Enter
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                            if let Err(e) = state_clone
+                                .session_manager
+                                .send_terminal_input(session_id, b"\r")
+                                .await
+                            {
+                                warn!(target: "clauset::ws", "Failed to send Enter for TUI menu selection in session {}: {}", session_id, e);
+                            }
+                        }
+                        WsClientMessage::TuiMenuCancel { menu_id } => {
+                            info!(target: "clauset::ws", "TuiMenuCancel for session {}: menu={}", session_id, menu_id);
+
+                            // Send Escape to cancel the TUI menu
+                            // ESC key: 0x1B
+                            if let Err(e) = state_clone
+                                .session_manager
+                                .send_terminal_input(session_id, &[0x1B])
+                                .await
+                            {
+                                warn!(target: "clauset::ws", "Failed to send Escape for TUI menu cancel in session {}: {}", session_id, e);
                             }
                         }
 

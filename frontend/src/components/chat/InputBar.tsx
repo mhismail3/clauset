@@ -1,6 +1,7 @@
 import { createSignal, createEffect, Show } from 'solid-js';
 import { useKeyboard } from '../../lib/keyboard';
 import { CommandPicker } from '../commands/CommandPicker';
+import { QuickActionsMenu } from './QuickActionsMenu';
 import { Command } from '../../lib/api';
 import {
   selectNext,
@@ -182,6 +183,14 @@ export function InputBar(props: InputBarProps) {
       }}
     >
       <div style={{ display: 'flex', gap: '10px', "align-items": 'flex-end' }}>
+        {/* Quick Actions Menu */}
+        <QuickActionsMenu
+          onSelectCommand={(cmd) => {
+            props.onSend(cmd);
+          }}
+          buttonSize={SINGLE_ROW_HEIGHT}
+        />
+
         {/* Textarea with retro styling */}
         <textarea
           ref={textareaRef}

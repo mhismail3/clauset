@@ -465,9 +465,11 @@ impl SessionManager {
     }
 
     /// Append terminal output to session buffer and parse for activity.
-    /// Returns (AppendResult, Option<SessionActivity>) where activity is Some if it changed.
-    pub async fn append_terminal_output(&self, session_id: Uuid, data: &[u8]) -> (AppendResult, Option<SessionActivity>) {
-        let (append_result, activity) = self.buffers.append(session_id, data).await;
+    /// Returns (AppendResult, Option<SessionActivity>, Option<TuiMenu>) where:
+    /// - activity is Some if it changed
+    /// - tui_menu is Some if a new TUI menu was detected
+    pub async fn append_terminal_output(&self, session_id: Uuid, data: &[u8]) -> (AppendResult, Option<SessionActivity>, Option<clauset_types::TuiMenu>) {
+        let (append_result, activity, tui_menu) = self.buffers.append(session_id, data).await;
 
         // If activity changed, update the database with new stats
         if let Some(ref act) = activity {
@@ -491,7 +493,7 @@ impl SessionManager {
             }
         }
 
-        (append_result, activity)
+        (append_result, activity, tui_menu)
     }
 
     /// Get the terminal buffer for a session (for replay on reconnect).

@@ -66,6 +66,13 @@ pub enum ProcessEvent {
         session_id: Uuid,
         agent_id: String,
     },
+    /// Subagent (Task tool) completed with details.
+    SubagentCompleted {
+        session_id: Uuid,
+        agent_type: String,
+        description: String,
+        result: String,
+    },
     /// Tool execution failed.
     ToolError {
         session_id: Uuid,
@@ -98,6 +105,9 @@ pub enum ProcessEvent {
         session_id: Uuid,
         mode: clauset_types::ChatMode,
     },
+    /// TUI menu event for native UI rendering.
+    /// Sent when a TUI selection menu is detected in terminal output.
+    TuiMenu(clauset_types::TuiMenuEvent),
 }
 
 /// Options for spawning a Claude process.

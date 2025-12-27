@@ -6,9 +6,10 @@
 
 use crate::state::AppState;
 use clauset_core::ProcessEvent;
+use clauset_types::TuiMenuEvent;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{error, info, instrument, warn};
 
 /// Spawns a background task that processes all session events.
 /// This ensures terminal output is buffered and activity is tracked
@@ -42,7 +43,7 @@ async fn process_event(state: &AppState, event: ProcessEvent) {
     match event {
         ProcessEvent::TerminalOutput { session_id, ref data } => {
             // Store terminal output in buffer and get sequence number for reliable streaming
-            let (append_result, activity) = state
+            let (append_result, activity, tui_menu) = state
                 .session_manager
                 .append_terminal_output(session_id, data)
                 .await;
@@ -85,6 +86,17 @@ async fn process_event(state: &AppState, event: ProcessEvent) {
                     },
                 );
             }
+
+            // If a TUI menu was detected, broadcast it for native UI rendering
+            if let Some(menu) = tui_menu {
+                info!(target: "clauset::events", "TUI menu detected for session {}: {} options", session_id, menu.options.len());
+                let _ = state.session_manager.event_sender().send(
+                    ProcessEvent::TuiMenu(TuiMenuEvent::MenuPresented {
+                        session_id,
+                        menu,
+                    }),
+                );
+            }
         }
         ProcessEvent::Exited { session_id, exit_code } => {
             info!(target: "clauset::session", "Session {} exited with code {:?}", session_id, exit_code);
@@ -113,6 +125,7 @@ async fn process_event(state: &AppState, event: ProcessEvent) {
         // Subagent and error events are handled by WebSocket handlers
         ProcessEvent::SubagentStarted { .. } => {}
         ProcessEvent::SubagentStopped { .. } => {}
+        ProcessEvent::SubagentCompleted { .. } => {}
         ProcessEvent::ToolError { .. } => {}
         ProcessEvent::ContextCompacting { .. } => {}
         // Permission request events are handled by WebSocket handlers
@@ -121,5 +134,7 @@ async fn process_event(state: &AppState, event: ProcessEvent) {
         ProcessEvent::ContextUpdate { .. } => {}
         // Mode change events are handled by WebSocket handlers
         ProcessEvent::ModeChange { .. } => {}
+        // TUI menu events are handled by WebSocket handlers for native UI rendering
+        ProcessEvent::TuiMenu(_) => {}
     }
 }

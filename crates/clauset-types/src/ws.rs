@@ -119,6 +119,23 @@ pub enum WsClientMessage {
     /// User wants to interrupt/cancel the current operation.
     /// Sends Ctrl+C (SIGINT) to the PTY.
     Interrupt,
+
+    // === TUI Menu Protocol ===
+
+    /// User selected an option in a TUI menu.
+    /// Backend will send navigation keys + Enter to the PTY.
+    TuiMenuSelect {
+        /// ID of the menu being responded to
+        menu_id: String,
+        /// 0-based index of the selected option
+        selected_index: usize,
+    },
+    /// User cancelled the TUI menu.
+    /// Backend will send Escape to the PTY.
+    TuiMenuCancel {
+        /// ID of the menu being cancelled
+        menu_id: String,
+    },
 }
 
 /// Messages sent from server to client.
@@ -316,6 +333,17 @@ pub enum WsServerMessage {
         /// Identifier of the stopped subagent
         agent_id: String,
     },
+    /// Subagent (Task tool) completed with details.
+    /// Provides detailed information about what the subagent accomplished.
+    SubagentCompleted {
+        session_id: Uuid,
+        /// Type of agent (e.g., "Explore", "Plan", "general-purpose")
+        agent_type: String,
+        /// Description of the task (from tool input)
+        description: String,
+        /// Summary of what the agent produced (from tool response)
+        result: String,
+    },
     /// Tool execution failed.
     /// Notifies frontend of tool errors for display.
     ToolError {
@@ -356,6 +384,14 @@ pub enum WsServerMessage {
     ModeChange {
         session_id: Uuid,
         mode: ChatMode,
+    },
+
+    // === TUI Menu Protocol ===
+
+    /// TUI menu event for native UI rendering.
+    /// Sent when a TUI selection menu is detected in terminal output.
+    TuiMenu {
+        event: crate::TuiMenuEvent,
     },
 }
 
@@ -589,6 +625,21 @@ mod serialization_tests {
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"subagent_stopped""#));
+    }
+
+    #[test]
+    fn test_subagent_completed_serialization() {
+        let msg = WsServerMessage::SubagentCompleted {
+            session_id: Uuid::nil(),
+            agent_type: "Explore".to_string(),
+            description: "Search for files".to_string(),
+            result: "Found 5 matching files".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"subagent_completed""#));
+        assert!(json.contains(r#""agent_type":"Explore""#));
+        assert!(json.contains(r#""description":"Search for files""#));
+        assert!(json.contains(r#""result":"Found 5 matching files""#));
     }
 
     #[test]
@@ -1077,6 +1128,109 @@ mod serialization_tests {
                 assert_eq!(mode, ChatMode::Plan);
             }
             _ => panic!("Expected ModeChange"),
+        }
+    }
+
+    // ========================================================================
+    // TUI MENU TESTS
+    // ========================================================================
+
+    #[test]
+    fn test_tui_menu_select_serialization() {
+        let msg = WsClientMessage::TuiMenuSelect {
+            menu_id: "menu_123".to_string(),
+            selected_index: 2,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"tui_menu_select""#));
+        assert!(json.contains(r#""menu_id":"menu_123""#));
+        assert!(json.contains(r#""selected_index":2"#));
+    }
+
+    #[test]
+    fn test_tui_menu_cancel_serialization() {
+        let msg = WsClientMessage::TuiMenuCancel {
+            menu_id: "menu_123".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"tui_menu_cancel""#));
+        assert!(json.contains(r#""menu_id":"menu_123""#));
+    }
+
+    #[test]
+    fn test_tui_menu_server_event_serialization() {
+        use crate::{TuiMenu, TuiMenuEvent, TuiMenuOption, TuiMenuType};
+
+        let menu = TuiMenu {
+            id: "menu_1".to_string(),
+            title: "Select model".to_string(),
+            description: Some("Choose a model".to_string()),
+            options: vec![
+                TuiMenuOption::new(0, "Sonnet".to_string(), None, false),
+                TuiMenuOption::new(1, "Opus".to_string(), None, true),
+            ],
+            menu_type: TuiMenuType::ModelSelect,
+            highlighted_index: 0,
+        };
+
+        let msg = WsServerMessage::TuiMenu {
+            event: TuiMenuEvent::MenuPresented {
+                session_id: Uuid::nil(),
+                menu,
+            },
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"tui_menu""#));
+        assert!(json.contains(r#""event""#));
+        assert!(json.contains(r#""menu_presented""#));
+    }
+
+    #[test]
+    fn test_tui_menu_dismissed_event_serialization() {
+        use crate::TuiMenuEvent;
+
+        let msg = WsServerMessage::TuiMenu {
+            event: TuiMenuEvent::MenuDismissed {
+                session_id: Uuid::nil(),
+                menu_id: "menu_123".to_string(),
+            },
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"tui_menu""#));
+        assert!(json.contains(r#""menu_dismissed""#));
+    }
+
+    #[test]
+    fn test_tui_menu_select_roundtrip() {
+        let original = WsClientMessage::TuiMenuSelect {
+            menu_id: "m1".to_string(),
+            selected_index: 3,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: WsClientMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            WsClientMessage::TuiMenuSelect { menu_id, selected_index } => {
+                assert_eq!(menu_id, "m1");
+                assert_eq!(selected_index, 3);
+            }
+            _ => panic!("Expected TuiMenuSelect"),
+        }
+    }
+
+    #[test]
+    fn test_tui_menu_cancel_roundtrip() {
+        let original = WsClientMessage::TuiMenuCancel {
+            menu_id: "m2".to_string(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: WsClientMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            WsClientMessage::TuiMenuCancel { menu_id } => {
+                assert_eq!(menu_id, "m2");
+            }
+            _ => panic!("Expected TuiMenuCancel"),
         }
     }
 }

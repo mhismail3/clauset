@@ -4,7 +4,10 @@
 //! - Sequenced chunks for ordered delivery and gap detection
 //! - Ring buffer eviction with sequence tracking
 //! - Activity parsing from terminal output
+//! - TUI menu detection for native UI rendering
 
+use crate::TuiMenuParser;
+use clauset_types::TuiMenu;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -254,12 +257,13 @@ impl Default for SessionActivity {
 }
 
 /// Ring buffer for terminal output with sequence tracking.
-#[derive(Debug)]
 struct TerminalBuffer {
     /// Sequenced ring buffer for reliable streaming
     sequenced: SequencedRingBuffer,
     /// Activity tracking state
     activity: SessionActivity,
+    /// TUI menu parser for detecting selection menus
+    tui_menu_parser: TuiMenuParser,
 }
 
 impl TerminalBuffer {
@@ -267,6 +271,7 @@ impl TerminalBuffer {
         Self {
             sequenced: SequencedRingBuffer::new(MAX_BUFFER_SIZE),
             activity: SessionActivity::default(),
+            tui_menu_parser: TuiMenuParser::new(),
         }
     }
 
@@ -336,8 +341,10 @@ impl SessionBuffers {
     }
 
     /// Append terminal output to a session's buffer and parse for activity.
-    /// Returns (AppendResult, Option<SessionActivity>) where activity is Some if it changed.
-    pub async fn append(&self, session_id: Uuid, data: &[u8]) -> (AppendResult, Option<SessionActivity>) {
+    /// Returns (AppendResult, Option<SessionActivity>, Option<TuiMenu>) where:
+    /// - activity is Some if it changed
+    /// - tui_menu is Some if a new TUI menu was detected
+    pub async fn append(&self, session_id: Uuid, data: &[u8]) -> (AppendResult, Option<SessionActivity>, Option<TuiMenu>) {
         let mut buffers = self.buffers.write().await;
         let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
         let append_result = buffer.append(data);
@@ -365,7 +372,10 @@ impl SessionBuffers {
             None
         };
 
-        (append_result, activity)
+        // Check for TUI menu patterns in terminal output
+        let tui_menu = buffer.tui_menu_parser.process(data);
+
+        (append_result, activity, tui_menu)
     }
 
     // ========================================================================

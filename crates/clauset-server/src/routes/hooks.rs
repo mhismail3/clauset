@@ -251,6 +251,47 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 });
             }
 
+            // Detect Task tool (subagent) completion and broadcast detailed info
+            if tool_name == "Task" {
+                // Extract agent type and description from tool_input
+                let agent_type = tool_input
+                    .get("subagent_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("general-purpose")
+                    .to_string();
+
+                let description = tool_input
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Task completed")
+                    .to_string();
+
+                // Extract result from tool_response (truncate if too long)
+                let result = tool_response
+                    .as_str()
+                    .map(|s| {
+                        if s.len() > 500 {
+                            format!("{}...", &s[..500])
+                        } else {
+                            s.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "No result".to_string());
+
+                info!(
+                    target: "clauset::hooks",
+                    "Subagent completed for session {}: type={}, desc={}",
+                    session_id, agent_type, description
+                );
+
+                let _ = state.session_manager.broadcast_event(ProcessEvent::SubagentCompleted {
+                    session_id,
+                    agent_type,
+                    description,
+                    result,
+                });
+            }
+
             // Update context window from accurate hook data
             if let Some(ref ctx) = context_window {
                 state.session_manager.update_context_from_hook(

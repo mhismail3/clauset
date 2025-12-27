@@ -14,9 +14,11 @@ import {
   handleChatHistory,
   handleSubagentStarted,
   handleSubagentStopped,
+  handleSubagentCompleted,
   handleToolError,
   handleContextCompacting,
   handlePermissionRequest,
+  addUserMessage,
   type Message,
   type ChatEvent,
   type ChatMessage,
@@ -188,15 +190,73 @@ describe('Messages Store', () => {
   });
 
   describe('handleSubagentStopped', () => {
-    it('creates subagent stopped message', () => {
+    it('is a no-op (detailed info comes via handleSubagentCompleted)', () => {
       const sessionId = 'subagent-stop-session';
 
       handleSubagentStopped(sessionId, 'agent-789');
       const messages = getMessagesForSession(sessionId);
 
+      // handleSubagentStopped is now a no-op - we wait for handleSubagentCompleted
+      expect(messages).toHaveLength(0);
+    });
+  });
+
+  describe('handleSubagentCompleted', () => {
+    it('creates an assistant message with subagent details', () => {
+      const sessionId = 'subagent-completed-session';
+
+      handleSubagentCompleted(
+        sessionId,
+        'Explore',
+        'Search for files',
+        'Found 5 matching files in src/'
+      );
+      const messages = getMessagesForSession(sessionId);
+
       expect(messages).toHaveLength(1);
-      expect(messages[0].systemType).toBe('subagent_stopped');
-      expect(messages[0].content).toBe('Subagent completed');
+      expect(messages[0].role).toBe('assistant');
+      expect(messages[0].systemType).toBe('subagent_completed');
+      expect(messages[0].content).toBe('Found 5 matching files in src/');
+      expect(messages[0].metadata?.agentType).toBe('Explore');
+      expect(messages[0].metadata?.description).toBe('Search for files');
+    });
+
+    it('handles general-purpose agent type', () => {
+      const sessionId = 'subagent-general-session';
+
+      handleSubagentCompleted(
+        sessionId,
+        'general-purpose',
+        'Complex task',
+        'Task completed successfully'
+      );
+      const messages = getMessagesForSession(sessionId);
+
+      expect(messages[0].metadata?.agentType).toBe('general-purpose');
+    });
+  });
+
+  describe('addUserMessage', () => {
+    it('creates a user message immediately', () => {
+      const sessionId = 'user-msg-session';
+
+      addUserMessage(sessionId, 'Hello, Claude!');
+      const messages = getMessagesForSession(sessionId);
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0].role).toBe('user');
+      expect(messages[0].content).toBe('Hello, Claude!');
+    });
+
+    it('works with slash commands', () => {
+      const sessionId = 'slash-cmd-session';
+
+      addUserMessage(sessionId, '/clear');
+      const messages = getMessagesForSession(sessionId);
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0].role).toBe('user');
+      expect(messages[0].content).toBe('/clear');
     });
   });
 

@@ -14,6 +14,7 @@ mod process;
 mod prompt_indexer;
 mod session;
 mod sizing;
+mod tui_menu_parser;
 
 pub use buffer::{AppendResult, RecentAction, SequencedChunk, SessionActivity, SessionBuffers};
 pub use chat_processor::ChatProcessor;
@@ -36,6 +37,7 @@ pub use sizing::{
     validate_dimensions, ConfidenceLevel, DeviceHint, DimensionError, DimensionSource,
     ValidatedDimensions,
 };
+pub use tui_menu_parser::TuiMenuParser;
 
 /// Result type for Clauset operations.
 pub type Result<T> = std::result::Result<T, ClausetError>;

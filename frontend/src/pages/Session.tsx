@@ -9,10 +9,8 @@ import { TimelineView } from '../components/interactions/TimelineView';
 import { DiffViewer } from '../components/interactions/DiffViewer';
 import { StatusBar } from '../components/session/StatusBar';
 import { TodoWidget, type TodoItem } from '../components/session/TodoWidget';
-import { SubagentPanel, type ActiveSubagent } from '../components/session/SubagentPanel';
 import { KeyboardShortcutsModal } from '../components/session/KeyboardShortcutsModal';
 import { SessionSettingsMenu } from '../components/session/SessionSettingsMenu';
-import { AllowedToolsPanel } from '../components/session/AllowedToolsPanel';
 import { api, Session } from '../lib/api';
 import { createWebSocketManager, WsMessage, SyncResponse, ConnectionState } from '../lib/ws';
 import { useKeyboard } from '../lib/keyboard';
@@ -28,9 +26,11 @@ import {
   handleChatHistory,
   handleSubagentStarted,
   handleSubagentStopped,
+  handleSubagentCompleted,
   handleToolError,
   handleContextCompacting,
   markPermissionResponded,
+  addUserMessage,
   type ChatEvent,
   type ChatMessage,
 } from '../stores/messages';
@@ -41,7 +41,13 @@ import {
   clearInteractiveState,
   type InteractiveEvent,
 } from '../stores/interactive';
+import {
+  getTuiMenuState,
+  handleTuiMenuEvent,
+  type TuiMenuEvent,
+} from '../stores/tui_menu';
 import { InteractiveCarousel } from '../components/interactive/InteractiveCarousel';
+import { TuiMenuOverlay } from '../components/tui_menu/TuiMenuOverlay';
 
 // Maximum chunks to queue when terminal is not yet ready (prevents OOM)
 const MAX_TERMINAL_QUEUE_CHUNKS = 100;
@@ -138,11 +144,9 @@ export default function SessionPage() {
   const [resuming, setResuming] = createSignal(false);
   const [mode, setMode] = createSignal<'normal' | 'plan'>('normal');
   const [isProcessing, setIsProcessing] = createSignal(false);
-  const [activeSubagents, setActiveSubagents] = createSignal<ActiveSubagent[]>([]);
   const [hookData, setHookData] = createSignal<{
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
-    allowedTools?: string[];
   }>({});
   const [showShortcuts, setShowShortcuts] = createSignal(false);
 
@@ -500,24 +504,37 @@ export default function SessionPage() {
         }
         break;
       }
+      case 'tui_menu': {
+        // TUI menu from built-in commands (/model, /config, etc.)
+        const tuiMenuEvent = (msg as unknown as { event: TuiMenuEvent }).event;
+        if (tuiMenuEvent) {
+          handleTuiMenuEvent(tuiMenuEvent);
+        }
+        break;
+      }
       case 'subagent_started': {
         // Subagent (Task tool) started
         const data = msg as unknown as { session_id: string; agent_id: string; agent_type: string };
         handleSubagentStarted(params.id, data.agent_id, data.agent_type);
-        // Track active subagent
-        setActiveSubagents((prev) => [
-          ...prev,
-          { agentId: data.agent_id, agentType: data.agent_type, startedAt: Date.now() },
-        ]);
         scrollToBottom();
         break;
       }
       case 'subagent_stopped': {
-        // Subagent (Task tool) completed
+        // Subagent (Task tool) stopped - detailed info comes via subagent_completed event
         const data = msg as unknown as { session_id: string; agent_id: string };
         handleSubagentStopped(params.id, data.agent_id);
-        // Remove from active subagents
-        setActiveSubagents((prev) => prev.filter((s) => s.agentId !== data.agent_id));
+        // Don't scroll here - wait for subagent_completed with the actual output
+        break;
+      }
+      case 'subagent_completed': {
+        // Subagent (Task tool) completed with detailed output
+        const data = msg as unknown as {
+          session_id: string;
+          agent_type: string;
+          description: string;
+          result: string;
+        };
+        handleSubagentCompleted(params.id, data.agent_type, data.description, data.result);
         scrollToBottom();
         break;
       }
@@ -602,8 +619,9 @@ export default function SessionPage() {
   async function handleSendMessage(content: string) {
     const sessionId = params.id;
 
-    // Don't add message locally - it will come back from the UserPromptSubmit hook
-    // This ensures messages are only added once and stay in sync with the server
+    // Add user message locally immediately so it always appears in chat
+    // This ensures all user input (including slash commands) is visible
+    addUserMessage(sessionId, content);
 
     scrollToBottom();
 
@@ -782,7 +800,7 @@ export default function SessionPage() {
       />
 
       {/* Header */}
-      <header class="flex-none glass safe-top" style={{ padding: '12px 16px' }}>
+      <header class="flex-none glass safe-top" style={{ padding: '12px 16px', position: 'relative', 'z-index': '50' }}>
         <div
           style={{
             display: 'flex',
@@ -985,14 +1003,8 @@ export default function SessionPage() {
               contextPercent={session()?.context_percent}
             />
 
-            {/* Active Subagents Panel */}
-            <SubagentPanel subagents={activeSubagents()} />
-
             {/* Todo Widget */}
             <TodoWidget todos={todos()} />
-
-            {/* Allowed Tools Panel */}
-            <AllowedToolsPanel allowedTools={hookData().allowedTools} />
 
             <main class="flex-1 scrollable p-4 space-y-4" style={{ "min-height": '0' }}>
               {/* Empty state when no messages yet (only show when session is active) */}
@@ -1088,9 +1100,42 @@ export default function SessionPage() {
               }}
             </Show>
 
+            {/* TUI Menu Overlay for /model, /config, etc. */}
+            <Show when={getTuiMenuState(params.id).type === 'active'}>
+              {() => {
+                const state = getTuiMenuState(params.id);
+                if (state.type !== 'active') return null;
+                return (
+                  <TuiMenuOverlay
+                    sessionId={params.id}
+                    menu={state.menu}
+                    onSelect={(menuId, selectedIndex) => {
+                      console.log('[tui_menu] onSelect:', menuId, selectedIndex);
+                      if (wsManager && wsState() === 'connected') {
+                        wsManager.send({
+                          type: 'tui_menu_select',
+                          menu_id: menuId,
+                          selected_index: selectedIndex,
+                        });
+                      }
+                    }}
+                    onCancel={(menuId) => {
+                      console.log('[tui_menu] onCancel:', menuId);
+                      if (wsManager && wsState() === 'connected') {
+                        wsManager.send({
+                          type: 'tui_menu_cancel',
+                          menu_id: menuId,
+                        });
+                      }
+                    }}
+                  />
+                );
+              }}
+            </Show>
+
             <InputBar
               onSend={handleSendMessage}
-              disabled={wsState() !== 'connected' || getInteractiveState(params.id).type === 'prompt'}
+              disabled={wsState() !== 'connected' || getInteractiveState(params.id).type === 'prompt' || getTuiMenuState(params.id).type === 'active'}
               placeholder={session()?.mode === 'terminal' ? 'Type here (output in terminal)...' : 'Message Claude...'}
               isProcessing={isClaudeProcessing()}
               onInterrupt={handleInterrupt}

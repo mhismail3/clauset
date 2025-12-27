@@ -162,9 +162,95 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
-- Non-Critical Chat Mode Features - **COMPLETE**
+- Native TUI Menu Support - **COMPLETE**
 
-### Non-Critical Chat Mode Features (Just Completed)
+### Native TUI Menu Support (Just Completed)
+- **Goal**: Render Claude Code's built-in TUI menus (/model, /config, etc.) natively in chat mode
+- **Problem**: Built-in commands bypass hook system - menus render only in terminal as ANSI escape sequences
+- **Solution**: Parse terminal output to detect menu patterns, render as native UI overlay
+- **Plan file**: `~/.claude/plans/robust-humming-meadow.md`
+
+#### Implementation:
+1. **Phase 1: Types Module** (`crates/clauset-types/src/tui_menu.rs`)
+   - TuiMenuOption, TuiMenuType, TuiMenu structs
+   - TuiMenuEvent enum (MenuPresented, MenuDismissed)
+   - 24 comprehensive tests
+
+2. **Phase 2: Menu Parser** (`crates/clauset-core/src/tui_menu_parser.rs`)
+   - State machine with 3 states: Idle, Accumulating, MenuActive
+   - Generic detection: numbered options, footer patterns ("Enter to confirm")
+   - ANSI code stripping for clean parsing
+   - 26 unit tests
+
+3. **Phase 3: Backend Integration**
+   - `ws.rs`: Added TuiMenuSelect/TuiMenuCancel client messages, TuiMenu server message
+   - `process.rs`: Added ProcessEvent::TuiMenu variant
+   - `buffer.rs`: Integrated TuiMenuParser, returns detected menus from append()
+   - `event_processor.rs`: Broadcasts MenuPresented events when menus detected
+   - `websocket.rs`: Handles TuiMenuSelect (sends arrow keys + Enter), TuiMenuCancel (sends Escape)
+
+4. **Phase 4: Frontend**
+   - `stores/tui_menu.ts`: State management (getTuiMenuState, handleTuiMenuEvent, clearTuiMenuState)
+   - `components/tui_menu/TuiMenuOverlay.tsx`: Modal overlay with keyboard navigation
+   - `components/tui_menu/TuiMenuOverlay.css`: Retro styling matching theme
+   - `pages/Session.tsx`: WebSocket handler, overlay integration, disabled input during menu
+
+5. **Phase 5: Tests**
+   - Backend: 143 tests in clauset-types, 26 tests in tui_menu_parser
+   - Frontend: 176 tests total (includes new tui_menu.test.ts)
+
+#### Files Created:
+- `crates/clauset-types/src/tui_menu.rs`
+- `crates/clauset-core/src/tui_menu_parser.rs`
+- `frontend/src/stores/tui_menu.ts`
+- `frontend/src/stores/__tests__/tui_menu.test.ts`
+- `frontend/src/components/tui_menu/TuiMenuOverlay.tsx`
+- `frontend/src/components/tui_menu/TuiMenuOverlay.css`
+
+#### Files Modified:
+- `crates/clauset-types/src/lib.rs` - export tui_menu
+- `crates/clauset-types/src/ws.rs` - TuiMenu messages
+- `crates/clauset-core/src/lib.rs` - export TuiMenuParser
+- `crates/clauset-core/src/process.rs` - ProcessEvent::TuiMenu
+- `crates/clauset-core/src/buffer.rs` - Parser integration
+- `crates/clauset-core/src/session.rs` - Updated append_terminal_output return type
+- `crates/clauset-server/src/event_processor.rs` - Broadcast menu events
+- `crates/clauset-server/src/websocket.rs` - Handle select/cancel messages
+- `frontend/src/pages/Session.tsx` - TuiMenuOverlay integration
+
+### Previous
+- Chat Mode Refinements - **COMPLETE**
+
+### Chat Mode Refinements (Just Completed)
+Following user feedback, addressed several UX issues:
+
+1. **Settings Menu Z-Index Fix**
+   - Header z-index: 50, dropdown z-index: 1000
+   - Fixed overlap with content below
+
+2. **Removed SubagentPanel**
+   - Panel only showed briefly during agent execution (not useful)
+   - Replaced with detailed SubagentCompleted message bubbles
+
+3. **Enhanced Subagent Messages**
+   - Added `SubagentCompleted` event with detailed output (agent_type, description, result)
+   - Backend: Added to ws.rs, process.rs, hooks.rs (detects Task tool PostToolUse)
+   - Frontend: Renders as assistant message with green border, header showing agent type & description, result in italics
+   - Files: hooks.rs, websocket.rs, event_processor.rs, messages.ts, MessageBubble.tsx
+
+4. **QuickActionsMenu Component**
+   - Lightning bolt button left of input field
+   - Opens menu with: /clear, /compact, /cost, /model, /plan, /help
+   - Each item shows icon, label, description, command
+   - File: `frontend/src/components/chat/QuickActionsMenu.tsx`
+
+5. **Slash Commands as User Message Bubbles**
+   - All user input now appears immediately in chat (including slash commands)
+   - Added `addUserMessage()` function to messages.ts
+   - Added deduplication in `handleChatEvent()` to prevent duplicates from UserPromptSubmit hook
+   - Files: messages.ts, Session.tsx
+
+### Non-Critical Chat Mode Features (Previously Completed)
 All non-critical features from the plan have been implemented:
 
 1. **StatusBar Component** (`frontend/src/components/session/StatusBar.tsx`)

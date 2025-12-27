@@ -1,0 +1,203 @@
+/* TUI Menu Overlay - Native selection menu rendering */
+
+.tui-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.tui-menu-container {
+  background: var(--color-bg-surface);
+  border: 2px solid var(--color-bg-overlay);
+  border-radius: 12px;
+  padding: 16px;
+  max-width: 400px;
+  width: 100%;
+  box-shadow: var(--shadow-retro);
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Header */
+.tui-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tui-menu-icon {
+  font-size: 14px;
+  color: var(--color-accent);
+}
+
+.tui-menu-title {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Description */
+.tui-menu-description {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin: 0 0 16px 0;
+  line-height: 1.5;
+}
+
+/* Options */
+.tui-menu-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.tui-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  text-align: left;
+  width: 100%;
+}
+
+.tui-menu-option:hover,
+.tui-menu-option.highlighted {
+  background: var(--color-bg-overlay);
+  border-color: var(--color-accent-muted);
+}
+
+.tui-menu-option.selected {
+  border-color: var(--color-accent);
+}
+
+.tui-menu-option.highlighted.selected {
+  background: var(--color-accent-muted);
+}
+
+/* Option number */
+.option-number {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  min-width: 20px;
+}
+
+.tui-menu-option.highlighted .option-number {
+  color: var(--color-accent);
+}
+
+/* Option content */
+.option-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.option-label {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.option-checkmark {
+  font-size: 12px;
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.option-description {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Arrow indicator */
+.option-arrow {
+  font-size: 12px;
+  color: var(--color-accent);
+  margin-left: auto;
+}
+
+/* Footer */
+.tui-menu-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-bg-overlay);
+}
+
+.footer-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.footer-divider {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+/* Mobile adjustments */
+@media (max-width: 480px) {
+  .tui-menu-container {
+    margin: 0;
+    max-width: none;
+    border-radius: 12px 12px 0 0;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+  }
+
+  .tui-menu-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+}
