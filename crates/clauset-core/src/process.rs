@@ -53,6 +53,8 @@ pub enum ProcessEvent {
     Chat(clauset_types::ChatEvent),
     /// New prompt indexed for Prompt Library.
     NewPrompt(clauset_types::PromptSummary),
+    /// Interactive event for native UI rendering.
+    Interactive(clauset_types::InteractiveEvent),
 }
 
 /// Options for spawning a Claude process.
@@ -380,15 +382,20 @@ impl ProcessManager {
                                 // Wait a bit longer to ensure Claude is fully ready
                                 std::thread::sleep(Duration::from_millis(800));
                                 if let Ok(mut w) = writer_clone.lock() {
-                                    // Send the prompt text followed by Enter
-                                    let _ = w.write_all(initial_prompt.as_bytes());
+                                    // Trim any trailing whitespace/newlines from prompt
+                                    let prompt_text = initial_prompt.trim();
+
+                                    // Send the prompt text
+                                    let _ = w.write_all(prompt_text.as_bytes());
                                     let _ = w.flush();
-                                    // Small delay between text and Enter
-                                    std::thread::sleep(Duration::from_millis(50));
-                                    // Send Enter key to execute
+
+                                    // Delay between text and Enter - TUI needs Enter as separate event
+                                    std::thread::sleep(Duration::from_millis(100));
+
+                                    // Send Enter key to execute (carriage return)
                                     let _ = w.write_all(b"\r");
                                     let _ = w.flush();
-                                    debug!(target: "clauset::process", "Sent initial prompt to Claude: {}", initial_prompt);
+                                    debug!(target: "clauset::process", "Sent initial prompt to Claude: {}", prompt_text);
                                 }
                                 prompt_sent = true;
                             }
@@ -436,17 +443,22 @@ impl ProcessManager {
             }
             Some(ManagedProcess::Terminal { writer, .. }) => {
                 // For terminal mode, send input followed by carriage return.
-                // Important: Send text and Enter key separately with a small delay,
-                // matching the pattern used for initial prompt (lines 378-386).
+                // Important: Send text and Enter key separately with a delay,
                 // Claude Code's TUI needs the Enter key to arrive as a distinct input event.
                 let mut writer = writer.lock().unwrap();
+
+                // Trim any trailing whitespace/newlines from input
+                let input_text = input.trim();
+
                 // First, write the text content
                 writer
-                    .write_all(input.as_bytes())
+                    .write_all(input_text.as_bytes())
                     .map_err(|e| ClausetError::IoError(e))?;
                 writer.flush().map_err(|e| ClausetError::IoError(e))?;
-                // Small delay to let the TUI process the text
-                std::thread::sleep(std::time::Duration::from_millis(50));
+
+                // Delay to let the TUI process the text before Enter
+                std::thread::sleep(std::time::Duration::from_millis(100));
+
                 // Now send Enter key (carriage return) to execute
                 writer
                     .write_all(b"\r")

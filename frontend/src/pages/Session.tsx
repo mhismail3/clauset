@@ -24,6 +24,13 @@ import {
   type ChatMessage,
 } from '../stores/messages';
 import { appendTerminalOutput, clearTerminalHistory } from '../stores/terminal';
+import {
+  getInteractiveState,
+  handleInteractiveEvent,
+  clearInteractiveState,
+  type InteractiveEvent,
+} from '../stores/interactive';
+import { InteractiveCarousel } from '../components/interactive/InteractiveCarousel';
 
 // Maximum chunks to queue when terminal is not yet ready (prevents OOM)
 const MAX_TERMINAL_QUEUE_CHUNKS = 100;
@@ -464,6 +471,15 @@ export default function SessionPage() {
         }
         break;
       }
+      case 'interactive': {
+        // Interactive prompt from AskUserQuestion tool
+        const interactiveEvent = (msg as unknown as { event: InteractiveEvent }).event;
+        if (interactiveEvent) {
+          handleInteractiveEvent(interactiveEvent);
+          scrollToBottom();
+        }
+        break;
+      }
     }
   }
 
@@ -828,9 +844,54 @@ export default function SessionPage() {
               <div ref={messagesEndRef} />
             </main>
 
+            {/* Interactive Question Carousel */}
+            <Show when={getInteractiveState(params.id).type === 'prompt'}>
+              {() => {
+                const state = getInteractiveState(params.id);
+                if (state.type !== 'prompt') return null;
+                return (
+                  <InteractiveCarousel
+                    sessionId={params.id}
+                    session={state.session}
+                    onSubmitAll={async (answers) => {
+                      console.log('[interactive] onSubmitAll called with answers:', answers);
+                      if (wsManager && wsState() === 'connected') {
+                        // Send answers to terminal one by one with delay
+                        // Each answer triggers Claude to process and show next question,
+                        // so we need adequate delay between sends (500ms should work)
+                        for (let i = 0; i < answers.length; i++) {
+                          const answer = answers[i];
+                          console.log('[interactive] Sending answer:', answer);
+                          wsManager.send({
+                            type: 'interactive_choice',
+                            question_id: answer.questionId,
+                            selected_indices: answer.selectedIndices,
+                          });
+                          // Wait for Claude to process and show next question
+                          // First answer is immediate, subsequent ones need delay
+                          if (i < answers.length - 1) {
+                            await new Promise((r) => setTimeout(r, 500));
+                          }
+                        }
+                        console.log('[interactive] All answers sent');
+                      } else {
+                        console.log('[interactive] WebSocket not connected, state:', wsState());
+                      }
+                    }}
+                    onCancel={() => {
+                      if (wsManager && wsState() === 'connected') {
+                        wsManager.send({ type: 'interactive_cancel' });
+                      }
+                      clearInteractiveState(params.id);
+                    }}
+                  />
+                );
+              }}
+            </Show>
+
             <InputBar
               onSend={handleSendMessage}
-              disabled={wsState() !== 'connected'}
+              disabled={wsState() !== 'connected' || getInteractiveState(params.id).type === 'prompt'}
               placeholder={session()?.mode === 'terminal' ? 'Type here (output in terminal)...' : 'Message Claude...'}
             />
           </div>

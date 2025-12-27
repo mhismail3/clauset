@@ -162,17 +162,71 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
-- Terminal flicker fix for "/" command picker - DONE
+- Interactive slash command support - multi-question carousel IMPLEMENTED
 
-### Terminal "/" Flicker Fix (Just Completed)
-- **Problem**: Terminal flickered when "/" was typed (both toolbar button and keyboard), continuing AFTER Claude Code's command picker appeared
-- **Root cause**: ResizeObserver fired for xterm internal viewport changes, triggering resize cascade even when container dimensions hadn't changed
-- **Fix**: Added dimension-based filtering to `handleResize()` - only process resize events when container width/height actually changed
+### Interactive Slash Command Support with Multi-Question Carousel (Just Implemented)
+- **Goal**: Add native UI for interactive slash command prompts in chat mode with swipeable card carousel
+- **Problem**: Slash commands like /model, /config use AskUserQuestion tool which renders as raw ANSI in terminal
+- **Solution**: Intercept AskUserQuestion at PreToolUse hook, batch all questions into single prompt, render as swipeable carousel
+- **User Experience**:
+  - All questions appear as navigation dots at top
+  - Swipe left/right or use arrow keys to navigate between questions
+  - Answer each question (single-select auto-advances, multi-select has "Next" button)
+  - Green checkmarks on dots show which questions are answered
+  - "Send All Responses" button appears when all questions answered
+  - Answers sent to terminal one by one with 100ms delay
+- **Implementation**:
+  1. `crates/clauset-types/src/interactive.rs` - InteractivePrompt batches multiple InteractiveQuestion
+  2. `hooks.rs` - Batches all questions into single PromptPresented event (not one per question)
+  3. `websocket.rs` - Uses PromptPresented variant
+  4. `frontend/src/stores/interactive.ts` - PromptSession with per-question answers Map
+  5. `frontend/src/components/interactive/InteractiveCarousel.tsx` - Swipeable carousel with dots, arrows, "Send All"
+  6. `frontend/src/pages/Session.tsx` - Uses InteractiveCarousel, sends answers sequentially
+  7. `frontend/src/index.css` - Carousel styling (dots, arrows, submit-all button)
+- **Files created**:
+  - `crates/clauset-types/src/interactive.rs`
+  - `frontend/src/stores/interactive.ts`
+  - `frontend/src/components/interactive/QuestionCard.tsx` (legacy, kept for reference)
+  - `frontend/src/components/interactive/InteractiveCarousel.tsx` (new carousel)
+- **Files modified**:
+  - `crates/clauset-types/src/lib.rs` - export interactive module
+  - `crates/clauset-types/src/ws.rs` - message types
+  - `crates/clauset-core/src/process.rs` - ProcessEvent::Interactive
+  - `crates/clauset-server/src/routes/hooks.rs` - batch questions into single PromptPresented
+  - `crates/clauset-server/src/websocket.rs` - PromptPresented handling
+  - `crates/clauset-server/src/event_processor.rs` - handle Interactive event
+  - `frontend/src/pages/Session.tsx` - InteractiveCarousel integration
+  - `frontend/src/index.css` - carousel styling
+- **Next**: Test with slash commands that ask multiple questions
+
+### Terminal Command Picker Flicker Fix (Completed)
+- **Problem**: Terminal flickered showing welcome box when scrolling down in slash command picker (typing "/" then pressing down arrow until menu scrolls)
+- **Root cause**: `scrollIntoView({ behavior: 'smooth' })` in CommandPicker.tsx caused ~300ms of continuous animation frames. The CommandPicker (fixed position, z-index 100) sits over the terminal, and the continuous repaints during smooth scroll interfered with xterm's compositor layer, causing its viewport to momentarily scroll to top of scrollback buffer.
+- **Key insight**: The `initialSyncDone` flag was working correctly - this was NOT about sync requests. It was a rendering/compositor interference issue.
+- **Fix applied**:
+  1. Removed `behavior: 'smooth'` from `scrollIntoView({ block: 'nearest' })` - instant scrolling eliminates animation frame interference
+  2. Added `contain: 'layout paint'` CSS property to CommandPicker container - isolates its layout/paint from affecting terminal
+- **File changed**: `frontend/src/components/commands/CommandPicker.tsx`
+
+### Terminal Flicker Fix - Disable Post-Initial Resyncs (Just Completed)
+- **Problem**: Terminal still flickered when using Claude Code's command picker - it would show correctly for a moment then flash back to showing the welcome box
+- **Root cause**: Multiple code paths were calling `doFitAndResize()` which triggered `setTerminalDimensions()` → `sendSyncRequest()`. The sync request told the server to send the ENTIRE terminal buffer, causing xterm to redraw from the beginning (showing welcome box instead of current state)
+- **Solution**: "Fire and forget" approach - after initial sync, STOP sending dimension updates
+  - Added `initialSyncDone` flag in ws.ts
+  - After first sync response, set flag to true
+  - `setTerminalDimensions()` returns early if flag is set (no more sync requests)
+  - Reset flag on connection close (so reconnects work)
 - **Files changed**:
-  - `frontend/src/components/terminal/TerminalView.tsx`:
-    - Added `lastContainerWidth` and `lastContainerHeight` tracking variables
-    - Modified `handleResize()` to check if container dimensions actually changed before triggering resize
-    - Initialize dimensions in `onMount()` after terminal.open()
+  - `frontend/src/lib/ws.ts`:
+    - Added `initialSyncDone` flag
+    - Modified `handleSyncResponse()` to set flag after first sync
+    - Modified `setTerminalDimensions()` to skip sync requests after initial
+    - Reset flag in `ws.onclose` handler
+
+### Previous Terminal Flicker Fix (Same Session)
+- Added dimension-based filtering to `handleResize()` in TerminalView.tsx
+- Only process resize events when container width/height actually changed
+- Prevents ResizeObserver feedback loop
 
 ### Terminal Flicker Fix - Comprehensive (Just Completed)
 - **Problem**: Terminal still flickered when interacting with Claude Code's autocomplete

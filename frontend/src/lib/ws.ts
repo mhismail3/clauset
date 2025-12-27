@@ -222,6 +222,11 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
   // Track last message received (for Safari staleness detection)
   let lastMessageTime = Date.now();
 
+  // After initial sync is complete, stop sending dimension updates
+  // This prevents the terminal from constantly resyncing and flickering
+  // Only explicit orientation changes should trigger resync after initial setup
+  let initialSyncDone = false;
+
   const maxReconnectAttempts = options.reconnectAttempts ?? 10;
   const baseReconnectDelay = options.reconnectDelay ?? 1000;
 
@@ -403,6 +408,8 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
         ws = null;
         stopHeartbeat();
         clearStreamTimers();
+        // Reset sync flag so reconnect can establish dimensions again
+        initialSyncDone = false;
 
         if (isSuspended) {
           // Don't reconnect if suspended
@@ -527,6 +534,13 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     } else {
       // We're caught up - just update our sequence position
       streamState.lastContiguousSeq = response.buffer_end_seq;
+    }
+
+    // Mark initial sync as complete - stop sending dimension updates after this
+    // This prevents constant resyncing that causes terminal flickering
+    if (!initialSyncDone) {
+      initialSyncDone = true;
+      console.log('Initial sync complete - dimension updates disabled');
     }
 
     // Notify callback
@@ -696,18 +710,23 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     streamState.terminalCols = cols;
     streamState.terminalRows = rows;
 
-    // If dimensions changed and we're connected, send updated dimensions via resync
-    // Debounce to coalesce rapid dimension changes (e.g., during keyboard animation)
-    // This prevents flickering from multiple PTY resizes in quick succession
+    // After initial sync is complete, don't send dimension updates
+    // This prevents constant resyncing that causes terminal flickering
+    // The terminal will just display what it receives from the server
+    if (initialSyncDone) {
+      return;
+    }
+
+    // Only send dimension updates during initial setup (before first sync response)
     if (changed && ws?.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
       if (dimensionUpdateTimer) {
         clearTimeout(dimensionUpdateTimer);
       }
       dimensionUpdateTimer = window.setTimeout(() => {
         dimensionUpdateTimer = null;
-        // Re-check connection state after debounce
-        if (ws?.readyState === WebSocket.OPEN) {
-          console.log(`Sending dimension update: ${cols}x${rows}`);
+        // Re-check connection state and sync status after debounce
+        if (ws?.readyState === WebSocket.OPEN && !initialSyncDone) {
+          console.log(`Sending initial dimension update: ${cols}x${rows}`);
           sendSyncRequest();
         }
       }, DIMENSION_UPDATE_DEBOUNCE_MS);

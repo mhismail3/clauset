@@ -600,3 +600,297 @@ select:focus {
   /* Hide any text selection highlight */
   -webkit-tap-highlight-color: transparent !important;
 }
+
+/* Interactive Question Card */
+.interactive-card {
+  background: var(--color-bg-surface);
+  border: 2px solid var(--color-bg-overlay);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 0 12px 12px 12px;
+  box-shadow: var(--shadow-retro);
+}
+
+.interactive-header {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-accent);
+  margin-bottom: 8px;
+}
+
+.interactive-question {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--color-text-primary);
+  margin: 0 0 16px 0;
+  line-height: 1.5;
+}
+
+.interactive-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.interactive-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: 2px solid var(--color-bg-overlay);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.interactive-option:hover {
+  border-color: var(--color-text-muted);
+}
+
+.interactive-option.selected {
+  border-color: var(--color-accent);
+  background: var(--color-accent-muted);
+}
+
+.option-indicator {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.radio-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--color-text-muted);
+}
+
+.interactive-option.selected .radio-dot {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  box-shadow: inset 0 0 0 3px var(--color-bg-elevated);
+}
+
+.checkbox-mark {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 2px solid var(--color-text-muted);
+  font-size: 12px;
+  line-height: 12px;
+  text-align: center;
+  color: var(--color-bg-elevated);
+}
+
+.interactive-option.selected .checkbox-mark {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.option-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.option-label {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.option-description {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
+.interactive-submit {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  border: 2px solid var(--color-accent);
+  border-radius: 8px;
+  background: var(--color-accent);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+  box-shadow: var(--shadow-retro-sm);
+}
+
+.interactive-submit:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.interactive-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.interactive-cancel {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.interactive-cancel:hover {
+  color: var(--color-text-tertiary);
+}
+
+/* Interactive Carousel */
+.interactive-carousel {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 12px;
+  background: var(--color-bg-elevated);
+  border-top: 1px solid var(--color-bg-overlay);
+}
+
+.carousel-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.carousel-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--color-text-muted);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.carousel-dot.active {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  transform: scale(1.2);
+}
+
+.carousel-dot.answered {
+  border-color: #2c8f7a;
+  background: #2c8f7a;
+}
+
+.carousel-dot .dot-check {
+  font-size: 8px;
+  color: white;
+  font-weight: bold;
+}
+
+.carousel-progress {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.carousel-nav {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 8px;
+}
+
+.nav-arrow {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid var(--color-bg-overlay);
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-arrow:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.nav-arrow:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.interactive-confirm {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  border: 2px solid var(--color-accent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.interactive-confirm:hover {
+  background: var(--color-accent-muted);
+}
+
+.interactive-submit-all {
+  width: 100%;
+  padding: 14px;
+  border: 2px solid #2c8f7a;
+  border-radius: 8px;
+  background: #2c8f7a;
+  color: white;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+  box-shadow: var(--shadow-retro-sm);
+  animation: pulse-green 2s ease-in-out infinite;
+}
+
+.interactive-submit-all:hover {
+  background: #248068;
+  transform: translateY(-1px);
+}
+
+@keyframes pulse-green {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(44, 143, 122, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(44, 143, 122, 0);
+  }
+}

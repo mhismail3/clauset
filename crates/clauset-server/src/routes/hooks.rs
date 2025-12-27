@@ -6,7 +6,10 @@
 use crate::state::AppState;
 use axum::{extract::State, http::StatusCode, Json};
 use clauset_core::{ProcessEvent, RecentAction};
-use clauset_types::{HookActivityUpdate, HookEvent, HookEventPayload, HookEventType, SessionStatus};
+use clauset_types::{
+    HookActivityUpdate, HookEvent, HookEventPayload, HookEventType,
+    InteractiveEvent, InteractivePrompt, InteractiveQuestion, QuestionOption, SessionStatus,
+};
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -70,6 +73,28 @@ pub async fn receive(
     for chat_event in chat_events {
         // Broadcast chat events to WebSocket clients
         let _ = state.session_manager.broadcast_event(ProcessEvent::Chat(chat_event));
+    }
+
+    // Intercept AskUserQuestion tool calls for native UI rendering
+    if let HookEvent::PreToolUse { session_id, tool_name, tool_input, .. } = &event {
+        if tool_name == "AskUserQuestion" {
+            if let Some(questions) = parse_ask_user_question(tool_input) {
+                debug!(
+                    target: "clauset::hooks",
+                    "Broadcasting {} interactive questions for session {}",
+                    questions.len(), session_id
+                );
+                // Batch all questions into a single prompt event
+                let prompt = InteractivePrompt::new(questions);
+                let interactive_event = InteractiveEvent::PromptPresented {
+                    session_id: *session_id,
+                    prompt,
+                };
+                let _ = state.session_manager.broadcast_event(
+                    ProcessEvent::Interactive(interactive_event)
+                );
+            }
+        }
     }
 
     // Process the event for real-time activity updates
@@ -494,5 +519,62 @@ fn extract_claude_session_id(event: &HookEvent) -> String {
         HookEvent::SubagentStop { claude_session_id, .. } => claude_session_id.clone(),
         HookEvent::Notification { claude_session_id, .. } => claude_session_id.clone(),
         HookEvent::PreCompact { claude_session_id, .. } => claude_session_id.clone(),
+    }
+}
+
+/// Parse AskUserQuestion tool input into structured questions.
+///
+/// The tool_input format from Claude Code is:
+/// ```json
+/// {
+///   "questions": [
+///     {
+///       "header": "Model",
+///       "question": "Which model should be used?",
+///       "multiSelect": false,
+///       "options": [
+///         { "label": "Claude Sonnet", "description": "Balanced performance" },
+///         { "label": "Claude Opus", "description": "Maximum capability" }
+///       ]
+///     }
+///   ]
+/// }
+/// ```
+fn parse_ask_user_question(input: &Value) -> Option<Vec<InteractiveQuestion>> {
+    let questions = input.get("questions")?.as_array()?;
+
+    let parsed: Vec<InteractiveQuestion> = questions
+        .iter()
+        .filter_map(|q| {
+            let header = q.get("header")?.as_str()?.to_string();
+            let question = q.get("question")?.as_str()?.to_string();
+            let multi_select = q.get("multiSelect").and_then(|v| v.as_bool()).unwrap_or(false);
+
+            let options: Vec<QuestionOption> = q
+                .get("options")?
+                .as_array()?
+                .iter()
+                .enumerate()
+                .filter_map(|(i, opt)| {
+                    Some(QuestionOption {
+                        index: i + 1, // 1-based for PTY response
+                        label: opt.get("label")?.as_str()?.to_string(),
+                        description: opt.get("description").and_then(|v| v.as_str()).map(String::from),
+                    })
+                })
+                .collect();
+
+            if options.is_empty() {
+                return None;
+            }
+
+            Some(InteractiveQuestion::new(header, question, options, multi_select))
+        })
+        .collect();
+
+    if parsed.is_empty() {
+        None
+    } else {
+        Some(parsed)
     }
 }

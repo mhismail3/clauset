@@ -7,7 +7,7 @@ use clauset_core::ProcessEvent;
 use clauset_types::{WsClientMessage, WsServerMessage};
 use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Maximum size for text input messages (10KB)
@@ -233,6 +233,18 @@ pub async fn handle_websocket(
                                 None
                             }
                         }
+                        ProcessEvent::Interactive(interactive_event) => {
+                            // Forward interactive events for native UI rendering
+                            let event_session_id = match &interactive_event {
+                                clauset_types::InteractiveEvent::PromptPresented { session_id, .. } => *session_id,
+                                clauset_types::InteractiveEvent::InteractionComplete { session_id } => *session_id,
+                            };
+                            if event_session_id == session_id {
+                                Some(WsServerMessage::Interactive { event: interactive_event.clone() })
+                            } else {
+                                None
+                            }
+                        }
                         _ => None,
                     };
 
@@ -440,6 +452,96 @@ pub async fn handle_websocket(
                             let response = WsServerMessage::ChatHistory { messages };
                             let _ = outgoing_tx_clone.send(response).await;
                         }
+                        // === Interactive Prompt Protocol ===
+                        WsClientMessage::InteractiveChoice { question_id, selected_indices } => {
+                            info!(target: "clauset::ws", "InteractiveChoice for session {}: question={}, indices={:?}", session_id, question_id, selected_indices);
+
+                            // Claude Code's AskUserQuestion uses a TUI picker controlled by arrow keys
+                            // Options are 1-indexed, first option is selected by default
+                            // To select option N, we need to send (N-1) Down arrows, then Enter
+                            //
+                            // IMPORTANT: The TUI needs Enter to arrive as a SEPARATE input event,
+                            // not bundled with navigation keys. Must flush and delay between them.
+                            //
+                            // ANSI escape codes:
+                            // Down arrow: ESC [ B  (0x1B 0x5B 0x42)
+                            // Enter: CR (0x0D or \r)
+
+                            let mut nav_bytes: Vec<u8> = Vec::new();
+
+                            if selected_indices.len() == 1 {
+                                // Single select: navigate to option
+                                let option_idx = selected_indices[0];
+                                // Navigate down to the option (option 1 = 0 downs, option 2 = 1 down, etc.)
+                                for _ in 1..option_idx {
+                                    // Down arrow: ESC [ B
+                                    nav_bytes.extend_from_slice(b"\x1b[B");
+                                }
+                            } else {
+                                // Multi-select: navigate and toggle each option with space
+                                let mut sorted_indices = selected_indices.clone();
+                                sorted_indices.sort();
+
+                                let mut current_pos = 1; // Start at first option
+                                for &option_idx in &sorted_indices {
+                                    // Navigate to this option
+                                    while current_pos < option_idx {
+                                        nav_bytes.extend_from_slice(b"\x1b[B"); // Down
+                                        current_pos += 1;
+                                    }
+                                    // Toggle selection with space
+                                    nav_bytes.push(b' ');
+                                }
+                            }
+
+                            info!(target: "clauset::ws", "Sending navigation for session {}: {} bytes", session_id, nav_bytes.len());
+
+                            // Send navigation keys first (if any)
+                            if !nav_bytes.is_empty() {
+                                if let Err(e) = state_clone
+                                    .session_manager
+                                    .send_terminal_input(session_id, &nav_bytes)
+                                    .await
+                                {
+                                    warn!(target: "clauset::ws", "Failed to send navigation for session {}: {}", session_id, e);
+                                }
+                            }
+
+                            // Wait for TUI to process navigation, then send Enter separately
+                            // This matches the pattern in send_input() which works correctly
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                            info!(target: "clauset::ws", "Sending Enter key for session {}", session_id);
+                            match state_clone
+                                .session_manager
+                                .send_terminal_input(session_id, b"\r")
+                                .await
+                            {
+                                Ok(_) => info!(target: "clauset::ws", "Enter key sent successfully for session {}", session_id),
+                                Err(e) => warn!(target: "clauset::ws", "Failed to send Enter for session {}: {}", session_id, e),
+                            }
+                        }
+                        WsClientMessage::InteractiveText { response } => {
+                            debug!(target: "clauset::ws", "InteractiveText for session {}: {} chars", session_id, response.len());
+
+                            // Send text + Enter to PTY
+                            let input = format!("{}\r", response);
+
+                            let _ = state_clone
+                                .session_manager
+                                .send_terminal_input(session_id, input.as_bytes())
+                                .await;
+                        }
+                        WsClientMessage::InteractiveCancel => {
+                            debug!(target: "clauset::ws", "InteractiveCancel for session {}", session_id);
+
+                            // Send Ctrl+C (ETX) to cancel
+                            let _ = state_clone
+                                .session_manager
+                                .send_terminal_input(session_id, &[0x03])
+                                .await;
+                        }
+
                         WsClientMessage::NegotiateDimensions {
                             cols,
                             rows,

@@ -51,7 +51,7 @@ export function CommandPicker(props: CommandPickerProps) {
     const selectedIdx = commandsStore.selectedIndex;
     const selectedEl = listRef.querySelector(`[data-index="${selectedIdx}"]`);
     if (selectedEl) {
-      selectedEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      selectedEl.scrollIntoView({ block: 'nearest' });
     }
   });
 
@@ -80,6 +80,7 @@ export function CommandPicker(props: CommandPickerProps) {
           'box-shadow': '0 -4px 24px rgba(0, 0, 0, 0.4)',
           overflow: 'hidden',
           'z-index': '100',
+          contain: 'layout paint',
         }}
       >
         {/* Loading state */}

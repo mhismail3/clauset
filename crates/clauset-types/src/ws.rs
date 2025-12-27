@@ -86,6 +86,24 @@ pub enum WsClientMessage {
     /// Request chat history for the session.
     /// Client sends this on connect to load persisted chat messages.
     RequestChatHistory,
+
+    // === Interactive Prompt Protocol ===
+
+    /// User selected option(s) from an interactive question.
+    /// For single-select: one index. For multi-select: multiple indices.
+    InteractiveChoice {
+        /// ID of the question being answered
+        question_id: String,
+        /// Selected option indices (1-based)
+        selected_indices: Vec<usize>,
+    },
+    /// User provided text input for a text prompt.
+    InteractiveText {
+        /// The text response
+        response: String,
+    },
+    /// User cancelled the interactive prompt.
+    InteractiveCancel,
 }
 
 /// Messages sent from server to client.
@@ -255,6 +273,14 @@ pub enum WsServerMessage {
     /// A new prompt was indexed (for Prompt Library real-time updates).
     NewPrompt {
         prompt: crate::PromptSummary,
+    },
+
+    // === Interactive Prompt Protocol ===
+
+    /// Interactive event for native UI rendering.
+    /// Sent when Claude Code's AskUserQuestion tool is invoked.
+    Interactive {
+        event: crate::InteractiveEvent,
     },
 }
 
