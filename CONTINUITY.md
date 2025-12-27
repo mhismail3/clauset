@@ -162,7 +162,17 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
-- Native TUI Menu Support - **COMPLETE**
+- Native TUI Menu Support - **COMPLETE** (+ bug fix for parser detection)
+
+### TUI Menu Parser Bug Fix (Just Completed)
+- **Problem**: Menu overlay showed incorrectly - literal `\u2191` escape sequences displayed, ANSI codes leaking through
+- **Root cause**: Claude Code outputs literal escape sequence TEXT (e.g., `\u2191\u2193`) not actual Unicode characters
+- **Fixes applied**:
+  1. Added `normalize_unicode_escapes()` function to convert literal `\uXXXX` to Unicode chars
+  2. Improved ANSI stripping regex to handle DEC private sequences (`\x1b[?...`), charset switching, etc.
+  3. Added simplified footer patterns (`"Navigate"`, `"Enter Select"`) that work with both formats
+- **Files changed**: `crates/clauset-core/src/tui_menu_parser.rs`
+- **Tests**: 32 tests in tui_menu_parser (6 new tests for the fix)
 
 ### Native TUI Menu Support (Just Completed)
 - **Goal**: Render Claude Code's built-in TUI menus (/model, /config, etc.) natively in chat mode

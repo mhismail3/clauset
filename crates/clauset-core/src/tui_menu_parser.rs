@@ -36,8 +36,10 @@ enum ParserState {
 }
 
 /// Patterns that indicate footer/instruction lines (confirm end of menu)
+/// Note: Claude Code may output Unicode as literal escape sequences (e.g., "\u2191" instead of ↑)
 static FOOTER_PATTERNS: Lazy<Vec<&'static str>> = Lazy::new(|| {
     vec![
+        // Standard patterns
         "Enter to confirm",
         "Esc to exit",
         "↑/↓ to navigate",
@@ -45,6 +47,10 @@ static FOOTER_PATTERNS: Lazy<Vec<&'static str>> = Lazy::new(|| {
         "to confirm",
         "to exit",
         "to select",
+        // Patterns that work with literal escape sequences (Claude Code CLI output)
+        "Navigate",      // Matches "↑↓ Navigate" or "\u2191\u2193 Navigate"
+        "Enter Select",  // Matches "Enter Select" in footer
+        "Esc Cancel",    // Matches "Esc Cancel" in footer
     ]
 });
 
@@ -105,7 +111,8 @@ impl TuiMenuParser {
     /// Returns `Some(TuiMenu)` when a complete menu is detected.
     pub fn process(&mut self, data: &[u8]) -> Option<TuiMenu> {
         let raw_text = String::from_utf8_lossy(data);
-        let clean_text = strip_ansi_codes(&raw_text);
+        // Strip ANSI codes first, then normalize any literal Unicode escapes
+        let clean_text = normalize_unicode_escapes(&strip_ansi_codes(&raw_text));
 
         // Split into lines for processing
         let new_lines: Vec<String> = clean_text
@@ -345,11 +352,45 @@ impl TuiMenuParser {
 /// Strip ANSI escape codes from text.
 fn strip_ansi_codes(text: &str) -> String {
     static ANSI_RE: Lazy<Regex> = Lazy::new(|| {
-        // Match ANSI escape sequences
-        Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\]8;;[^\x07]*\x07|\x1b\]8;;\x07").expect("Invalid ANSI regex")
+        // Comprehensive ANSI escape sequence matching:
+        // - CSI sequences: ESC [ ... letter (includes DEC private sequences with ?)
+        // - OSC sequences: ESC ] ... BEL or ESC \
+        // - Charset switching: ESC ( letter or ESC ) letter
+        // - Keypad mode: ESC = or ESC >
+        // - Save/restore cursor: ESC 7 or ESC 8
+        // - Other single-char ESC sequences
+        Regex::new(concat!(
+            r"\x1b\[[0-9;?]*[a-zA-Z]",      // CSI sequences (including DEC private with ?)
+            r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)",  // OSC sequences (BEL or ST terminator)
+            r"|\x1b[()][AB012]",             // Charset switching
+            r"|\x1b[=>]",                    // Keypad mode
+            r"|\x1b[78]",                    // Save/restore cursor
+            r"|\x1b[DEHMNOPVWXYZ\\^_c]",    // Other single-char ESC sequences
+        )).expect("Invalid ANSI regex")
     });
 
     ANSI_RE.replace_all(text, "").to_string()
+}
+
+/// Normalize literal Unicode escape sequences (e.g., "\u2191") to actual Unicode characters.
+/// Claude Code CLI sometimes outputs these as literal text in the terminal.
+fn normalize_unicode_escapes(text: &str) -> String {
+    static UNICODE_ESCAPE_RE: Lazy<Regex> = Lazy::new(|| {
+        // Match literal \uXXXX patterns (not actual escape sequences, but the text representation)
+        Regex::new(r"\\u([0-9a-fA-F]{4})").expect("Invalid unicode escape regex")
+    });
+
+    UNICODE_ESCAPE_RE.replace_all(text, |caps: &regex::Captures| {
+        if let Some(hex_str) = caps.get(1) {
+            if let Ok(code) = u32::from_str_radix(hex_str.as_str(), 16) {
+                if let Some(c) = char::from_u32(code) {
+                    return c.to_string();
+                }
+            }
+        }
+        // If conversion fails, keep the original
+        caps.get(0).map(|m| m.as_str().to_string()).unwrap_or_default()
+    }).into_owned()
 }
 
 /// Split option text into label and optional description.
@@ -710,5 +751,98 @@ Enter to confirm
         let menu = parser.process(with_arrow.as_bytes()).unwrap();
 
         assert_eq!(menu.highlighted_index, 1);
+    }
+
+    #[test]
+    fn test_normalize_unicode_escapes() {
+        // Arrow symbols
+        assert_eq!(normalize_unicode_escapes(r"\u2191\u2193"), "↑↓");
+        // Middle dot
+        assert_eq!(normalize_unicode_escapes(r"\u00B7"), "·");
+        // Triangle pointer
+        assert_eq!(normalize_unicode_escapes(r"\u25B8"), "▸");
+        // Mixed with regular text
+        assert_eq!(
+            normalize_unicode_escapes(r"\u2191\u2193 Navigate \u00B7 Enter Select"),
+            "↑↓ Navigate · Enter Select"
+        );
+        // Text without escapes should remain unchanged
+        assert_eq!(normalize_unicode_escapes("plain text"), "plain text");
+    }
+
+    #[test]
+    fn test_strip_ansi_with_dec_private_sequences() {
+        // DEC private sequences use ? (e.g., show/hide cursor)
+        let with_dec = "\x1b[?2026Hsome text\x1b[?2026l";
+        let stripped = strip_ansi_codes(with_dec);
+        assert_eq!(stripped, "some text");
+    }
+
+    #[test]
+    fn test_strip_ansi_charset_switching() {
+        // Charset switching sequences
+        let with_charset = "\x1b(Bsome text\x1b)0";
+        let stripped = strip_ansi_codes(with_charset);
+        assert_eq!(stripped, "some text");
+    }
+
+    #[test]
+    fn test_detects_menu_with_literal_unicode_footer() {
+        // This simulates what Claude Code actually outputs - literal \u sequences
+        let menu_with_literal_escapes = r#"
+Select model
+
+  1. Default
+  2. Sonnet
+  3. Haiku
+
+\u2191\u2193 Navigate \u00B7 Enter Select \u00B7 Esc Cancel
+"#;
+        let mut parser = TuiMenuParser::new();
+        let result = parser.process(menu_with_literal_escapes.as_bytes());
+
+        assert!(result.is_some(), "Should detect menu with literal unicode escapes in footer");
+        let menu = result.unwrap();
+        assert_eq!(menu.options.len(), 3);
+    }
+
+    #[test]
+    fn test_detects_menu_with_simplified_footer() {
+        // Footer with "Navigate" pattern
+        let menu_with_navigate = r#"
+Select option
+  1. First
+  2. Second
+Navigate with arrows
+"#;
+        let mut parser = TuiMenuParser::new();
+        let result = parser.process(menu_with_navigate.as_bytes());
+
+        assert!(result.is_some(), "Should detect menu with 'Navigate' in footer");
+    }
+
+    #[test]
+    fn test_full_claude_code_menu_format() {
+        // Complete menu as Claude Code outputs it (with ANSI codes and literal escapes)
+        let realistic_menu = concat!(
+            "\x1b[2J\x1b[H",  // Clear screen
+            "Select model\r\n\r\n",
+            "  1. Default (recommended)   Opus 4.5\r\n",
+            "  2. Sonnet                  Sonnet 4.5\r\n",
+            "\x1b[32m▸\x1b[0m 3. Haiku \x1b[33m✓\x1b[0m               Haiku 4.5\r\n",
+            "\r\n",
+            r"\u2191\u2193 Navigate \u00B7 Enter Select \u00B7 Esc Cancel",
+            "\r\n",
+        );
+
+        let mut parser = TuiMenuParser::new();
+        let result = parser.process(realistic_menu.as_bytes());
+
+        assert!(result.is_some(), "Should detect realistic Claude Code menu");
+        let menu = result.unwrap();
+        assert_eq!(menu.title, "Select model");
+        assert_eq!(menu.options.len(), 3);
+        assert_eq!(menu.highlighted_index, 2); // ▸ on option 3
+        assert!(menu.options[2].is_selected);  // ✓ on option 3
     }
 }
