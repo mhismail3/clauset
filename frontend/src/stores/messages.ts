@@ -17,6 +17,7 @@ export interface Message {
   metadata?: {
     agentId?: string;
     agentType?: string;
+    description?: string;
     toolName?: string;
     toolInput?: unknown;
     error?: string;
@@ -174,7 +175,7 @@ export function handleSubagentStarted(sessionId: string, agentId: string, agentT
  * Handle subagent stopped event.
  * Note: This is now mostly superseded by handleSubagentCompleted which provides more detail.
  */
-export function handleSubagentStopped(sessionId: string, agentId: string) {
+export function handleSubagentStopped(_sessionId: string, _agentId: string) {
   // Don't add a message here - wait for the subagent_completed event with details
   // The subagent_completed event provides the actual output from the Task tool
 }
@@ -189,8 +190,6 @@ export function handleSubagentCompleted(
   description: string,
   result: string
 ) {
-  const typeLabel = agentType === 'general-purpose' ? 'Agent' : agentType;
-
   // Create an assistant message with subagent details
   // The content will be rendered in italics by MessageBubble
   const message: Message = {
@@ -414,12 +413,61 @@ function convertChatMessage(msg: ChatMessage): Message {
 
 /**
  * Handle chat history from the backend.
- * This replaces the current messages with the authoritative backend data.
+ * This merges with existing messages to prevent data loss from race conditions.
+ *
+ * IMPORTANT: Don't blindly replace messages with server data because:
+ * 1. Server may return empty array before hooks have been processed
+ * 2. localStorage may have newer messages from real-time events
+ * 3. Race condition between SyncResponse and hook events
  */
 export function handleChatHistory(sessionId: string, chatMessages: ChatMessage[]) {
   console.log('[messages] Received chat history:', chatMessages.length, 'messages');
-  const messages = chatMessages.map(convertChatMessage);
-  setSessionMessages(sessionId, messages);
+
+  // Get existing messages from memory or localStorage
+  const existingInMemory = messages().get(sessionId);
+  const existingFromStorage = existingInMemory === undefined ? loadFromStorage(sessionId) : null;
+  const existingMessages = existingInMemory ?? existingFromStorage ?? [];
+
+  // If server returns empty but we have existing messages, DON'T overwrite
+  // This prevents the race condition where RequestChatHistory arrives before hooks are processed
+  if (chatMessages.length === 0 && existingMessages.length > 0) {
+    console.log('[messages] Server returned empty history but we have', existingMessages.length, 'existing messages - keeping existing');
+    // Make sure in-memory state is populated from localStorage if needed
+    if (existingInMemory === undefined && existingFromStorage) {
+      setMessages((prev) => {
+        const newMap = new Map(prev);
+        newMap.set(sessionId, existingFromStorage);
+        return newMap;
+      });
+    }
+    return;
+  }
+
+  // If server has messages, use server as source of truth
+  // But merge with any messages we've received via real-time events
+  const serverMessages = chatMessages.map(convertChatMessage);
+
+  // Build a set of server message IDs for deduplication
+  const serverMessageIds = new Set(serverMessages.map(m => m.id));
+
+  // Keep any real-time messages that aren't in server data (added since last save)
+  // These are typically messages added via handleChatEvent during the current session
+  const realtimeMessages = existingMessages.filter(m => {
+    // Keep messages that aren't in server data AND were added recently (within last minute)
+    // This preserves messages from real-time events that haven't been persisted to server yet
+    if (serverMessageIds.has(m.id)) return false;
+    const isRecent = Date.now() - m.timestamp < 60000; // 1 minute
+    return isRecent;
+  });
+
+  // Merge: server messages first (historical), then recent real-time messages
+  const mergedMessages = [...serverMessages, ...realtimeMessages];
+
+  // Sort by timestamp to maintain chronological order
+  mergedMessages.sort((a, b) => a.timestamp - b.timestamp);
+
+  console.log('[messages] Merged:', serverMessages.length, 'server +', realtimeMessages.length, 'realtime =', mergedMessages.length, 'total');
+  setSessionMessages(sessionId, mergedMessages);
 }
 
 /**

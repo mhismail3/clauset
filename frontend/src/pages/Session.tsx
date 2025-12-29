@@ -143,7 +143,6 @@ export default function SessionPage() {
   const [terminalData, setTerminalData] = createSignal<Uint8Array[]>([]);
   const [resuming, setResuming] = createSignal(false);
   const [mode, setMode] = createSignal<'normal' | 'plan'>('normal');
-  const [isProcessing, setIsProcessing] = createSignal(false);
   const [hookData, setHookData] = createSignal<{
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
@@ -491,6 +490,11 @@ export default function SessionPage() {
         const chatEvent = (msg as unknown as { event: ChatEvent }).event;
         if (chatEvent) {
           handleChatEvent(chatEvent);
+          // Clear streaming state when message completes via chat_event path
+          // This ensures isProcessing() returns false when Claude finishes
+          if (chatEvent.type === 'message_complete') {
+            setCurrentStreamingId(null);
+          }
           scrollToBottom();
         }
         break;
@@ -1057,9 +1061,9 @@ export default function SessionPage() {
 
             {/* Interactive Question Carousel */}
             <Show when={getInteractiveState(params.id).type === 'prompt'}>
-              {() => {
+              {(_) => {
                 const state = getInteractiveState(params.id);
-                if (state.type !== 'prompt') return null;
+                if (state.type !== 'prompt') return <></>;
                 return (
                   <InteractiveCarousel
                     sessionId={params.id}
@@ -1102,9 +1106,9 @@ export default function SessionPage() {
 
             {/* TUI Menu Overlay for /model, /config, etc. */}
             <Show when={getTuiMenuState(params.id).type === 'active'}>
-              {() => {
+              {(_) => {
                 const state = getTuiMenuState(params.id);
-                if (state.type !== 'active') return null;
+                if (state.type !== 'active') return <></>;
                 return (
                   <TuiMenuOverlay
                     sessionId={params.id}
@@ -1136,7 +1140,7 @@ export default function SessionPage() {
             <InputBar
               onSend={handleSendMessage}
               disabled={wsState() !== 'connected' || getInteractiveState(params.id).type === 'prompt' || getTuiMenuState(params.id).type === 'active'}
-              placeholder={session()?.mode === 'terminal' ? 'Type here (output in terminal)...' : 'Message Claude...'}
+              placeholder="Type here..."
               isProcessing={isClaudeProcessing()}
               onInterrupt={handleInterrupt}
             />

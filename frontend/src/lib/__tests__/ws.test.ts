@@ -70,9 +70,10 @@ function simulateClose(wasClean = false, code = 1000) {
   onCloseCallback?.({ wasClean, code });
 }
 
-function simulateError() {
+// Helper function for future tests - void expression prevents unused warning
+void function simulateError() {
   onErrorCallback?.();
-}
+};
 
 // Import after mocking WebSocket
 import { createWebSocketManager } from '../ws';

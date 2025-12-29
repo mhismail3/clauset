@@ -1,6 +1,5 @@
 import { Show, For, createSignal, createEffect, onCleanup } from 'solid-js';
 import {
-  InteractiveQuestion,
   PromptSession,
   setQuestionAnswer,
   setCurrentQuestionIndex,

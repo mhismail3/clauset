@@ -199,12 +199,8 @@ pub async fn handle_websocket(
                             })
                         }
                         ProcessEvent::Exited { session_id: sid, .. } if *sid == session_id => {
-                            // Persist activity data before updating status
-                            state_clone.session_manager.persist_session_activity(session_id).await;
-                            // Update session status
-                            let _ = state_clone
-                                .session_manager
-                                .update_status(session_id, clauset_types::SessionStatus::Stopped);
+                            // NOTE: Database update is handled by event_processor.rs
+                            // We only forward the status change notification to the client
                             Some(WsServerMessage::StatusChange {
                                 session_id,
                                 old_status: clauset_types::SessionStatus::Active,

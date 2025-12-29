@@ -162,6 +162,42 @@ Success criteria:
   - iOS keyboard: Fixed container push-up with visualViewport.offsetTop tracking
 
 ### Now
+- Session Status and Chat Persistence Bug Fixes - **COMPLETE**
+
+### Session Bug Fixes (December 2024)
+Addressing multiple issues reported by user:
+
+1. **InputBar placeholder text overflow** - FIXED
+   - Changed from verbose "Type here (output in terminal)..." to simple "Type here..."
+   - File: `frontend/src/pages/Session.tsx`
+
+2. **Chat message persistence race condition** - FIXED
+   - Problem: `RequestChatHistory` sent before hooks processed, empty array overwrote localStorage
+   - Fix: Added guards against empty arrays, merge real-time messages with server history (60s window)
+   - File: `frontend/src/stores/messages.ts:handleChatHistory()`
+
+3. **Session stuck on "Thinking"** - FIXED (root cause identified and fixed)
+   - **Initial incorrect fix**: Added `mark_session_ready()` in Stop hook - REVERTED (introduced race condition)
+   - **Root cause analysis**: Two message paths exist:
+     1. Direct protocol (`text`, `message_complete`) - called `setCurrentStreamingId(null)` ✅
+     2. ChatEvent wrapper (`chat_event` → `message_complete`) - did NOT clear `currentStreamingId` ❌
+   - **Actual fix**: Added `setCurrentStreamingId(null)` when `message_complete` arrives via `chat_event` path
+   - File: `frontend/src/pages/Session.tsx:488-500`
+   - Backend code was CORRECT - `HookActivityUpdate::stop()` already sets `is_busy=false` atomically
+   - File (reverted): `crates/clauset-server/src/routes/hooks.rs:337-346`
+
+4. **Session incorrectly showing as STOPPED** - FIXED
+   - Problem: Duplicate status updates in websocket.rs and event_processor.rs
+   - Fix: Removed database update from websocket.rs, only event_processor.rs handles it
+   - File: `crates/clauset-server/src/websocket.rs:201-209`
+
+5. **TypeScript compilation errors** - FIXED
+   - Fixed unused variables, Show component syntax, missing type properties
+   - Files: `Session.tsx`, `messages.ts`, `InteractiveCarousel.tsx`, various test files
+
+6. **Terminal extra lines issue** - PENDING (complex buffer dimension normalization)
+
+### Previous
 - Native TUI Menu Support - **COMPLETE** (+ bug fix for parser detection)
 
 ### TUI Menu Parser Bug Fix (Just Completed)

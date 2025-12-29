@@ -335,9 +335,14 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             }
 
             if !stop_hook_active {
-                // Claude finished responding - mark as ready
+                // Claude finished responding - broadcast Ready state
+                // HookActivityUpdate::stop() returns is_busy=false, which update_activity_from_hook
+                // uses to clear the busy flag atomically with the state update
                 let update = HookActivityUpdate::stop();
                 update_activity_from_hook(&state, session_id, update).await;
+                debug!(target: "clauset::hooks", "Session {} marked as ready (Stop hook)", session_id);
+            } else {
+                debug!(target: "clauset::hooks", "Session {} Stop hook active, not marking as ready", session_id);
             }
         }
 

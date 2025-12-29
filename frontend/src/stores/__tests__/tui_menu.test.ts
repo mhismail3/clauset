@@ -6,7 +6,6 @@ import {
   hasActiveTuiMenu,
   getActiveTuiMenu,
   type TuiMenu,
-  type TuiMenuEvent,
 } from '../tui_menu';
 
 describe('TUI Menu Store', () => {

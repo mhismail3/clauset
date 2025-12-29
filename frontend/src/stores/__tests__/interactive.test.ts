@@ -103,7 +103,7 @@ describe('Interactive Store', () => {
               },
             ],
           },
-        };
+        } as unknown as InteractiveEvent; // Cast through unknown to test snake_case conversion
         handleInteractiveEvent(event);
 
         const state = getInteractiveState('session-1');
@@ -128,7 +128,7 @@ describe('Interactive Store', () => {
               },
             ],
           },
-        };
+        } as unknown as InteractiveEvent; // Cast through unknown to test missing multi_select
         handleInteractiveEvent(event);
 
         const state = getInteractiveState('session-1');
@@ -138,7 +138,7 @@ describe('Interactive Store', () => {
       });
 
       it('stores question options correctly', () => {
-        const prompt = setupPromptSession('session-1');
+        setupPromptSession('session-1');
         const state = getInteractiveState('session-1');
 
         if (state.type === 'prompt') {
