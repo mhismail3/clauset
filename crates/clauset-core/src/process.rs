@@ -347,6 +347,13 @@ impl ProcessManager {
             debug!(target: "clauset::process", "Using model: {}", model);
         }
 
+        // Pass the initial prompt as a positional argument (like: claude "prompt")
+        // This is the simple, reliable way to start Claude with a prompt
+        if !opts.prompt.is_empty() {
+            cmd.arg(&opts.prompt);
+            debug!(target: "clauset::process", "Passing initial prompt as CLI argument: {}", opts.prompt);
+        }
+
         // Set environment variables for Clauset hooks integration
         // These allow the hook script to identify which session and where to send events
         cmd.env("CLAUSET_SESSION_ID", opts.session_id.to_string());
@@ -380,21 +387,15 @@ impl ProcessManager {
             .map_err(|e| ClausetError::PtyError(e.to_string()))?;
 
         let writer = Arc::new(std::sync::Mutex::new(writer));
-        let writer_clone = writer.clone();
 
         let session_id = opts.session_id;
         let tx = event_tx.clone();
-        let initial_prompt = opts.prompt.clone();
 
         // Reader thread (PTY reading is blocking)
+        // Note: Initial prompt is now passed as CLI argument, no PTY-based prompt sending needed
         let handle = std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
             debug!(target: "clauset::process", "PTY reader thread started for session {}", session_id);
-
-            // Track if we've sent the initial prompt
-            let mut prompt_sent = initial_prompt.is_empty();
-            let mut total_bytes = 0usize;
-            let mut accumulated_output = String::new();
 
             loop {
                 // Check shutdown signal before each read
@@ -409,50 +410,14 @@ impl ProcessManager {
                         break;
                     }
                     Ok(n) => {
-                        total_bytes += n;
                         let output_str = String::from_utf8_lossy(&buf[..n]);
-                        trace!(target: "clauset::process", "PTY output ({} bytes, total {}): {}", n, total_bytes,
+                        trace!(target: "clauset::process", "PTY output ({} bytes): {}", n,
                               output_str.chars().take(200).collect::<String>());
 
                         let _ = tx.send(ProcessEvent::TerminalOutput {
                             session_id,
                             data: buf[..n].to_vec(),
                         });
-
-                        // Accumulate output to detect Claude's ready prompt
-                        if !prompt_sent {
-                            accumulated_output.push_str(&output_str);
-
-                            // Claude Code shows a prompt indicator when ready for input
-                            // Look for common prompt patterns: "> ", "❯ ", or after seeing
-                            // enough output indicating Claude has started
-                            let ready = accumulated_output.contains("> ")
-                                || accumulated_output.contains("❯ ")
-                                || accumulated_output.contains("claude")
-                                || total_bytes > 500;
-
-                            if ready {
-                                // Wait a bit longer to ensure Claude is fully ready
-                                std::thread::sleep(Duration::from_millis(800));
-                                if let Ok(mut w) = writer_clone.lock() {
-                                    // Trim any trailing whitespace/newlines from prompt
-                                    let prompt_text = initial_prompt.trim();
-
-                                    // Send the prompt text
-                                    let _ = w.write_all(prompt_text.as_bytes());
-                                    let _ = w.flush();
-
-                                    // Delay between text and Enter - TUI needs Enter as separate event
-                                    std::thread::sleep(Duration::from_millis(100));
-
-                                    // Send Enter key to execute (carriage return)
-                                    let _ = w.write_all(b"\r");
-                                    let _ = w.flush();
-                                    debug!(target: "clauset::process", "Sent initial prompt to Claude: {}", prompt_text);
-                                }
-                                prompt_sent = true;
-                            }
-                        }
                     }
                     Err(e) => {
                         // Don't log error if we're shutting down (expected)

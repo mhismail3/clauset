@@ -141,7 +141,7 @@ impl SessionManager {
 
     /// Start a session (spawn Claude process).
     pub async fn start_session(&self, session_id: Uuid, prompt: &str) -> Result<()> {
-        debug!(target: "clauset::session", "Starting session {} with prompt: {}", session_id, prompt);
+        info!(target: "clauset::session", "Starting session {} with prompt: {}", session_id, prompt);
 
         let session = self
             .db
@@ -151,7 +151,7 @@ impl SessionManager {
         // Update status to starting
         self.db.update_status(session_id, SessionStatus::Starting)?;
 
-        // Spawn process
+        // Spawn process - prompt is passed as CLI argument (like: claude "prompt")
         let spawn_result = self
             .process_manager
             .spawn(
