@@ -441,40 +441,41 @@ fn extract_text_content(content: &Value) -> String {
 }
 
 /// Convert a TranscriptEvent to a ChatEvent for WebSocket broadcast.
+///
+/// Note: Message lifecycle (create/complete) is handled by hooks, not transcript watcher.
+/// The transcript watcher only provides real-time content streaming.
+/// - AssistantTurnStart: Skipped (UserPromptSubmit hook creates the message)
+/// - AssistantTurnEnd: Skipped (Stop hook completes the message)
+/// - UserMessage: Skipped (UserPromptSubmit hook handles this)
+///
+/// Content events (Thinking, Text, ToolUse, ToolResult) are emitted with Claude's
+/// message ID. The caller is responsible for remapping to the internal message ID.
 pub fn transcript_event_to_chat_event(
     session_id: Uuid,
     event: TranscriptEvent,
 ) -> Option<ChatEvent> {
     match event {
-        TranscriptEvent::UserMessage {
-            message_id,
-            content,
-            timestamp,
-        } => {
-            let mut message = ChatMessage::user(session_id, content);
-            message.id = message_id;
-            message.timestamp = timestamp;
-            Some(ChatEvent::Message { session_id, message })
-        }
-        TranscriptEvent::AssistantTurnStart {
-            message_id,
-            timestamp,
-        } => {
-            let mut message = ChatMessage::assistant(session_id);
-            message.id = message_id;
-            message.timestamp = timestamp;
-            Some(ChatEvent::Message { session_id, message })
-        }
+        // User messages are handled by UserPromptSubmit hook - skip to avoid duplicates
+        TranscriptEvent::UserMessage { .. } => None,
+
+        // Assistant message creation is handled by UserPromptSubmit hook - skip to avoid duplicates
+        TranscriptEvent::AssistantTurnStart { .. } => None,
+
+        // Thinking content - emit delta (message_id will be remapped by caller)
         TranscriptEvent::Thinking { message_id, content } => Some(ChatEvent::ThinkingDelta {
             session_id,
             message_id,
             delta: content,
         }),
+
+        // Text content - emit delta (message_id will be remapped by caller)
         TranscriptEvent::Text { message_id, content } => Some(ChatEvent::ContentDelta {
             session_id,
             message_id,
             delta: content,
         }),
+
+        // Tool use events - emit for real-time tracking (message_id will be remapped by caller)
         TranscriptEvent::ToolUse {
             message_id,
             tool_use_id,
@@ -488,6 +489,8 @@ pub fn transcript_event_to_chat_event(
                 tool_call,
             })
         }
+
+        // Tool result events - emit for real-time tracking (message_id will be remapped by caller)
         TranscriptEvent::ToolResult {
             message_id,
             tool_use_id,
@@ -507,10 +510,9 @@ pub fn transcript_event_to_chat_event(
                 is_error,
             })
         }
-        TranscriptEvent::AssistantTurnEnd { message_id } => Some(ChatEvent::MessageComplete {
-            session_id,
-            message_id,
-        }),
+
+        // Message completion is handled by Stop hook - skip to avoid duplicates
+        TranscriptEvent::AssistantTurnEnd { .. } => None,
     }
 }
 
@@ -540,21 +542,51 @@ mod tests {
     fn test_transcript_event_to_chat_event() {
         let session_id = Uuid::new_v4();
 
-        // Test user message conversion
+        // User messages are now skipped (handled by hooks)
         let event = TranscriptEvent::UserMessage {
             message_id: "user-123".to_string(),
             content: "Hello".to_string(),
             timestamp: 1234567890,
         };
-        let chat_event = transcript_event_to_chat_event(session_id, event).unwrap();
-        assert!(matches!(chat_event, ChatEvent::Message { .. }));
+        assert!(transcript_event_to_chat_event(session_id, event).is_none());
 
-        // Test thinking delta conversion
+        // Assistant turn start is skipped (handled by hooks)
+        let event = TranscriptEvent::AssistantTurnStart {
+            message_id: "msg-123".to_string(),
+            timestamp: 1234567890,
+        };
+        assert!(transcript_event_to_chat_event(session_id, event).is_none());
+
+        // Assistant turn end is skipped (handled by hooks)
+        let event = TranscriptEvent::AssistantTurnEnd {
+            message_id: "msg-123".to_string(),
+        };
+        assert!(transcript_event_to_chat_event(session_id, event).is_none());
+
+        // Test thinking delta conversion (still emitted)
         let event = TranscriptEvent::Thinking {
             message_id: "msg-123".to_string(),
             content: "Let me think...".to_string(),
         };
         let chat_event = transcript_event_to_chat_event(session_id, event).unwrap();
         assert!(matches!(chat_event, ChatEvent::ThinkingDelta { .. }));
+
+        // Test text delta conversion (still emitted)
+        let event = TranscriptEvent::Text {
+            message_id: "msg-123".to_string(),
+            content: "Here is my response".to_string(),
+        };
+        let chat_event = transcript_event_to_chat_event(session_id, event).unwrap();
+        assert!(matches!(chat_event, ChatEvent::ContentDelta { .. }));
+
+        // Test tool use conversion (still emitted)
+        let event = TranscriptEvent::ToolUse {
+            message_id: "msg-123".to_string(),
+            tool_use_id: "tool_abc".to_string(),
+            name: "Read".to_string(),
+            input: serde_json::json!({"path": "/test.txt"}),
+        };
+        let chat_event = transcript_event_to_chat_event(session_id, event).unwrap();
+        assert!(matches!(chat_event, ChatEvent::ToolCallStart { .. }));
     }
 }

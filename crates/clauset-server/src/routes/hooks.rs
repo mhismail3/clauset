@@ -5,9 +5,9 @@
 
 use crate::state::AppState;
 use axum::{extract::State, http::StatusCode, Json};
-use clauset_core::{ProcessEvent, RecentAction};
+use clauset_core::{ChatProcessor, ProcessEvent, RecentAction};
 use clauset_types::{
-    HookActivityUpdate, HookEvent, HookEventPayload, HookEventType,
+    ChatEvent, HookActivityUpdate, HookEvent, HookEventPayload, HookEventType,
     InteractiveEvent, InteractivePrompt, InteractiveQuestion, QuestionOption, SessionStatus,
 };
 use serde::Serialize;
@@ -120,11 +120,18 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 info!(target: "clauset::hooks", "Starting transcript watcher for session {} at {}", session_id, path);
                 match state.chat_processor.start_transcript_watcher(session_id, &path) {
                     Ok(mut event_rx) => {
-                        // Spawn task to broadcast transcript events
+                        // Spawn task to broadcast transcript events with message ID remapping
                         let session_manager = state.session_manager.clone();
+                        let chat_processor = state.chat_processor.clone();
                         tokio::spawn(async move {
                             while let Some(chat_event) = event_rx.recv().await {
-                                let _ = session_manager.broadcast_event(ProcessEvent::Chat(chat_event));
+                                // Remap message IDs from Claude's IDs to our internal IDs
+                                let remapped_event = remap_chat_event_message_id(
+                                    chat_event,
+                                    session_id,
+                                    &chat_processor,
+                                ).await;
+                                let _ = session_manager.broadcast_event(ProcessEvent::Chat(remapped_event));
                             }
                             debug!(target: "clauset::hooks", "Transcript watcher event loop ended for session {}", session_id);
                         });
@@ -811,5 +818,68 @@ fn parse_ask_user_question(input: &Value) -> Option<Vec<InteractiveQuestion>> {
         None
     } else {
         Some(parsed)
+    }
+}
+
+/// Remap message IDs in chat events from Claude's IDs to our internal IDs.
+///
+/// Transcript events use Claude's message IDs (like `msg_015LzU...`), but our
+/// message lifecycle uses internal IDs (like `assistant-{uuid}`). This function
+/// looks up the current assistant message ID for the session and remaps the
+/// event's message_id to match.
+async fn remap_chat_event_message_id(
+    event: ChatEvent,
+    session_id: uuid::Uuid,
+    chat_processor: &Arc<ChatProcessor>,
+) -> ChatEvent {
+    // Get the current assistant message ID for this session
+    let internal_id = match chat_processor.get_current_assistant_message_id(session_id).await {
+        Some(id) => id,
+        None => {
+            // No current message - return event unchanged
+            // This can happen if the message hasn't been created yet
+            debug!(
+                target: "clauset::hooks",
+                "No current assistant message for session {}, using original ID",
+                session_id
+            );
+            return event;
+        }
+    };
+
+    // Remap the message_id in content delta events
+    match event {
+        ChatEvent::ContentDelta { session_id, delta, .. } => {
+            ChatEvent::ContentDelta {
+                session_id,
+                message_id: internal_id,
+                delta,
+            }
+        }
+        ChatEvent::ThinkingDelta { session_id, delta, .. } => {
+            ChatEvent::ThinkingDelta {
+                session_id,
+                message_id: internal_id,
+                delta,
+            }
+        }
+        ChatEvent::ToolCallStart { session_id, tool_call, .. } => {
+            ChatEvent::ToolCallStart {
+                session_id,
+                message_id: internal_id,
+                tool_call,
+            }
+        }
+        ChatEvent::ToolCallComplete { session_id, tool_call_id, output, is_error, .. } => {
+            ChatEvent::ToolCallComplete {
+                session_id,
+                message_id: internal_id,
+                tool_call_id,
+                output,
+                is_error,
+            }
+        }
+        // Other event types pass through unchanged
+        other => other,
     }
 }

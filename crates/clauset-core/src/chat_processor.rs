@@ -264,56 +264,64 @@ impl ChatProcessor {
                     return events;
                 }
 
+                // Check if transcript watcher is active for this session
+                // If so, content streaming is handled by the watcher - we only send MessageComplete
+                let watcher_active = self.has_transcript_watcher(*session_id).await;
+                info!(target: "clauset::chat", "Transcript watcher active: {}", watcher_active);
+
                 let mut sessions = self.sessions.write().await;
                 let state = sessions.entry(*session_id).or_insert_with(SessionChatState::new);
 
                 info!(target: "clauset::chat", "Current message exists: {}", state.current_message.is_some());
 
-                // Read Claude's response from transcript file
-                if let Some(path) = transcript_path {
-                    info!(target: "clauset::chat", "Reading transcript from: {}", path);
-                    match read_last_assistant_response(path) {
-                        Ok(response) => {
-                            info!(target: "clauset::chat", "Transcript read: {} text chars, {} thinking chars", response.text.len(), response.thinking.len());
+                // Only read and send content from transcript if watcher is NOT active
+                // (watcher handles real-time content streaming, this is a fallback)
+                if !watcher_active {
+                    if let Some(path) = transcript_path {
+                        info!(target: "clauset::chat", "Reading transcript from: {} (watcher not active)", path);
+                        match read_last_assistant_response(path) {
+                            Ok(response) => {
+                                info!(target: "clauset::chat", "Transcript read: {} text chars, {} thinking chars", response.text.len(), response.thinking.len());
 
-                            if let Some(msg) = &mut state.current_message {
-                                info!(target: "clauset::chat", "Current message content: {} chars", msg.content.len());
+                                if let Some(msg) = &mut state.current_message {
+                                    info!(target: "clauset::chat", "Current message content: {} chars", msg.content.len());
 
-                                // Add thinking content if available
-                                if !response.thinking.is_empty() {
-                                    msg.append_thinking(&response.thinking);
-                                    self.persist_message(msg);
-                                    events.push(ChatEvent::ThinkingDelta {
-                                        session_id: *session_id,
-                                        message_id: msg.id.clone(),
-                                        delta: response.thinking,
-                                    });
-                                    info!(target: "clauset::chat", "Added ThinkingDelta event");
+                                    // Add thinking content if available
+                                    if !response.thinking.is_empty() {
+                                        msg.append_thinking(&response.thinking);
+                                        self.persist_message(msg);
+                                        events.push(ChatEvent::ThinkingDelta {
+                                            session_id: *session_id,
+                                            message_id: msg.id.clone(),
+                                            delta: response.thinking,
+                                        });
+                                        info!(target: "clauset::chat", "Added ThinkingDelta event");
+                                    }
+
+                                    // Add text content
+                                    if !response.text.is_empty() {
+                                        msg.append_content(&response.text);
+                                        self.persist_message(msg);
+                                        events.push(ChatEvent::ContentDelta {
+                                            session_id: *session_id,
+                                            message_id: msg.id.clone(),
+                                            delta: response.text,
+                                        });
+                                        info!(target: "clauset::chat", "Added ContentDelta event");
+                                    }
+                                } else {
+                                    info!(target: "clauset::chat", "No current message to update");
                                 }
-
-                                // Only add text content if message is currently empty (no streamed content)
-                                if msg.content.is_empty() && !response.text.is_empty() {
-                                    msg.append_content(&response.text);
-                                    self.persist_message(msg);
-                                    events.push(ChatEvent::ContentDelta {
-                                        session_id: *session_id,
-                                        message_id: msg.id.clone(),
-                                        delta: response.text,
-                                    });
-                                    info!(target: "clauset::chat", "Added ContentDelta event");
-                                } else if !msg.content.is_empty() {
-                                    info!(target: "clauset::chat", "Message already has content, skipping text");
-                                }
-                            } else {
-                                info!(target: "clauset::chat", "No current message to update");
+                            }
+                            Err(e) => {
+                                info!(target: "clauset::chat", "Failed to read transcript: {}", e);
                             }
                         }
-                        Err(e) => {
-                            info!(target: "clauset::chat", "Failed to read transcript: {}", e);
-                        }
+                    } else {
+                        info!(target: "clauset::chat", "No transcript_path provided");
                     }
                 } else {
-                    info!(target: "clauset::chat", "No transcript_path provided");
+                    info!(target: "clauset::chat", "Transcript watcher active, skipping content read (watcher handles streaming)");
                 }
 
                 // Finalize current assistant message
@@ -522,6 +530,18 @@ impl ChatProcessor {
     pub async fn has_transcript_watcher(&self, session_id: Uuid) -> bool {
         let watchers = self.transcript_watchers.read().await;
         watchers.contains_key(&session_id)
+    }
+
+    /// Get the current streaming assistant message ID for a session.
+    ///
+    /// This is used to remap message IDs from transcript events (which use Claude's
+    /// message IDs) to our internal message IDs.
+    pub async fn get_current_assistant_message_id(&self, session_id: Uuid) -> Option<String> {
+        let sessions = self.sessions.read().await;
+        sessions
+            .get(&session_id)
+            .and_then(|state| state.current_message.as_ref())
+            .map(|msg| msg.id.clone())
     }
 }
 
