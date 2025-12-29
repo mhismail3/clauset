@@ -2015,6 +2015,7 @@ impl InteractionStore {
                     clauset_types::ChatRole::Assistant
                 },
                 content,
+                thinking_content: None,
                 tool_calls,
                 is_streaming: is_streaming != 0,
                 is_complete: is_complete != 0,

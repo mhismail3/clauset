@@ -45,6 +45,109 @@ function StreamingIndicator() {
   );
 }
 
+/**
+ * Collapsible thinking block component.
+ * Shows Claude's intermediate reasoning with a preview that expands to full content.
+ */
+function ThinkingBlock(props: { content: string }) {
+  const [expanded, setExpanded] = createSignal(false);
+
+  const preview = () => {
+    const text = props.content.replace(/\n/g, ' ').trim();
+    return text.length > 60 ? text.slice(0, 60) + '...' : text;
+  };
+
+  return (
+    <div
+      style={{
+        "border-radius": '8px',
+        border: '1px solid var(--color-bg-overlay)',
+        background: 'var(--color-bg-surface)',
+        overflow: 'hidden',
+        "border-left": '3px solid var(--color-text-muted)',
+        "margin-bottom": '8px',
+      }}
+    >
+      <button
+        onClick={() => setExpanded(!expanded())}
+        style={{
+          width: '100%',
+          display: 'flex',
+          "align-items": 'center',
+          gap: '8px',
+          padding: '6px 10px',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          "text-align": 'left',
+        }}
+        class="pressable"
+      >
+        <span style={{ color: 'var(--color-text-muted)', "font-size": '12px' }}>💭</span>
+        <span
+          class="text-mono"
+          style={{
+            color: 'var(--color-text-muted)',
+            "font-size": '11px',
+            "font-style": 'italic',
+          }}
+        >
+          thinking
+        </span>
+        <span
+          style={{
+            flex: '1',
+            overflow: 'hidden',
+            "text-overflow": 'ellipsis',
+            "white-space": 'nowrap',
+            color: 'var(--color-text-muted)',
+            "font-size": '12px',
+            "font-style": 'italic',
+          }}
+        >
+          {preview()}
+        </span>
+        {/* Chevron icon */}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style={{
+            color: 'var(--color-text-muted)',
+            "flex-shrink": '0',
+            transform: expanded() ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.15s ease',
+          }}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      <Show when={expanded()}>
+        <pre
+          style={{
+            padding: '8px 10px',
+            "border-top": '1px solid var(--color-bg-overlay)',
+            "font-size": '12px',
+            color: 'var(--color-text-secondary)',
+            "white-space": 'pre-wrap',
+            "word-break": 'break-word',
+            margin: 0,
+            "font-family": 'var(--font-mono)',
+            "max-height": '300px',
+            "overflow-y": 'auto',
+          }}
+        >
+          {props.content}
+        </pre>
+      </Show>
+    </div>
+  );
+}
+
 interface MessageBubbleProps {
   message: Message;
   /** Callback to send permission response (for permission_request system messages) */
@@ -356,6 +459,11 @@ export function MessageBubble(props: MessageBubbleProps) {
             </div>
             <span class="text-mono" style={{ "font-size": '13px' }}>Thinking...</span>
           </div>
+        </Show>
+
+        {/* Thinking Content - Claude's reasoning/intermediate thoughts */}
+        <Show when={props.message.thinkingContent}>
+          <ThinkingBlock content={props.message.thinkingContent!} />
         </Show>
 
         {/* Tool Calls */}

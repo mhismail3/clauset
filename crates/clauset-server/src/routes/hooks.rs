@@ -111,9 +111,30 @@ pub async fn receive(
 async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match event {
         HookEvent::SessionStart {
-            session_id, source, ..
+            session_id, source, transcript_path, ..
         } => {
             info!(target: "clauset::hooks", "Session {} started (source: {})", session_id, source);
+
+            // Start transcript watcher for real-time content streaming
+            if let Some(path) = transcript_path {
+                info!(target: "clauset::hooks", "Starting transcript watcher for session {} at {}", session_id, path);
+                match state.chat_processor.start_transcript_watcher(session_id, &path) {
+                    Ok(mut event_rx) => {
+                        // Spawn task to broadcast transcript events
+                        let session_manager = state.session_manager.clone();
+                        tokio::spawn(async move {
+                            while let Some(chat_event) = event_rx.recv().await {
+                                let _ = session_manager.broadcast_event(ProcessEvent::Chat(chat_event));
+                            }
+                            debug!(target: "clauset::hooks", "Transcript watcher event loop ended for session {}", session_id);
+                        });
+                    }
+                    Err(e) => {
+                        warn!(target: "clauset::hooks", "Failed to start transcript watcher for session {}: {}", session_id, e);
+                    }
+                }
+            }
+
             // Confirm Ready state - session is initialized when spawned but this reinforces it
             // This ensures the dashboard shows Ready after Claude fully starts
             let update = HookActivityUpdate::stop(); // "stop" = Ready state
@@ -124,6 +145,10 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             session_id, reason, ..
         } => {
             info!(target: "clauset::hooks", "Session {} ended (reason: {})", session_id, reason);
+
+            // Stop transcript watcher
+            state.chat_processor.stop_transcript_watcher(session_id).await;
+
             // Persist activity data before updating status
             state.session_manager.persist_session_activity(session_id).await;
             let _ = state.session_manager.update_status(session_id, SessionStatus::Stopped);

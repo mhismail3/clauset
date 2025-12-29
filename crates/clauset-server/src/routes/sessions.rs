@@ -346,6 +346,7 @@ pub async fn import_session(
                 clauset_types::ChatRole::Assistant
             },
             content: msg.content.clone(),
+            thinking_content: None,
             tool_calls: Vec::new(),
             is_streaming: false,
             is_complete: true,

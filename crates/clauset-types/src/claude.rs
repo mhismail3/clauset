@@ -71,6 +71,8 @@ pub struct AssistantMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     Text { text: String },
+    /// Claude's internal reasoning/thinking (extended thinking or regular thinking)
+    Thinking { thinking: String },
     ToolUse {
         id: String,
         name: String,

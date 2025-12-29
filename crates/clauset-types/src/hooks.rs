@@ -276,6 +276,8 @@ pub enum HookEvent {
         cwd: Option<String>,
         context_window: Option<ContextWindow>,
         model: Option<ModelInfo>,
+        /// Path to the JSONL transcript file (for real-time content streaming)
+        transcript_path: Option<String>,
     },
 
     /// Session ended
@@ -394,6 +396,7 @@ impl TryFrom<HookEventPayload> for HookEvent {
                 cwd: p.cwd,
                 context_window: p.context_window,
                 model: p.model,
+                transcript_path: p.transcript_path,
             }),
 
             "SessionEnd" => Ok(HookEvent::SessionEnd {

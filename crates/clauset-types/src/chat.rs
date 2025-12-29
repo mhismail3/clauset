@@ -18,6 +18,9 @@ pub struct ChatMessage {
     pub role: ChatRole,
     /// Message text content (may be partial during streaming)
     pub content: String,
+    /// Claude's thinking/reasoning content (separate from response)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_content: Option<String>,
     /// Tool calls made during this assistant message
     #[serde(default)]
     pub tool_calls: Vec<ChatToolCall>,
@@ -69,6 +72,7 @@ impl ChatMessage {
             session_id,
             role: ChatRole::User,
             content,
+            thinking_content: None,
             tool_calls: Vec::new(),
             is_streaming: false,
             is_complete: true,
@@ -83,10 +87,19 @@ impl ChatMessage {
             session_id,
             role: ChatRole::Assistant,
             content: String::new(),
+            thinking_content: None,
             tool_calls: Vec::new(),
             is_streaming: true,
             is_complete: false,
             timestamp: now_ms(),
+        }
+    }
+
+    /// Append thinking content to a streaming message.
+    pub fn append_thinking(&mut self, delta: &str) {
+        match &mut self.thinking_content {
+            Some(content) => content.push_str(delta),
+            None => self.thinking_content = Some(delta.to_string()),
         }
     }
 
@@ -139,6 +152,12 @@ pub enum ChatEvent {
     },
     /// Content was appended to a streaming message
     ContentDelta {
+        session_id: Uuid,
+        message_id: String,
+        delta: String,
+    },
+    /// Thinking content was appended to a streaming message
+    ThinkingDelta {
         session_id: Uuid,
         message_id: String,
         delta: String,

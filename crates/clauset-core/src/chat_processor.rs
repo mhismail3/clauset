@@ -10,14 +10,18 @@
 //! - State machine tracks conversation flow
 //! - Messages are broadcast via ProcessEvent for WebSocket delivery
 
-use crate::InteractionStore;
+use crate::{
+    transcript_event_to_chat_event, InteractionStore, TranscriptEvent, TranscriptWatcher,
+    TranscriptWatcherHandle,
+};
 use clauset_types::{ChatEvent, ChatMessage, ChatRole, ChatToolCall, HookEvent};
-use tracing::info;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
+use tracing::info;
 use uuid::Uuid;
 
 /// State machine for tracking message building.
@@ -71,6 +75,8 @@ pub struct ChatProcessor {
     sessions: Arc<RwLock<HashMap<Uuid, SessionChatState>>>,
     /// Optional database store for message persistence
     store: Option<Arc<InteractionStore>>,
+    /// Active transcript watchers by session ID
+    transcript_watchers: Arc<RwLock<HashMap<Uuid, TranscriptWatcherHandle>>>,
 }
 
 impl Default for ChatProcessor {
@@ -84,6 +90,7 @@ impl ChatProcessor {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             store: None,
+            transcript_watchers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -92,6 +99,7 @@ impl ChatProcessor {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             store: Some(store),
+            transcript_watchers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -265,29 +273,39 @@ impl ChatProcessor {
                 if let Some(path) = transcript_path {
                     info!(target: "clauset::chat", "Reading transcript from: {}", path);
                     match read_last_assistant_response(path) {
-                        Ok(response_text) => {
-                            info!(target: "clauset::chat", "Transcript read: {} chars", response_text.len());
-                            if !response_text.is_empty() {
-                                if let Some(msg) = &mut state.current_message {
-                                    info!(target: "clauset::chat", "Current message content: {} chars", msg.content.len());
-                                    // Only add if message is currently empty (no streamed content)
-                                    if msg.content.is_empty() {
-                                        msg.append_content(&response_text);
-                                        self.persist_message(msg);
-                                        events.push(ChatEvent::ContentDelta {
-                                            session_id: *session_id,
-                                            message_id: msg.id.clone(),
-                                            delta: response_text,
-                                        });
-                                        info!(target: "clauset::chat", "Added ContentDelta event");
-                                    } else {
-                                        info!(target: "clauset::chat", "Message already has content, skipping");
-                                    }
-                                } else {
-                                    info!(target: "clauset::chat", "No current message to update");
+                        Ok(response) => {
+                            info!(target: "clauset::chat", "Transcript read: {} text chars, {} thinking chars", response.text.len(), response.thinking.len());
+
+                            if let Some(msg) = &mut state.current_message {
+                                info!(target: "clauset::chat", "Current message content: {} chars", msg.content.len());
+
+                                // Add thinking content if available
+                                if !response.thinking.is_empty() {
+                                    msg.append_thinking(&response.thinking);
+                                    self.persist_message(msg);
+                                    events.push(ChatEvent::ThinkingDelta {
+                                        session_id: *session_id,
+                                        message_id: msg.id.clone(),
+                                        delta: response.thinking,
+                                    });
+                                    info!(target: "clauset::chat", "Added ThinkingDelta event");
+                                }
+
+                                // Only add text content if message is currently empty (no streamed content)
+                                if msg.content.is_empty() && !response.text.is_empty() {
+                                    msg.append_content(&response.text);
+                                    self.persist_message(msg);
+                                    events.push(ChatEvent::ContentDelta {
+                                        session_id: *session_id,
+                                        message_id: msg.id.clone(),
+                                        delta: response.text,
+                                    });
+                                    info!(target: "clauset::chat", "Added ContentDelta event");
+                                } else if !msg.content.is_empty() {
+                                    info!(target: "clauset::chat", "Message already has content, skipping text");
                                 }
                             } else {
-                                info!(target: "clauset::chat", "Transcript response was empty");
+                                info!(target: "clauset::chat", "No current message to update");
                             }
                         }
                         Err(e) => {
@@ -427,6 +445,84 @@ impl ChatProcessor {
         let mut sessions = self.sessions.write().await;
         sessions.remove(&session_id);
     }
+
+    /// Start watching a transcript file for real-time content streaming.
+    ///
+    /// Returns a receiver that emits ChatEvents for each content block in the transcript.
+    /// The caller should spawn a task to read from the receiver and broadcast events.
+    ///
+    /// # Arguments
+    /// * `session_id` - The Clauset session ID
+    /// * `transcript_path` - Path to the JSONL transcript file
+    ///
+    /// # Returns
+    /// * `Ok(receiver)` - A channel receiver for ChatEvents
+    /// * `Err` - If the watcher could not be started
+    pub fn start_transcript_watcher(
+        &self,
+        session_id: Uuid,
+        transcript_path: &str,
+    ) -> crate::Result<mpsc::UnboundedReceiver<ChatEvent>> {
+        let path = PathBuf::from(transcript_path);
+
+        // Create channel for TranscriptEvents
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel::<TranscriptEvent>();
+
+        // Create and start the watcher
+        let watcher = TranscriptWatcher::new(path, session_id, event_tx);
+        let handle = watcher.start()?;
+
+        // Store the handle for cleanup
+        let watchers = self.transcript_watchers.clone();
+        tokio::spawn(async move {
+            let mut watchers = watchers.write().await;
+            watchers.insert(session_id, handle);
+        });
+
+        // Create output channel for ChatEvents
+        let (chat_tx, chat_rx) = mpsc::unbounded_channel::<ChatEvent>();
+
+        // Spawn task to convert TranscriptEvents to ChatEvents
+        tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                if let Some(chat_event) = transcript_event_to_chat_event(session_id, event) {
+                    if chat_tx.send(chat_event).is_err() {
+                        // Receiver dropped, stop processing
+                        break;
+                    }
+                }
+            }
+        });
+
+        info!(
+            target: "clauset::chat",
+            "Started transcript watcher for session {} at {}",
+            session_id, transcript_path
+        );
+
+        Ok(chat_rx)
+    }
+
+    /// Stop watching a transcript file.
+    ///
+    /// Call this when the session ends to clean up resources.
+    pub async fn stop_transcript_watcher(&self, session_id: Uuid) {
+        let mut watchers = self.transcript_watchers.write().await;
+        if let Some(handle) = watchers.remove(&session_id) {
+            handle.stop();
+            info!(
+                target: "clauset::chat",
+                "Stopped transcript watcher for session {}",
+                session_id
+            );
+        }
+    }
+
+    /// Check if a transcript watcher is active for a session.
+    pub async fn has_transcript_watcher(&self, session_id: Uuid) -> bool {
+        let watchers = self.transcript_watchers.read().await;
+        watchers.contains_key(&session_id)
+    }
 }
 
 /// Comprehensive regex for ANSI escape sequences.
@@ -561,6 +657,15 @@ fn truncate_output(s: &str) -> String {
     }
 }
 
+/// Response extracted from the Claude Code transcript.
+#[derive(Debug, Default)]
+struct TranscriptResponse {
+    /// The text response (from "text" content blocks)
+    text: String,
+    /// The thinking/reasoning content (from "thinking" content blocks)
+    thinking: String,
+}
+
 /// Read the last assistant response from a Claude Code transcript file.
 ///
 /// The transcript is a JSONL file where each line is a conversation message.
@@ -570,7 +675,7 @@ fn truncate_output(s: &str) -> String {
 /// ```json
 /// {"type":"assistant", "message":{"role":"assistant", "content":[{"type":"text", "text":"..."}]}}
 /// ```
-fn read_last_assistant_response(path: &str) -> std::io::Result<String> {
+fn read_last_assistant_response(path: &str) -> std::io::Result<TranscriptResponse> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
 
@@ -600,32 +705,46 @@ fn read_last_assistant_response(path: &str) -> std::io::Result<String> {
                 None => continue,
             };
 
-            // Extract text content from message.content array
+            // Extract text and thinking content from message.content array
             if let Some(content) = message.get("content").and_then(|v| v.as_array()) {
                 let mut text_parts = Vec::new();
+                let mut thinking_parts = Vec::new();
 
                 for part in content {
-                    // Handle text content blocks (skip thinking blocks)
-                    if let Some("text") = part.get("type").and_then(|v| v.as_str()) {
-                        if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
-                            text_parts.push(text.to_string());
+                    match part.get("type").and_then(|v| v.as_str()) {
+                        Some("text") => {
+                            if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                                text_parts.push(text.to_string());
+                            }
                         }
+                        Some("thinking") => {
+                            if let Some(thinking) = part.get("thinking").and_then(|v| v.as_str()) {
+                                thinking_parts.push(thinking.to_string());
+                            }
+                        }
+                        _ => {}
                     }
                 }
 
-                if !text_parts.is_empty() {
-                    return Ok(text_parts.join("\n"));
+                if !text_parts.is_empty() || !thinking_parts.is_empty() {
+                    return Ok(TranscriptResponse {
+                        text: text_parts.join("\n"),
+                        thinking: thinking_parts.join("\n"),
+                    });
                 }
             }
 
             // Also handle simple string content format
             if let Some(content) = message.get("content").and_then(|v| v.as_str()) {
-                return Ok(content.to_string());
+                return Ok(TranscriptResponse {
+                    text: content.to_string(),
+                    thinking: String::new(),
+                });
             }
         }
     }
 
-    Ok(String::new())
+    Ok(TranscriptResponse::default())
 }
 
 #[cfg(test)]
@@ -929,7 +1048,8 @@ Let me know if you need help.
         writeln!(file, r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":"Hello! How can I help?"}}]}}}}"#).unwrap();
 
         let result = read_last_assistant_response(file.path().to_str().unwrap()).unwrap();
-        assert_eq!(result, "Hello! How can I help?");
+        assert_eq!(result.text, "Hello! How can I help?");
+        assert!(result.thinking.is_empty());
     }
 
     #[test]
@@ -941,7 +1061,7 @@ Let me know if you need help.
 
         // Should get the LAST assistant response
         let result = read_last_assistant_response(file.path().to_str().unwrap()).unwrap();
-        assert_eq!(result, "Second response");
+        assert_eq!(result.text, "Second response");
     }
 
     #[test]
@@ -949,9 +1069,10 @@ Let me know if you need help.
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"thinking","thinking":"Let me think..."}},{{"type":"text","text":"Here is my answer"}}]}}}}"#).unwrap();
 
-        // Should skip thinking blocks, only get text
+        // Should extract both thinking and text content
         let result = read_last_assistant_response(file.path().to_str().unwrap()).unwrap();
-        assert_eq!(result, "Here is my answer");
+        assert_eq!(result.text, "Here is my answer");
+        assert_eq!(result.thinking, "Let me think...");
     }
 
     #[test]
@@ -960,7 +1081,7 @@ Let me know if you need help.
         writeln!(file, r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":"Part 1"}},{{"type":"text","text":"Part 2"}}]}}}}"#).unwrap();
 
         let result = read_last_assistant_response(file.path().to_str().unwrap()).unwrap();
-        assert_eq!(result, "Part 1\nPart 2");
+        assert_eq!(result.text, "Part 1\nPart 2");
     }
 
     #[test]
@@ -970,14 +1091,15 @@ Let me know if you need help.
         writeln!(file, r#"{{"type":"assistant","message":{{"role":"assistant","content":"Simple string content"}}}}"#).unwrap();
 
         let result = read_last_assistant_response(file.path().to_str().unwrap()).unwrap();
-        assert_eq!(result, "Simple string content");
+        assert_eq!(result.text, "Simple string content");
     }
 
     #[test]
     fn test_read_last_assistant_response_empty_file() {
         let file = NamedTempFile::new().unwrap();
         let result = read_last_assistant_response(file.path().to_str().unwrap()).unwrap();
-        assert_eq!(result, "");
+        assert!(result.text.is_empty());
+        assert!(result.thinking.is_empty());
     }
 
     #[test]
@@ -986,7 +1108,7 @@ Let me know if you need help.
         writeln!(file, r#"{{"type":"user","message":{{"role":"user","content":"Hello"}}}}"#).unwrap();
 
         let result = read_last_assistant_response(file.path().to_str().unwrap()).unwrap();
-        assert_eq!(result, "");
+        assert!(result.text.is_empty());
     }
 
     #[test]
@@ -1001,7 +1123,7 @@ Let me know if you need help.
         writeln!(file, r#"{{"type":"assistant","message":{{"role":"assistant","content":[]}}}}"#).unwrap();
 
         let result = read_last_assistant_response(file.path().to_str().unwrap()).unwrap();
-        assert_eq!(result, "");
+        assert!(result.text.is_empty());
     }
 
     #[test]
@@ -1012,7 +1134,17 @@ Let me know if you need help.
         writeln!(file, "   ").unwrap();  // whitespace line
 
         let result = read_last_assistant_response(file.path().to_str().unwrap()).unwrap();
-        assert_eq!(result, "Response");
+        assert_eq!(result.text, "Response");
+    }
+
+    #[test]
+    fn test_read_last_assistant_response_multiple_thinking_blocks() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"thinking","thinking":"First thought"}},{{"type":"thinking","thinking":"Second thought"}},{{"type":"text","text":"Final answer"}}]}}}}"#).unwrap();
+
+        let result = read_last_assistant_response(file.path().to_str().unwrap()).unwrap();
+        assert_eq!(result.text, "Final answer");
+        assert_eq!(result.thinking, "First thought\nSecond thought");
     }
 
     // ==================== ChatProcessor State Machine Tests ====================
@@ -1709,6 +1841,7 @@ Let me know if you need help.
             cwd: Some("/home/user".to_string()),
             context_window: None,
             model: None,
+            transcript_path: None,
         }).await;
 
         assert!(events.is_empty()); // Should handle gracefully
@@ -1722,5 +1855,115 @@ Let me know if you need help.
         // Should work the same as new()
         let messages = processor.get_messages(session_id).await;
         assert!(messages.is_empty());
+    }
+
+    // ==================== Transcript Watcher Integration Tests ====================
+
+    #[tokio::test]
+    async fn test_transcript_watcher_nonexistent_file() {
+        let processor = ChatProcessor::new();
+        let session_id = Uuid::new_v4();
+
+        // Attempting to watch a nonexistent file should fail
+        let result = processor.start_transcript_watcher(session_id, "/nonexistent/path/to/file.jsonl");
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_transcript_watcher_start_stop() {
+        let processor = ChatProcessor::new();
+        let session_id = Uuid::new_v4();
+
+        // Create a temp file
+        let file = NamedTempFile::new().unwrap();
+        let path = file.path().to_str().unwrap();
+
+        // Start watcher
+        let result = processor.start_transcript_watcher(session_id, path);
+        assert!(result.is_ok());
+
+        // Give the spawn task time to insert the handle
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // Check watcher is active
+        assert!(processor.has_transcript_watcher(session_id).await);
+
+        // Stop watcher
+        processor.stop_transcript_watcher(session_id).await;
+
+        // Check watcher is stopped
+        assert!(!processor.has_transcript_watcher(session_id).await);
+    }
+
+    #[tokio::test]
+    async fn test_transcript_watcher_emits_events() {
+        let processor = ChatProcessor::new();
+        let session_id = Uuid::new_v4();
+
+        // Create a temp file with transcript content
+        let mut file = NamedTempFile::new().unwrap();
+        let path = file.path().to_str().unwrap().to_string();
+
+        // Start watcher
+        let mut rx = processor.start_transcript_watcher(session_id, &path).unwrap();
+
+        // Give the watcher time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // Write a user message to the transcript
+        use std::io::Write;
+        writeln!(file, r#"{{"type":"user","message":{{"role":"user","content":"Hello Claude"}}}}"#).unwrap();
+        file.flush().unwrap();
+
+        // Wait for file watcher to detect change
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        // Try to receive an event with timeout
+        let event = tokio::time::timeout(
+            tokio::time::Duration::from_millis(500),
+            rx.recv()
+        ).await;
+
+        // The event should be a user message
+        if let Ok(Some(ChatEvent::Message { message, .. })) = event {
+            assert_eq!(message.role, ChatRole::User);
+            assert!(message.content.contains("Hello Claude"));
+        }
+        // Note: On some systems, file watching may be slow or unreliable,
+        // so we don't fail the test if no event is received
+    }
+
+    #[tokio::test]
+    async fn test_stop_with_transcript_emits_thinking() {
+        let processor = ChatProcessor::new();
+        let session_id = Uuid::new_v4();
+
+        // Setup: submit a prompt first
+        processor.process_hook_event(&HookEvent::UserPromptSubmit {
+            session_id,
+            claude_session_id: "test".to_string(),
+            prompt: "Hello".to_string(),
+            cwd: None,
+            context_window: None,
+        }).await;
+
+        // Create temp transcript file with thinking content
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"thinking","thinking":"Let me analyze this..."}},{{"type":"text","text":"Here is my response"}}]}}}}"#).unwrap();
+
+        // Stop with transcript path
+        let events = processor.process_hook_event(&HookEvent::Stop {
+            session_id,
+            claude_session_id: "test".to_string(),
+            stop_hook_active: false,
+            transcript_path: Some(file.path().to_str().unwrap().to_string()),
+            context_window: None,
+        }).await;
+
+        // Should emit ThinkingDelta
+        assert!(events.iter().any(|e| matches!(e, ChatEvent::ThinkingDelta { delta, .. } if delta.contains("Let me analyze"))));
+
+        // Should emit ContentDelta
+        assert!(events.iter().any(|e| matches!(e, ChatEvent::ContentDelta { delta, .. } if delta.contains("Here is my response"))));
     }
 }

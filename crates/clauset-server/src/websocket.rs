@@ -134,6 +134,10 @@ pub async fn handle_websocket(
                                                     is_error: *is_error,
                                                 });
                                             }
+                                            clauset_types::ContentBlock::Thinking { .. } => {
+                                                // Thinking blocks are handled by TranscriptWatcher
+                                                // Skip for stream-json mode
+                                            }
                                         }
                                     }
                                     // Check if there's an error
@@ -219,6 +223,7 @@ pub async fn handle_websocket(
                             let event_session_id = match &chat_event {
                                 clauset_types::ChatEvent::Message { session_id, .. } => *session_id,
                                 clauset_types::ChatEvent::ContentDelta { session_id, .. } => *session_id,
+                                clauset_types::ChatEvent::ThinkingDelta { session_id, .. } => *session_id,
                                 clauset_types::ChatEvent::ToolCallStart { session_id, .. } => *session_id,
                                 clauset_types::ChatEvent::ToolCallComplete { session_id, .. } => *session_id,
                                 clauset_types::ChatEvent::MessageComplete { session_id, .. } => *session_id,

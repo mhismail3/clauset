@@ -148,6 +148,7 @@ export default function SessionPage() {
     cacheCreationTokens?: number;
   }>({});
   const [showShortcuts, setShowShortcuts] = createSignal(false);
+  const [todoWidgetExpanded, setTodoWidgetExpanded] = createSignal(true);
 
   // iOS keyboard handling for chat view (follows visualViewport in real-time)
   // offsetTop counters iOS's automatic page scroll when keyboard appears
@@ -1008,7 +1009,11 @@ export default function SessionPage() {
             />
 
             {/* Todo Widget */}
-            <TodoWidget todos={todos()} />
+            <TodoWidget
+              todos={todos()}
+              expanded={todoWidgetExpanded()}
+              onToggle={() => setTodoWidgetExpanded(!todoWidgetExpanded())}
+            />
 
             <main class="flex-1 scrollable p-4 space-y-4" style={{ "min-height": '0' }}>
               {/* Empty state when no messages yet (only show when session is active) */}

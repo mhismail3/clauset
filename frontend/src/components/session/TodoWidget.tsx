@@ -1,4 +1,4 @@
-import { Show, For, createSignal } from 'solid-js';
+import { Show, For } from 'solid-js';
 
 export interface TodoItem {
   content: string;
@@ -8,10 +8,11 @@ export interface TodoItem {
 
 interface TodoWidgetProps {
   todos: TodoItem[];
+  expanded: boolean;
+  onToggle: () => void;
 }
 
 export function TodoWidget(props: TodoWidgetProps) {
-  const [expanded, setExpanded] = createSignal(true);
 
   const hasTodos = () => props.todos.length > 0;
   const pendingCount = () => props.todos.filter((t) => t.status === 'pending').length;
@@ -54,7 +55,7 @@ export function TodoWidget(props: TodoWidgetProps) {
       >
         {/* Header */}
         <button
-          onClick={() => setExpanded(!expanded())}
+          onClick={() => props.onToggle()}
           style={{
             width: '100%',
             display: 'flex',
@@ -93,7 +94,7 @@ export function TodoWidget(props: TodoWidgetProps) {
             stroke-width="2"
             style={{
               color: 'var(--color-text-muted)',
-              transform: expanded() ? 'rotate(180deg)' : 'rotate(0deg)',
+              transform: props.expanded ? 'rotate(180deg)' : 'rotate(0deg)',
               transition: 'transform 0.15s ease',
             }}
           >
@@ -102,7 +103,7 @@ export function TodoWidget(props: TodoWidgetProps) {
         </button>
 
         {/* Task list */}
-        <Show when={expanded()}>
+        <Show when={props.expanded}>
           <div
             style={{
               padding: '0 12px 8px',

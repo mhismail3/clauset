@@ -8,6 +8,8 @@ export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  /** Claude's thinking/reasoning content (displayed separately from response) */
+  thinkingContent?: string;
   toolCalls?: ToolCall[];
   timestamp: number;
   isStreaming?: boolean;
@@ -369,6 +371,7 @@ export interface ChatMessage {
   session_id: string;
   role: 'user' | 'assistant';
   content: string;
+  thinking_content?: string;
   tool_calls: ChatToolCall[];
   is_streaming: boolean;
   is_complete: boolean;
@@ -387,6 +390,7 @@ export interface ChatToolCall {
 export type ChatEvent =
   | { type: 'message'; session_id: string; message: ChatMessage }
   | { type: 'content_delta'; session_id: string; message_id: string; delta: string }
+  | { type: 'thinking_delta'; session_id: string; message_id: string; delta: string }
   | { type: 'tool_call_start'; session_id: string; message_id: string; tool_call: ChatToolCall }
   | { type: 'tool_call_complete'; session_id: string; message_id: string; tool_call_id: string; output: string; is_error: boolean }
   | { type: 'message_complete'; session_id: string; message_id: string };
@@ -399,6 +403,7 @@ function convertChatMessage(msg: ChatMessage): Message {
     id: msg.id,
     role: msg.role,
     content: msg.content,
+    thinkingContent: msg.thinking_content,
     toolCalls: msg.tool_calls.map((tc) => ({
       id: tc.id,
       name: tc.name,
@@ -516,6 +521,23 @@ export function handleChatEvent(event: ChatEvent) {
         newMap.set(event.session_id, updatedMessages);
         // Save after content delta (debounced)
         saveToStorage(event.session_id, updatedMessages);
+        return newMap;
+      });
+      break;
+    }
+
+    case 'thinking_delta': {
+      // Update the message thinking content with the delta
+      setMessages((prev) => {
+        const newMap = new Map(prev);
+        const sessionMessages = newMap.get(event.session_id) ?? [];
+        const updatedMessages = sessionMessages.map((msg) => {
+          if (msg.id === event.message_id) {
+            return { ...msg, thinkingContent: (msg.thinkingContent ?? '') + event.delta };
+          }
+          return msg;
+        });
+        newMap.set(event.session_id, updatedMessages);
         return newMap;
       });
       break;

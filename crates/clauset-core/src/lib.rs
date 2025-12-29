@@ -14,6 +14,7 @@ mod process;
 mod prompt_indexer;
 mod session;
 mod sizing;
+mod transcript_watcher;
 mod tui_menu_parser;
 
 pub use buffer::{AppendResult, RecentAction, SequencedChunk, SessionActivity, SessionBuffers};
@@ -36,6 +37,9 @@ pub use session::{CreateSessionOptions, SessionManager, SessionManagerConfig};
 pub use sizing::{
     validate_dimensions, ConfidenceLevel, DeviceHint, DimensionError, DimensionSource,
     ValidatedDimensions,
+};
+pub use transcript_watcher::{
+    transcript_event_to_chat_event, TranscriptEvent, TranscriptWatcher, TranscriptWatcherHandle,
 };
 pub use tui_menu_parser::TuiMenuParser;
 
