@@ -5,7 +5,9 @@
 
 use crate::state::AppState;
 use axum::{extract::State, http::StatusCode, Json};
-use clauset_core::{ChatProcessor, ProcessEvent, RecentAction};
+use clauset_core::{
+    transcript_event_to_chat_event, ChatProcessor, ProcessEvent, RecentAction, TranscriptEvent,
+};
 use clauset_types::{
     ChatEvent, HookActivityUpdate, HookEvent, HookEventPayload, HookEventType,
     InteractiveEvent, InteractivePrompt, InteractiveQuestion, QuestionOption, SessionStatus,
@@ -120,18 +122,36 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 info!(target: "clauset::hooks", "Starting transcript watcher for session {} at {}", session_id, path);
                 match state.chat_processor.start_transcript_watcher(session_id, &path) {
                     Ok(mut event_rx) => {
-                        // Spawn task to broadcast transcript events with message ID remapping
+                        // Spawn task to process transcript events
                         let session_manager = state.session_manager.clone();
                         let chat_processor = state.chat_processor.clone();
                         tokio::spawn(async move {
-                            while let Some(chat_event) = event_rx.recv().await {
-                                // Remap message IDs from Claude's IDs to our internal IDs
-                                let remapped_event = remap_chat_event_message_id(
-                                    chat_event,
-                                    session_id,
-                                    &chat_processor,
-                                ).await;
-                                let _ = session_manager.broadcast_event(ProcessEvent::Chat(remapped_event));
+                            while let Some(event) = event_rx.recv().await {
+                                match event {
+                                    // Usage events update session activity (authoritative token source)
+                                    TranscriptEvent::Usage { usage, .. } => {
+                                        session_manager.update_usage_from_transcript(
+                                            session_id,
+                                            usage.input_tokens,
+                                            usage.output_tokens,
+                                            usage.cache_read_input_tokens,
+                                            usage.cache_creation_input_tokens,
+                                            &usage.model,
+                                        ).await;
+                                    }
+                                    // Other events convert to chat events for broadcast
+                                    _ => {
+                                        if let Some(chat_event) = transcript_event_to_chat_event(session_id, event) {
+                                            // Remap message IDs from Claude's IDs to our internal IDs
+                                            let remapped_event = remap_chat_event_message_id(
+                                                chat_event,
+                                                session_id,
+                                                &chat_processor,
+                                            ).await;
+                                            let _ = session_manager.broadcast_event(ProcessEvent::Chat(remapped_event));
+                                        }
+                                    }
+                                }
                             }
                             debug!(target: "clauset::hooks", "Transcript watcher event loop ended for session {}", session_id);
                         });
@@ -179,30 +199,15 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
             let update = HookActivityUpdate::user_prompt_submit();
             update_activity_from_hook(&state, session_id, update).await;
 
-            // Update context window from accurate hook data (replaces regex parsing)
+            // Update context window size from hook data (transcript handles token counts)
             if let Some(ref ctx) = context_window {
                 state.session_manager.update_context_from_hook(
                     session_id,
                     ctx.total_input_tokens,
                     ctx.total_output_tokens,
                     ctx.context_window_size,
-                    None, // Model info is separate
+                    None,
                 ).await;
-
-                // Broadcast context update with cache token info to frontend
-                let (cache_read, cache_creation) = if let Some(ref usage) = ctx.current_usage {
-                    (usage.cache_read_input_tokens, usage.cache_creation_input_tokens)
-                } else {
-                    (0, 0)
-                };
-                let _ = state.session_manager.broadcast_event(ProcessEvent::ContextUpdate {
-                    session_id,
-                    input_tokens: ctx.total_input_tokens,
-                    output_tokens: ctx.total_output_tokens,
-                    cache_read_tokens: cache_read,
-                    cache_creation_tokens: cache_creation,
-                    context_window_size: ctx.context_window_size,
-                });
             }
 
             // Index the prompt for Prompt Library

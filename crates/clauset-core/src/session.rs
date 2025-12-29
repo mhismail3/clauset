@@ -648,6 +648,63 @@ impl SessionManager {
             });
         }
     }
+
+    /// Update usage from transcript data (authoritative source).
+    ///
+    /// This is called when the TranscriptWatcher emits a Usage event.
+    /// It accumulates per-message usage into session totals.
+    pub async fn update_usage_from_transcript(
+        &self,
+        session_id: Uuid,
+        input_tokens: u64,
+        output_tokens: u64,
+        cache_read_tokens: u64,
+        cache_creation_tokens: u64,
+        model: &str,
+    ) {
+        if let Some(activity) = self.buffers.accumulate_usage(
+            session_id,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            model,
+        ).await {
+            tracing::debug!(
+                target: "clauset::transcript",
+                "Usage update from transcript: session={}, model='{}', +{}in/{}out, total={}in/{}out",
+                session_id,
+                model,
+                input_tokens,
+                output_tokens,
+                activity.input_tokens,
+                activity.output_tokens
+            );
+
+            // Broadcast the updated activity
+            let _ = self.event_tx.send(ProcessEvent::ActivityUpdate {
+                session_id,
+                model: activity.model,
+                cost: activity.cost,
+                input_tokens: activity.input_tokens,
+                output_tokens: activity.output_tokens,
+                context_percent: activity.context_percent,
+                current_activity: activity.current_activity,
+                current_step: activity.current_step,
+                recent_actions: activity.recent_actions,
+            });
+
+            // Also broadcast specific context update for frontend
+            let _ = self.event_tx.send(ProcessEvent::ContextUpdate {
+                session_id,
+                input_tokens: activity.input_tokens,
+                output_tokens: activity.output_tokens,
+                cache_read_tokens: activity.cache_read_tokens,
+                cache_creation_tokens: activity.cache_creation_tokens,
+                context_window_size: activity.context_window_size, // From hooks
+            });
+        }
+    }
 }
 
 fn truncate_preview(s: &str) -> String {

@@ -10,10 +10,7 @@
 //! - State machine tracks conversation flow
 //! - Messages are broadcast via ProcessEvent for WebSocket delivery
 
-use crate::{
-    transcript_event_to_chat_event, InteractionStore, TranscriptEvent, TranscriptWatcher,
-    TranscriptWatcherHandle,
-};
+use crate::{InteractionStore, TranscriptEvent, TranscriptWatcher, TranscriptWatcherHandle};
 use clauset_types::{ChatEvent, ChatMessage, ChatRole, ChatToolCall, HookEvent};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -470,15 +467,20 @@ impl ChatProcessor {
     /// # Returns
     /// * `Ok(receiver)` - A channel receiver for ChatEvents
     /// * `Err` - If the watcher could not be started
+    /// Start watching a transcript file for real-time content streaming.
+    ///
+    /// Returns a receiver for raw `TranscriptEvent`s. The caller is responsible for:
+    /// - Converting content events to `ChatEvent`s via `transcript_event_to_chat_event`
+    /// - Handling `Usage` events to update session token counts
     pub fn start_transcript_watcher(
         &self,
         session_id: Uuid,
         transcript_path: &str,
-    ) -> crate::Result<mpsc::UnboundedReceiver<ChatEvent>> {
+    ) -> crate::Result<mpsc::UnboundedReceiver<TranscriptEvent>> {
         let path = PathBuf::from(transcript_path);
 
         // Create channel for TranscriptEvents
-        let (event_tx, mut event_rx) = mpsc::unbounded_channel::<TranscriptEvent>();
+        let (event_tx, event_rx) = mpsc::unbounded_channel::<TranscriptEvent>();
 
         // Create and start the watcher
         let watcher = TranscriptWatcher::new(path, session_id, event_tx);
@@ -491,28 +493,13 @@ impl ChatProcessor {
             watchers.insert(session_id, handle);
         });
 
-        // Create output channel for ChatEvents
-        let (chat_tx, chat_rx) = mpsc::unbounded_channel::<ChatEvent>();
-
-        // Spawn task to convert TranscriptEvents to ChatEvents
-        tokio::spawn(async move {
-            while let Some(event) = event_rx.recv().await {
-                if let Some(chat_event) = transcript_event_to_chat_event(session_id, event) {
-                    if chat_tx.send(chat_event).is_err() {
-                        // Receiver dropped, stop processing
-                        break;
-                    }
-                }
-            }
-        });
-
         info!(
             target: "clauset::chat",
             "Started transcript watcher for session {} at {}",
             session_id, transcript_path
         );
 
-        Ok(chat_rx)
+        Ok(event_rx)
     }
 
     /// Stop watching a transcript file.
@@ -1948,10 +1935,9 @@ Let me know if you need help.
             rx.recv()
         ).await;
 
-        // The event should be a user message
-        if let Ok(Some(ChatEvent::Message { message, .. })) = event {
-            assert_eq!(message.role, ChatRole::User);
-            assert!(message.content.contains("Hello Claude"));
+        // The event should be a user message (TranscriptEvent now, not ChatEvent)
+        if let Ok(Some(TranscriptEvent::UserMessage { content, .. })) = event {
+            assert!(content.contains("Hello Claude"));
         }
         // Note: On some systems, file watching may be slow or unreliable,
         // so we don't fail the test if no event is received

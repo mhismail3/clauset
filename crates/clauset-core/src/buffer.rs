@@ -208,6 +208,12 @@ pub struct SessionActivity {
     pub cost: f64,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Tokens read from cache (for context calculation)
+    pub cache_read_tokens: u64,
+    /// Tokens written to cache
+    pub cache_creation_tokens: u64,
+    /// Context window size for the model (from hooks, e.g., 200000)
+    pub context_window_size: u64,
     pub context_percent: u8,
     /// Current high-level activity (e.g., "Thinking...", "Reading file.rs")
     pub current_activity: String,
@@ -229,6 +235,9 @@ pub struct SessionActivity {
     /// Count of bytes received since last activity indicator - used to detect if
     /// Claude has output substantial response content
     pub bytes_since_activity: usize,
+    /// Whether usage comes from transcript (authoritative source).
+    /// When true, transcript data is used and hook context is skipped.
+    pub transcript_usage_received: bool,
     /// Whether we've received context data from hooks.
     /// When true, hook data is authoritative and we skip fragile regex parsing.
     pub hook_context_received: bool,
@@ -241,6 +250,9 @@ impl Default for SessionActivity {
             cost: 0.0,
             input_tokens: 0,
             output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            context_window_size: 0,
             context_percent: 0,
             current_activity: String::new(),
             current_step: None,
@@ -251,9 +263,35 @@ impl Default for SessionActivity {
             saw_activity_since_busy: false,
             last_activity_indicator: std::time::Instant::now(),
             bytes_since_activity: 0,
+            transcript_usage_received: false,
             hook_context_received: false,
         }
     }
+}
+
+/// Get default context window size for a Claude model.
+///
+/// All current Claude models have a 200K context window.
+/// This is used as a fallback when hooks don't provide context_window data.
+fn default_context_window_for_model(model: &str) -> u64 {
+    let model_lower = model.to_lowercase();
+
+    // All Claude 3.5/4 models have 200K context
+    if model_lower.contains("opus")
+        || model_lower.contains("sonnet")
+        || model_lower.contains("haiku")
+        || model_lower.contains("claude")
+    {
+        return 200_000;
+    }
+
+    // Legacy models (Claude 2, etc.) - 100K context
+    if model_lower.contains("claude-2") {
+        return 100_000;
+    }
+
+    // Default for unknown models
+    200_000
 }
 
 /// Ring buffer for terminal output with sequence tracking.
@@ -434,24 +472,36 @@ impl SessionBuffers {
         let clean_buffer = strip_ansi_codes(full_buffer);
 
         // Parse status line from FULL BUFFER: "Model | $Cost | InputK/OutputK | ctx:X%"
-        // SKIP if we've received hook context - hook data is authoritative and more accurate
-        if !buffer.activity.hook_context_received {
-            if let Some(status) = parse_status_line(&clean_buffer) {
-                let model_changed = buffer.activity.model != status.model;
-                let cost_changed = (buffer.activity.cost - status.cost).abs() > 0.001;
+        //
+        // Regex is only used as fallback when authoritative sources haven't provided data:
+        // - Transcript is authoritative for tokens (transcript_usage_received)
+        // - Hooks are authoritative for context window (hook_context_received)
+        // - Cost is ONLY available from regex (Claude Code doesn't provide it via hooks/transcript)
+        if let Some(status) = parse_status_line(&clean_buffer) {
+            // Always update model if not set (model comes from transcript too, but regex is faster)
+            if buffer.activity.model.is_empty() && !status.model.is_empty() {
+                buffer.activity.model = status.model.clone();
+                changed = true;
+            }
+
+            // Always update cost from regex - it's the only source
+            if (buffer.activity.cost - status.cost).abs() > 0.001 {
+                buffer.activity.cost = status.cost;
+                changed = true;
+            }
+
+            // Only use regex for tokens if we DON'T have transcript data
+            if !buffer.activity.transcript_usage_received && !buffer.activity.hook_context_received {
                 let input_changed = buffer.activity.input_tokens != status.input_tokens;
                 let output_changed = buffer.activity.output_tokens != status.output_tokens;
                 let ctx_changed = buffer.activity.context_percent != status.context_percent;
 
-                if model_changed || cost_changed || input_changed || output_changed || ctx_changed
-                {
+                if input_changed || output_changed || ctx_changed {
                     tracing::debug!(
                         target: "clauset::activity::stats",
-                        "Stats updated (regex fallback): model='{}', cost=${:.4}, tokens={}K/{}K, ctx={}%",
-                        status.model, status.cost, status.input_tokens/1000, status.output_tokens/1000, status.context_percent
+                        "Stats updated (regex fallback): tokens={}K/{}K, ctx={}%",
+                        status.input_tokens/1000, status.output_tokens/1000, status.context_percent
                     );
-                    buffer.activity.model = status.model;
-                    buffer.activity.cost = status.cost;
                     buffer.activity.input_tokens = status.input_tokens;
                     buffer.activity.output_tokens = status.output_tokens;
                     buffer.activity.context_percent = status.context_percent;
@@ -823,10 +873,13 @@ impl SessionBuffers {
         Some(buffer.activity.clone())
     }
 
-    /// Update context window information from hook data.
+    /// Update context window size from hook data.
     ///
-    /// This replaces the fragile regex parsing with accurate data from Claude's hook input.
-    /// The context_window data comes directly from Claude Code CLI's aF() function.
+    /// Hooks provide context_window_size which is needed for calculating context percentage.
+    /// Token counts are now handled by transcript (authoritative source).
+    ///
+    /// If transcript_usage_received is true, we only update context_window_size and model,
+    /// NOT token counts (to avoid conflicting with transcript accumulation).
     pub async fn update_context_from_hook(
         &self,
         session_id: Uuid,
@@ -840,14 +893,9 @@ impl SessionBuffers {
 
         let mut changed = false;
 
-        // Mark that we've received hook context - this disables fragile regex parsing
+        // Mark that we've received hook context
         if !buffer.activity.hook_context_received {
             buffer.activity.hook_context_received = true;
-            tracing::debug!(
-                target: "clauset::hooks",
-                "Hook context received for session {} - disabling regex status parsing",
-                session_id
-            );
         }
 
         // Update model if provided
@@ -858,42 +906,136 @@ impl SessionBuffers {
             }
         }
 
-        // Update token counts
-        if buffer.activity.input_tokens != input_tokens {
-            buffer.activity.input_tokens = input_tokens;
+        // Always store context_window_size (needed for percentage calculation)
+        if buffer.activity.context_window_size != context_window_size && context_window_size > 0 {
+            buffer.activity.context_window_size = context_window_size;
             changed = true;
-        }
-        if buffer.activity.output_tokens != output_tokens {
-            buffer.activity.output_tokens = output_tokens;
-            changed = true;
+
+            // Recalculate context percentage with the new window size
+            if buffer.activity.input_tokens > 0 {
+                let total_tokens = buffer.activity.input_tokens + buffer.activity.output_tokens;
+                let context_percent =
+                    ((total_tokens as f64 / context_window_size as f64) * 100.0).min(100.0) as u8;
+                if buffer.activity.context_percent != context_percent {
+                    buffer.activity.context_percent = context_percent;
+                }
+            }
         }
 
-        // Calculate context percentage
-        let context_percent = if context_window_size > 0 {
-            ((input_tokens as f64 / context_window_size as f64) * 100.0) as u8
-        } else {
-            0
-        };
-        if buffer.activity.context_percent != context_percent {
-            buffer.activity.context_percent = context_percent;
-            changed = true;
+        // Only update token counts from hooks if transcript hasn't provided authoritative data.
+        // Once transcript_usage_received is true, transcript is the authoritative source.
+        if !buffer.activity.transcript_usage_received {
+            if buffer.activity.input_tokens != input_tokens && input_tokens > 0 {
+                buffer.activity.input_tokens = input_tokens;
+                changed = true;
+            }
+            if buffer.activity.output_tokens != output_tokens && output_tokens > 0 {
+                buffer.activity.output_tokens = output_tokens;
+                changed = true;
+            }
+
+            // Recalculate context percentage using hook tokens
+            let effective_window = if buffer.activity.context_window_size > 0 {
+                buffer.activity.context_window_size
+            } else {
+                context_window_size
+            };
+            if effective_window > 0 {
+                let total_tokens = buffer.activity.input_tokens + buffer.activity.output_tokens;
+                let context_percent =
+                    ((total_tokens as f64 / effective_window as f64) * 100.0).min(100.0) as u8;
+                if buffer.activity.context_percent != context_percent {
+                    buffer.activity.context_percent = context_percent;
+                    changed = true;
+                }
+            }
         }
 
         if changed {
             buffer.activity.last_update = std::time::Instant::now();
             tracing::debug!(
                 target: "clauset::hooks",
-                "Context updated from hook for session {}: model='{}', tokens={}K/{}K, ctx={}%",
+                "Context updated from hook for session {}: model='{}', {}in/{}out, window={}, ctx={}%{}",
                 session_id,
                 buffer.activity.model,
-                input_tokens / 1000,
-                output_tokens / 1000,
-                context_percent
+                buffer.activity.input_tokens,
+                buffer.activity.output_tokens,
+                buffer.activity.context_window_size,
+                buffer.activity.context_percent,
+                if buffer.activity.transcript_usage_received { " (transcript authoritative)" } else { "" }
             );
             Some(buffer.activity.clone())
         } else {
             None
         }
+    }
+
+    /// Accumulate per-message token usage from transcript into cumulative session totals.
+    ///
+    /// The transcript is the AUTHORITATIVE source for token data. Each message contains:
+    /// - `input_tokens`: New input tokens (not from cache)
+    /// - `cache_read_input_tokens`: Tokens read from cache
+    /// - `cache_creation_input_tokens`: Tokens written to cache
+    /// - `output_tokens`: Tokens generated by the assistant
+    ///
+    /// For display, we compute total context as:
+    /// - Input context = sum of (input + cache_read + cache_creation) from all messages
+    /// - Output context = sum of output_tokens from all messages
+    pub async fn accumulate_usage(
+        &self,
+        session_id: Uuid,
+        input_tokens: u64,
+        output_tokens: u64,
+        cache_read_tokens: u64,
+        cache_creation_tokens: u64,
+        model: &str,
+    ) -> Option<SessionActivity> {
+        let mut buffers = self.buffers.write().await;
+        let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
+
+        // Mark that we've received transcript data (authoritative source)
+        if !buffer.activity.transcript_usage_received {
+            buffer.activity.transcript_usage_received = true;
+        }
+
+        // Accumulate token counts directly from transcript
+        buffer.activity.input_tokens += input_tokens;
+        buffer.activity.output_tokens += output_tokens;
+        buffer.activity.cache_read_tokens += cache_read_tokens;
+        buffer.activity.cache_creation_tokens += cache_creation_tokens;
+
+        // Update model if provided and set default context window size
+        if !model.is_empty() {
+            buffer.activity.model = model.to_string();
+
+            // Set default context window size if not already set (from hooks)
+            if buffer.activity.context_window_size == 0 {
+                buffer.activity.context_window_size = default_context_window_for_model(model);
+            }
+        }
+
+        // Recalculate context percentage
+        if buffer.activity.context_window_size > 0 {
+            let total_tokens = buffer.activity.input_tokens + buffer.activity.output_tokens;
+            buffer.activity.context_percent =
+                ((total_tokens as f64 / buffer.activity.context_window_size as f64) * 100.0)
+                    .min(100.0) as u8;
+        }
+
+        buffer.activity.last_update = std::time::Instant::now();
+
+        tracing::info!(
+            target: "clauset::transcript",
+            "Token usage from transcript for session {}: +{}in/{}out (total: {}in/{}out, ctx: {}%)",
+            session_id,
+            input_tokens,
+            output_tokens,
+            buffer.activity.input_tokens,
+            buffer.activity.output_tokens,
+            buffer.activity.context_percent,
+        );
+
+        Some(buffer.activity.clone())
     }
 }
 
@@ -929,21 +1071,18 @@ struct ParsedStatus {
 }
 
 /// Regex for full status line: "Model | $Cost | Input/Output | ctx:X%"
-/// Also matches partial formats where tokens/context are missing
-/// NOTE: K suffix is REQUIRED to prevent false positives from matching
-/// patterns like "804/993 files" as token counts
+/// K suffix is optional since Claude Code sometimes omits it for small values.
+/// The ctx:X% suffix helps distinguish from false positives like "804/993 files".
 static STATUS_LINE_FULL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"^([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*(?:\|\s*([0-9.]+)K/([0-9.]+)K)?\s*(?:\|\s*ctx:(\d+)%)?"
+        r"^([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*(?:\|\s*([0-9.]+)K?/([0-9.]+)K?)?\s*(?:\|\s*ctx:(\d+)%)?"
     ).unwrap()
 });
 
-/// Regex for continuation line with tokens: "InputK/OutputK | ctx:X%"
-/// This handles wrapped status lines on narrow terminals
-/// NOTE: K suffix is REQUIRED to prevent false positives from matching
-/// patterns like "804/993 files" as token counts
+/// Regex for continuation line with tokens: "Input/Output | ctx:X%"
+/// K suffix is optional. Requires ctx suffix to prevent false positives.
 static STATUS_LINE_TOKENS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^([0-9.]+)K/([0-9.]+)K\s*(?:\|\s*ctx:(\d+)%)?").unwrap()
+    Regex::new(r"^([0-9.]+)K?/([0-9.]+)K?\s*\|\s*ctx:(\d+)%").unwrap()
 });
 
 /// Regex for model and cost pattern (allows trailing text like "Update available!")

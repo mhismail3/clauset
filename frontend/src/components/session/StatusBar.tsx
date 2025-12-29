@@ -1,4 +1,5 @@
 import { Show } from 'solid-js';
+import { formatTokens, formatCost, shortenModel } from '../../lib/format';
 
 interface StatusBarProps {
   model?: string;
@@ -8,33 +9,6 @@ interface StatusBarProps {
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
   contextPercent?: number;
-}
-
-// Format token count (e.g., 29000 -> "29K", 1500 -> "1.5K")
-function formatTokens(tokens: number | undefined): string {
-  if (tokens === undefined || tokens === 0) return '0';
-  if (tokens >= 1000) {
-    const k = tokens / 1000;
-    return k >= 10 ? `${Math.round(k)}K` : `${k.toFixed(1)}K`;
-  }
-  return tokens.toString();
-}
-
-// Format cost (e.g., 0.68 -> "$0.68", 1.234 -> "$1.23")
-function formatCost(cost: number | undefined): string {
-  if (cost === undefined || cost === 0) return '$0.00';
-  return `$${cost.toFixed(2)}`;
-}
-
-// Shorten model name for display
-function shortenModel(model: string | undefined): string {
-  if (!model) return 'Unknown';
-  // Common patterns
-  if (model.includes('opus')) return 'Opus 4.5';
-  if (model.includes('sonnet')) return 'Sonnet 4';
-  if (model.includes('haiku')) return 'Haiku';
-  // Strip version suffixes
-  return model.replace(/-\d{8}$/, '').replace('claude-', '');
 }
 
 export function StatusBar(props: StatusBarProps) {
@@ -94,14 +68,11 @@ export function StatusBar(props: StatusBarProps) {
           </span>
         </Show>
 
-        {/* Cache tokens (if present) */}
-        <Show when={(props.cacheReadTokens ?? 0) > 0 || (props.cacheCreationTokens ?? 0) > 0}>
+        {/* Cache tokens - shows tokens served from cache (cost savings) */}
+        <Show when={(props.cacheReadTokens ?? 0) > 0}>
           <span style={{ opacity: 0.4 }}>|</span>
           <span style={{ color: '#8b5cf6' }}>
-            cache: {formatTokens(props.cacheReadTokens)}r
-            {(props.cacheCreationTokens ?? 0) > 0 && (
-              <span>/{formatTokens(props.cacheCreationTokens)}w</span>
-            )}
+            {formatTokens(props.cacheReadTokens)} cached
           </span>
         </Show>
 

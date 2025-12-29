@@ -39,7 +39,8 @@ pub use sizing::{
     ValidatedDimensions,
 };
 pub use transcript_watcher::{
-    transcript_event_to_chat_event, TranscriptEvent, TranscriptWatcher, TranscriptWatcherHandle,
+    compute_session_usage, get_transcript_path, transcript_event_to_chat_event, SessionUsage,
+    TranscriptEvent, TranscriptUsage, TranscriptWatcher, TranscriptWatcherHandle,
 };
 pub use tui_menu_parser::TuiMenuParser;
 

@@ -2,22 +2,99 @@
 //!
 //! Watches the transcript file written by Claude Code at `~/.claude/projects/<path>/<session>.jsonl`
 //! and emits events for each content block (user messages, thinking, text, tool_use, tool_result).
+//!
+//! **The transcript file is the authoritative source for token usage data.**
+//! Each assistant message contains accurate API usage including cache tokens.
 
 use crate::Result;
-use clauset_types::{ChatEvent, ChatMessage, ChatToolCall};
+use clauset_types::{ChatEvent, ChatToolCall};
 use notify::{
     event::{AccessKind, AccessMode, ModifyKind},
     Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
+
+/// Token usage from a single API call (assistant message).
+///
+/// This is the authoritative source for token data, extracted directly from
+/// Claude Code's transcript file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TranscriptUsage {
+    /// Direct input tokens (not from cache)
+    pub input_tokens: u64,
+    /// Output tokens generated
+    pub output_tokens: u64,
+    /// Tokens written to cache
+    pub cache_creation_input_tokens: u64,
+    /// Tokens read from cache
+    pub cache_read_input_tokens: u64,
+    /// Model used for this call
+    pub model: String,
+}
+
+impl TranscriptUsage {
+    /// Total input tokens including cache (for context window calculation)
+    pub fn total_input(&self) -> u64 {
+        self.input_tokens + self.cache_read_input_tokens + self.cache_creation_input_tokens
+    }
+
+    /// Merge another usage into this one (for cumulative totals)
+    pub fn accumulate(&mut self, other: &TranscriptUsage) {
+        self.input_tokens += other.input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.cache_creation_input_tokens += other.cache_creation_input_tokens;
+        self.cache_read_input_tokens += other.cache_read_input_tokens;
+        // Keep the most recent model
+        if !other.model.is_empty() {
+            self.model = other.model.clone();
+        }
+    }
+}
+
+/// Cumulative session usage computed from transcript.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SessionUsage {
+    /// Total input tokens across all turns
+    pub total_input_tokens: u64,
+    /// Total output tokens across all turns
+    pub total_output_tokens: u64,
+    /// Total cache read tokens across all turns
+    pub total_cache_read_tokens: u64,
+    /// Total cache creation tokens across all turns
+    pub total_cache_creation_tokens: u64,
+    /// Model from most recent message
+    pub model: String,
+    /// Number of assistant messages processed
+    pub message_count: u64,
+}
+
+impl SessionUsage {
+    /// Add a single message's usage to the cumulative total.
+    pub fn add_message(&mut self, usage: &TranscriptUsage) {
+        self.total_input_tokens += usage.input_tokens;
+        self.total_output_tokens += usage.output_tokens;
+        self.total_cache_read_tokens += usage.cache_read_input_tokens;
+        self.total_cache_creation_tokens += usage.cache_creation_input_tokens;
+        if !usage.model.is_empty() {
+            self.model = usage.model.clone();
+        }
+        self.message_count += 1;
+    }
+
+    /// Total tokens for context window percentage calculation.
+    /// Uses input + cache_read as that's what's in the context.
+    pub fn context_tokens(&self) -> u64 {
+        self.total_input_tokens + self.total_cache_read_tokens + self.total_cache_creation_tokens
+    }
+}
 
 /// Events emitted by the transcript watcher.
 #[derive(Debug, Clone)]
@@ -56,6 +133,12 @@ pub enum TranscriptEvent {
     },
     /// End of assistant turn
     AssistantTurnEnd { message_id: String },
+    /// Token usage update from an assistant message.
+    /// This is the authoritative source for token data.
+    Usage {
+        message_id: String,
+        usage: TranscriptUsage,
+    },
 }
 
 /// Entry from Claude's transcript JSONL.
@@ -67,11 +150,30 @@ struct TranscriptEntry {
     timestamp: Option<String>,
 }
 
+/// Usage data embedded in assistant messages.
+#[derive(Debug, Deserialize, Default)]
+struct TranscriptMessageUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+    #[serde(default)]
+    cache_creation_input_tokens: u64,
+    #[serde(default)]
+    cache_read_input_tokens: u64,
+}
+
 #[derive(Debug, Deserialize)]
 struct TranscriptMessageEntry {
     id: Option<String>,
     role: Option<String>,
     content: Value,
+    /// Model used for this message (assistant messages only)
+    #[serde(default)]
+    model: Option<String>,
+    /// Token usage (assistant messages only)
+    #[serde(default)]
+    usage: Option<TranscriptMessageUsage>,
 }
 
 /// Watches a Claude Code transcript file and emits content events in real-time.
@@ -304,6 +406,7 @@ impl TranscriptWatcher {
 
         let message_id = message
             .id
+            .clone()
             .unwrap_or_else(|| format!("assistant-{}", uuid::Uuid::new_v4()));
 
         // Check if this is a new assistant turn
@@ -320,6 +423,21 @@ impl TranscriptWatcher {
             let _ = self.event_tx.send(TranscriptEvent::AssistantTurnStart {
                 message_id: message_id.clone(),
                 timestamp,
+            });
+        }
+
+        // Emit usage event if usage data is present (authoritative token source)
+        if let Some(ref usage) = message.usage {
+            let transcript_usage = TranscriptUsage {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_creation_input_tokens: usage.cache_creation_input_tokens,
+                cache_read_input_tokens: usage.cache_read_input_tokens,
+                model: message.model.clone().unwrap_or_default(),
+            };
+            let _ = self.event_tx.send(TranscriptEvent::Usage {
+                message_id: message_id.clone(),
+                usage: transcript_usage,
             });
         }
 
@@ -440,6 +558,116 @@ fn extract_text_content(content: &Value) -> String {
     }
 }
 
+/// Compute cumulative session usage by reading an entire transcript file.
+///
+/// This is the authoritative source for session token usage. Call this when:
+/// - A session starts (to initialize from existing transcript)
+/// - A session resumes (to restore accurate totals)
+///
+/// Returns `None` if the file doesn't exist or can't be parsed.
+pub fn compute_session_usage(transcript_path: &Path) -> Option<SessionUsage> {
+    if !transcript_path.exists() {
+        return None;
+    }
+
+    let file = match File::open(transcript_path) {
+        Ok(f) => f,
+        Err(e) => {
+            warn!(
+                target: "clauset::transcript",
+                "Failed to open transcript file {:?}: {}",
+                transcript_path, e
+            );
+            return None;
+        }
+    };
+
+    let reader = BufReader::new(file);
+    let mut session_usage = SessionUsage::default();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        // Parse the JSONL entry
+        let entry: TranscriptEntry = match serde_json::from_str(&line) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        // Only process assistant messages with usage data
+        if entry.entry_type != "assistant" {
+            continue;
+        }
+
+        if let Some(message) = entry.message {
+            if let Some(usage) = message.usage {
+                let transcript_usage = TranscriptUsage {
+                    input_tokens: usage.input_tokens,
+                    output_tokens: usage.output_tokens,
+                    cache_creation_input_tokens: usage.cache_creation_input_tokens,
+                    cache_read_input_tokens: usage.cache_read_input_tokens,
+                    model: message.model.unwrap_or_default(),
+                };
+                session_usage.add_message(&transcript_usage);
+            }
+        }
+    }
+
+    if session_usage.message_count > 0 {
+        info!(
+            target: "clauset::transcript",
+            "Computed session usage from transcript: {} messages, {} input tokens, {} output tokens, model={}",
+            session_usage.message_count,
+            session_usage.total_input_tokens,
+            session_usage.total_output_tokens,
+            session_usage.model
+        );
+        Some(session_usage)
+    } else {
+        None
+    }
+}
+
+/// Get the transcript file path for a Claude session.
+///
+/// The path format is: `~/.claude/projects/<encoded-project-path>/<session-id>.jsonl`
+pub fn get_transcript_path(claude_session_id: &str, project_path: &Path) -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let claude_projects = home.join(".claude").join("projects");
+
+    // Encode project path (replace / with -)
+    let encoded_path = project_path
+        .to_string_lossy()
+        .replace('/', "-")
+        .trim_start_matches('-')
+        .to_string();
+
+    let transcript_path = claude_projects
+        .join(&encoded_path)
+        .join(format!("{}.jsonl", claude_session_id));
+
+    if transcript_path.exists() {
+        Some(transcript_path)
+    } else {
+        // Try without the leading dash
+        let alt_path = claude_projects
+            .join(format!("-{}", encoded_path))
+            .join(format!("{}.jsonl", claude_session_id));
+        if alt_path.exists() {
+            Some(alt_path)
+        } else {
+            None
+        }
+    }
+}
+
 /// Convert a TranscriptEvent to a ChatEvent for WebSocket broadcast.
 ///
 /// Note: Message lifecycle (create/complete) is handled by hooks, not transcript watcher.
@@ -513,6 +741,9 @@ pub fn transcript_event_to_chat_event(
 
         // Message completion is handled by Stop hook - skip to avoid duplicates
         TranscriptEvent::AssistantTurnEnd { .. } => None,
+
+        // Usage events are handled separately (not chat events) - skip
+        TranscriptEvent::Usage { .. } => None,
     }
 }
 

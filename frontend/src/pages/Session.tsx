@@ -204,31 +204,26 @@ export default function SessionPage() {
 
     const status = parseStatusLine(outputBuffer);
     if (status) {
-      // Check if status changed significantly
+      // Check if model or cost changed (don't check tokens - WebSocket provides authoritative data)
       const changed = !lastStatus ||
         lastStatus.model !== status.model ||
-        Math.abs(lastStatus.cost - status.cost) > 0.001 ||
-        lastStatus.inputTokens !== status.inputTokens ||
-        lastStatus.outputTokens !== status.outputTokens ||
-        lastStatus.contextPercent !== status.contextPercent;
+        Math.abs(lastStatus.cost - status.cost) > 0.001;
 
       if (changed) {
         lastStatus = status;
 
-        // Immediately update local session state for responsive UI
+        // Update model and cost from terminal parsing (tokens come from WebSocket)
         const currentSession = session();
         if (currentSession) {
           setSession({
             ...currentSession,
             model: status.model,
             total_cost_usd: status.cost,
-            input_tokens: status.inputTokens,
-            output_tokens: status.outputTokens,
-            context_percent: status.contextPercent,
+            // Note: input_tokens, output_tokens, context_percent come from WebSocket activity_update
           });
         }
 
-        // Debounce backend updates (send at most every 2 seconds)
+        // Debounce backend updates for model/cost only
         if (statusUpdateTimer) {
           clearTimeout(statusUpdateTimer);
         }
@@ -238,9 +233,7 @@ export default function SessionPage() {
               type: 'status_update',
               model: status.model,
               cost: status.cost,
-              input_tokens: status.inputTokens,
-              output_tokens: status.outputTokens,
-              context_percent: status.contextPercent,
+              // Tokens sent via activity_update from backend
             });
           }
           statusUpdateTimer = null;
@@ -262,15 +255,13 @@ export default function SessionPage() {
       const status = parseStatusLine(outputBuffer);
       if (status) {
         lastStatus = status;
+        // Only update model/cost from terminal - tokens come from WebSocket activity_update
         const currentSession = session();
         if (currentSession) {
           setSession({
             ...currentSession,
             model: status.model,
             total_cost_usd: status.cost,
-            input_tokens: status.inputTokens,
-            output_tokens: status.outputTokens,
-            context_percent: status.contextPercent,
           });
         }
       }
@@ -358,7 +349,7 @@ export default function SessionPage() {
           });
         }
 
-        // Parse status from buffer
+        // Parse status from buffer (model/cost only - tokens from WebSocket)
         const text = new TextDecoder().decode(bytes);
         outputBuffer = text.slice(-2000); // Keep last 2KB for status parsing
         const status = parseStatusLine(outputBuffer);
@@ -370,9 +361,6 @@ export default function SessionPage() {
               ...currentSession,
               model: status.model,
               total_cost_usd: status.cost,
-              input_tokens: status.inputTokens,
-              output_tokens: status.outputTokens,
-              context_percent: status.contextPercent,
             });
           }
         }
@@ -406,31 +394,25 @@ export default function SessionPage() {
 
         const status = parseStatusLine(outputBuffer);
         if (status) {
-          // Check if status changed significantly
+          // Check if model or cost changed (tokens come from WebSocket activity_update)
           const changed = !lastStatus ||
             lastStatus.model !== status.model ||
-            Math.abs(lastStatus.cost - status.cost) > 0.001 ||
-            lastStatus.inputTokens !== status.inputTokens ||
-            lastStatus.outputTokens !== status.outputTokens ||
-            lastStatus.contextPercent !== status.contextPercent;
+            Math.abs(lastStatus.cost - status.cost) > 0.001;
 
           if (changed) {
             lastStatus = status;
 
-            // Immediately update local session state for responsive UI
+            // Update model/cost from terminal - tokens come from WebSocket
             const currentSession = session();
             if (currentSession) {
               setSession({
                 ...currentSession,
                 model: status.model,
                 total_cost_usd: status.cost,
-                input_tokens: status.inputTokens,
-                output_tokens: status.outputTokens,
-                context_percent: status.contextPercent,
               });
             }
 
-            // Debounce backend updates (send at most every 2 seconds)
+            // Debounce backend updates for model/cost only
             if (statusUpdateTimer) {
               clearTimeout(statusUpdateTimer);
             }
@@ -440,9 +422,6 @@ export default function SessionPage() {
                   type: 'status_update',
                   model: status.model,
                   cost: status.cost,
-                  input_tokens: status.inputTokens,
-                  output_tokens: status.outputTokens,
-                  context_percent: status.contextPercent,
                 });
               }
               statusUpdateTimer = null;
