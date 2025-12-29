@@ -265,7 +265,6 @@ impl ChatProcessor {
                 }
 
                 // Check if transcript watcher is active for this session
-                // If so, content streaming is handled by the watcher - we only send MessageComplete
                 let watcher_active = self.has_transcript_watcher(*session_id).await;
                 info!(target: "clauset::chat", "Transcript watcher active: {}", watcher_active);
 
@@ -274,22 +273,24 @@ impl ChatProcessor {
 
                 info!(target: "clauset::chat", "Current message exists: {}", state.current_message.is_some());
 
-                // Only read and send content from transcript if watcher is NOT active
-                // (watcher handles real-time content streaming, this is a fallback)
-                if !watcher_active {
-                    if let Some(path) = transcript_path {
-                        info!(target: "clauset::chat", "Reading transcript from: {} (watcher not active)", path);
-                        match read_last_assistant_response(path) {
-                            Ok(response) => {
-                                info!(target: "clauset::chat", "Transcript read: {} text chars, {} thinking chars", response.text.len(), response.thinking.len());
+                // ALWAYS read transcript to persist final content to the message.
+                // The transcript watcher handles real-time streaming to the frontend,
+                // but we still need to persist the final content for chat history.
+                // Only emit events if watcher is NOT active (to avoid duplicate deltas).
+                if let Some(path) = transcript_path {
+                    info!(target: "clauset::chat", "Reading transcript from: {}", path);
+                    match read_last_assistant_response(path) {
+                        Ok(response) => {
+                            info!(target: "clauset::chat", "Transcript read: {} text chars, {} thinking chars", response.text.len(), response.thinking.len());
 
-                                if let Some(msg) = &mut state.current_message {
-                                    info!(target: "clauset::chat", "Current message content: {} chars", msg.content.len());
+                            if let Some(msg) = &mut state.current_message {
+                                info!(target: "clauset::chat", "Current message content before: {} chars", msg.content.len());
 
-                                    // Add thinking content if available
-                                    if !response.thinking.is_empty() {
-                                        msg.append_thinking(&response.thinking);
-                                        self.persist_message(msg);
+                                // Add thinking content if available
+                                if !response.thinking.is_empty() {
+                                    msg.append_thinking(&response.thinking);
+                                    // Only emit delta if watcher wasn't handling streaming
+                                    if !watcher_active {
                                         events.push(ChatEvent::ThinkingDelta {
                                             session_id: *session_id,
                                             message_id: msg.id.clone(),
@@ -297,11 +298,13 @@ impl ChatProcessor {
                                         });
                                         info!(target: "clauset::chat", "Added ThinkingDelta event");
                                     }
+                                }
 
-                                    // Add text content
-                                    if !response.text.is_empty() {
-                                        msg.append_content(&response.text);
-                                        self.persist_message(msg);
+                                // Add text content
+                                if !response.text.is_empty() {
+                                    msg.append_content(&response.text);
+                                    // Only emit delta if watcher wasn't handling streaming
+                                    if !watcher_active {
                                         events.push(ChatEvent::ContentDelta {
                                             session_id: *session_id,
                                             message_id: msg.id.clone(),
@@ -309,19 +312,20 @@ impl ChatProcessor {
                                         });
                                         info!(target: "clauset::chat", "Added ContentDelta event");
                                     }
-                                } else {
-                                    info!(target: "clauset::chat", "No current message to update");
                                 }
-                            }
-                            Err(e) => {
-                                info!(target: "clauset::chat", "Failed to read transcript: {}", e);
+
+                                info!(target: "clauset::chat", "Current message content after: {} chars", msg.content.len());
+                                self.persist_message(msg);
+                            } else {
+                                info!(target: "clauset::chat", "No current message to update");
                             }
                         }
-                    } else {
-                        info!(target: "clauset::chat", "No transcript_path provided");
+                        Err(e) => {
+                            info!(target: "clauset::chat", "Failed to read transcript: {}", e);
+                        }
                     }
                 } else {
-                    info!(target: "clauset::chat", "Transcript watcher active, skipping content read (watcher handles streaming)");
+                    info!(target: "clauset::chat", "No transcript_path provided");
                 }
 
                 // Finalize current assistant message
