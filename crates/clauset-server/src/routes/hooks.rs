@@ -135,10 +135,12 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 }
             }
 
-            // Confirm Ready state - session is initialized when spawned but this reinforces it
-            // This ensures the dashboard shows Ready after Claude fully starts
-            let update = HookActivityUpdate::stop(); // "stop" = Ready state
-            update_activity_from_hook(&state, session_id, update).await;
+            // NOTE: We intentionally do NOT set activity to Ready here.
+            // The session is already initialized to Ready when created in session.rs.
+            // Setting it here would cause a race condition: if UserPromptSubmit arrives
+            // before SessionStart (which can happen), this would overwrite the
+            // "Thinking" state with "Ready", causing the dashboard to show Ready
+            // even while Claude is actively processing.
         }
 
         HookEvent::SessionEnd {
