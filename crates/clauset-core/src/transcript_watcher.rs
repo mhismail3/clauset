@@ -265,8 +265,29 @@ impl TranscriptWatcher {
 
         let watcher_clone = watcher.clone();
         let path = futures::executor::block_on(watcher.lock()).path.clone();
+        let path_for_task = path.clone();
 
-        // Start file watcher
+        // Watch the parent directory instead of the file directly.
+        // This handles the case where the transcript file doesn't exist yet
+        // (Claude Code creates it when the session starts processing).
+        let parent_dir = path.parent().ok_or_else(|| {
+            crate::ClausetError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Cannot get parent directory of {:?}", path),
+            ))
+        })?;
+
+        // Ensure parent directory exists
+        if !parent_dir.exists() {
+            std::fs::create_dir_all(parent_dir).map_err(|e| {
+                crate::ClausetError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to create directory {:?}: {}", parent_dir, e),
+                ))
+            })?;
+        }
+
+        // Start file watcher on parent directory
         let (notify_tx, mut notify_rx) = mpsc::unbounded_channel();
         let mut file_watcher = notify::recommended_watcher(move |res: std::result::Result<Event, notify::Error>| {
             if let Ok(event) = res {
@@ -274,7 +295,7 @@ impl TranscriptWatcher {
             }
         }).map_err(|e| crate::ClausetError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
 
-        file_watcher.watch(&path, RecursiveMode::NonRecursive)
+        file_watcher.watch(parent_dir, RecursiveMode::NonRecursive)
             .map_err(|e| crate::ClausetError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
 
         // Spawn task to process file events
@@ -282,10 +303,17 @@ impl TranscriptWatcher {
             loop {
                 tokio::select! {
                     Some(event) = notify_rx.recv() => {
-                        // Check if file was modified or written
+                        // Only process events for our specific file
+                        let is_our_file = event.paths.iter().any(|p| p == &path_for_task);
+                        if !is_our_file {
+                            continue;
+                        }
+
+                        // Check if file was created, modified, or written
                         let should_read = matches!(
                             event.kind,
-                            EventKind::Modify(ModifyKind::Data(_))
+                            EventKind::Create(_)
+                                | EventKind::Modify(ModifyKind::Data(_))
                                 | EventKind::Modify(ModifyKind::Any)
                                 | EventKind::Access(AccessKind::Close(AccessMode::Write))
                         );
@@ -924,8 +952,6 @@ pub fn transcript_event_to_chat_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
-    use std::io::Write;
 
     #[test]
     fn test_extract_text_content_string() {
