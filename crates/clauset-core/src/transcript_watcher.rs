@@ -139,6 +139,30 @@ pub enum TranscriptEvent {
         message_id: String,
         usage: TranscriptUsage,
     },
+    /// System event (stop_hook_summary, compact_boundary, etc.)
+    SystemEvent {
+        message_id: String,
+        /// Subtype of system event (e.g., "stop_hook_summary", "compact_boundary")
+        subtype: String,
+        /// Content text if present
+        content: Option<String>,
+        /// Additional metadata
+        metadata: Option<Value>,
+        timestamp: u64,
+    },
+    /// File history snapshot (tracking file modifications)
+    FileSnapshot {
+        message_id: String,
+        /// Paths to files included in the snapshot
+        file_paths: Vec<String>,
+        timestamp: u64,
+    },
+    /// Context compaction boundary marker
+    ContextCompacted {
+        timestamp: u64,
+        /// Metadata about the compaction (e.g., hook counts)
+        metadata: Option<Value>,
+    },
 }
 
 /// Entry from Claude's transcript JSONL.
@@ -148,6 +172,21 @@ struct TranscriptEntry {
     entry_type: String,
     message: Option<TranscriptMessageEntry>,
     timestamp: Option<String>,
+    /// Subtype for system entries (e.g., "stop_hook_summary", "compact_boundary")
+    #[serde(default)]
+    subtype: Option<String>,
+    /// Metadata for file-history-snapshot entries
+    #[serde(rename = "filePaths", default)]
+    file_paths: Option<Vec<String>>,
+    /// Content for system entries
+    #[serde(default)]
+    content: Option<Value>,
+    /// Hook count for stop_hook_summary
+    #[serde(rename = "hookCount", default)]
+    hook_count: Option<u64>,
+    /// Compact metadata for compact_boundary
+    #[serde(rename = "compactMetadata", default)]
+    compact_metadata: Option<Value>,
 }
 
 /// Usage data embedded in assistant messages.
@@ -350,7 +389,8 @@ impl TranscriptWatcher {
 
         let timestamp = entry
             .timestamp
-            .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
+            .as_ref()
+            .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
             .map(|dt| dt.timestamp_millis() as u64)
             .unwrap_or_else(|| {
                 std::time::SystemTime::now()
@@ -366,8 +406,18 @@ impl TranscriptWatcher {
             "assistant" => {
                 self.process_assistant_message(entry.message, timestamp);
             }
-            _ => {
-                // System events, etc. - skip for now
+            "system" => {
+                self.process_system_entry(&entry, timestamp);
+            }
+            "file-history-snapshot" => {
+                self.process_file_snapshot(&entry, timestamp);
+            }
+            other => {
+                debug!(
+                    target: "clauset::transcript_watcher",
+                    "Unhandled transcript entry type: {}",
+                    other
+                );
             }
         }
     }
@@ -521,6 +571,118 @@ impl TranscriptWatcher {
                 // Unknown block type - skip
             }
         }
+    }
+
+    /// Process a system entry (stop_hook_summary, compact_boundary, etc.)
+    fn process_system_entry(&mut self, entry: &TranscriptEntry, timestamp: u64) {
+        let subtype = match &entry.subtype {
+            Some(s) => s.clone(),
+            None => {
+                debug!(
+                    target: "clauset::transcript_watcher",
+                    "System entry without subtype, skipping"
+                );
+                return;
+            }
+        };
+
+        let message_id = format!("system-{}-{}", subtype, uuid::Uuid::new_v4());
+
+        // Extract text content if present
+        let content_text = entry.content.as_ref().and_then(|c| {
+            if let Value::String(s) = c {
+                Some(s.clone())
+            } else if let Value::Array(arr) = c {
+                // Content might be an array of blocks
+                let texts: Vec<String> = arr
+                    .iter()
+                    .filter_map(|b| {
+                        if let Some(text) = b.get("text").and_then(|t| t.as_str()) {
+                            Some(text.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if texts.is_empty() {
+                    None
+                } else {
+                    Some(texts.join("\n"))
+                }
+            } else {
+                None
+            }
+        });
+
+        // Handle compact_boundary specially
+        if subtype == "compact_boundary" {
+            info!(
+                target: "clauset::transcript_watcher",
+                "Context compaction boundary detected at timestamp {}",
+                timestamp
+            );
+            let _ = self.event_tx.send(TranscriptEvent::ContextCompacted {
+                timestamp,
+                metadata: entry.compact_metadata.clone(),
+            });
+            return;
+        }
+
+        // Build metadata from various fields
+        let metadata = if entry.hook_count.is_some() || entry.compact_metadata.is_some() {
+            let mut meta = serde_json::Map::new();
+            if let Some(hook_count) = entry.hook_count {
+                meta.insert("hookCount".to_string(), Value::Number(hook_count.into()));
+            }
+            if let Some(ref compact_meta) = entry.compact_metadata {
+                meta.insert("compactMetadata".to_string(), compact_meta.clone());
+            }
+            Some(Value::Object(meta))
+        } else {
+            None
+        };
+
+        debug!(
+            target: "clauset::transcript_watcher",
+            "Emitting SystemEvent: subtype={}, has_content={}",
+            subtype,
+            content_text.is_some()
+        );
+
+        let _ = self.event_tx.send(TranscriptEvent::SystemEvent {
+            message_id,
+            subtype,
+            content: content_text,
+            metadata,
+            timestamp,
+        });
+    }
+
+    /// Process a file-history-snapshot entry.
+    fn process_file_snapshot(&mut self, entry: &TranscriptEntry, timestamp: u64) {
+        let file_paths = entry.file_paths.clone().unwrap_or_default();
+
+        if file_paths.is_empty() {
+            debug!(
+                target: "clauset::transcript_watcher",
+                "File snapshot with no file paths, skipping"
+            );
+            return;
+        }
+
+        let message_id = format!("file-snapshot-{}", uuid::Uuid::new_v4());
+
+        debug!(
+            target: "clauset::transcript_watcher",
+            "Emitting FileSnapshot: {} files",
+            file_paths.len()
+        );
+
+        let _ = self.event_tx.send(TranscriptEvent::FileSnapshot {
+            message_id,
+            file_paths,
+            timestamp,
+        });
     }
 }
 
@@ -744,6 +906,18 @@ pub fn transcript_event_to_chat_event(
 
         // Usage events are handled separately (not chat events) - skip
         TranscriptEvent::Usage { .. } => None,
+
+        // System events - not converted to chat events
+        // These are handled separately for session state updates
+        TranscriptEvent::SystemEvent { .. } => None,
+
+        // File snapshots - not converted to chat events
+        // Could be used for file tracking in the future
+        TranscriptEvent::FileSnapshot { .. } => None,
+
+        // Context compaction - not converted to chat events
+        // Handled separately to notify frontend of context reset
+        TranscriptEvent::ContextCompacted { .. } => None,
     }
 }
 

@@ -69,8 +69,24 @@ pub async fn receive(
     }
 
     if let Some(raw_mode) = permission_mode {
+        debug!(
+            target: "clauset::hooks::mode",
+            "Hook has permission_mode: '{}' for session {}",
+            raw_mode, session_id
+        );
         if let Some(mode) = PermissionMode::from_hook_value(&raw_mode) {
+            debug!(
+                target: "clauset::hooks::mode",
+                "Parsed permission mode {:?} for session {}, updating...",
+                mode, session_id
+            );
             state.session_manager.update_permission_mode(session_id, mode).await;
+        } else {
+            warn!(
+                target: "clauset::hooks::mode",
+                "Failed to parse permission mode '{}' for session {}",
+                raw_mode, session_id
+            );
         }
     }
 
@@ -172,6 +188,43 @@ async fn process_hook_event(
                                             usage.cache_creation_input_tokens,
                                             &usage.model,
                                         ).await;
+                                    }
+                                    // Context compaction events - broadcast to frontend
+                                    TranscriptEvent::ContextCompacted { timestamp, metadata } => {
+                                        info!(
+                                            target: "clauset::hooks",
+                                            "Context compaction detected for session {} at timestamp {}",
+                                            session_id, timestamp
+                                        );
+                                        // Broadcast context compacting event
+                                        let trigger = metadata
+                                            .as_ref()
+                                            .and_then(|m| m.get("trigger"))
+                                            .and_then(|t| t.as_str())
+                                            .unwrap_or("transcript")
+                                            .to_string();
+                                        let _ = session_manager.broadcast_event(ProcessEvent::ContextCompacting {
+                                            session_id,
+                                            trigger,
+                                        });
+                                    }
+                                    // System events - log for debugging, could be used for notifications
+                                    TranscriptEvent::SystemEvent { subtype, content, .. } => {
+                                        debug!(
+                                            target: "clauset::hooks",
+                                            "System event for session {}: subtype={}, has_content={}",
+                                            session_id, subtype, content.is_some()
+                                        );
+                                        // Future: could emit notifications for certain subtypes
+                                    }
+                                    // File snapshots - log for debugging
+                                    TranscriptEvent::FileSnapshot { file_paths, .. } => {
+                                        debug!(
+                                            target: "clauset::hooks",
+                                            "File snapshot for session {}: {} files",
+                                            session_id, file_paths.len()
+                                        );
+                                        // Future: could track file modifications
                                     }
                                     // Other events convert to chat events for broadcast
                                     _ => {

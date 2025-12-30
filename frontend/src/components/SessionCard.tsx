@@ -462,7 +462,7 @@ export function SessionCard(props: SessionCardProps) {
               }))}
             </span>
           </Show>
-          <Show when={props.session.context_percent > 0}>
+          <Show when={props.session.context_percent >= 0}>
             <span style={{ color: 'var(--color-text-muted)' }}>|</span>
             <span>ctx:{props.session.context_percent}%</span>
           </Show>

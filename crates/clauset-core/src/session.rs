@@ -682,7 +682,18 @@ impl SessionManager {
         session_id: Uuid,
         mode: clauset_types::PermissionMode,
     ) {
-        if self.buffers.update_permission_mode(session_id, mode).await {
+        let changed = self.buffers.update_permission_mode(session_id, mode).await;
+        tracing::debug!(
+            target: "clauset::session::mode",
+            "update_permission_mode for session {}: mode={:?}, changed={}",
+            session_id, mode, changed
+        );
+        if changed {
+            tracing::info!(
+                target: "clauset::session::mode",
+                "Broadcasting ModeChange event for session {}: {:?}",
+                session_id, mode
+            );
             let _ = self.event_tx.send(ProcessEvent::ModeChange {
                 session_id,
                 mode,

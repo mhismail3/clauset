@@ -45,16 +45,26 @@ pub async fn handle_websocket(
         ws_tx.send(Message::Text(json.into())).await?;
     }
 
-    if let Some(activity) = state.session_manager.get_activity(session_id).await {
-        if let Some(mode) = activity.permission_mode {
-            let mode_msg = WsServerMessage::ModeChange {
-                session_id,
-                mode,
-            };
-            let json = serde_json::to_string(&mode_msg)?;
-            ws_tx.send(Message::Text(json.into())).await?;
-        }
-    }
+    // Always send initial mode - default if not set
+    let initial_mode = state
+        .session_manager
+        .get_activity(session_id)
+        .await
+        .and_then(|a| a.permission_mode)
+        .unwrap_or(clauset_types::PermissionMode::Default);
+
+    debug!(
+        target: "clauset::ws",
+        "Sending initial mode {:?} for session {}",
+        initial_mode, session_id
+    );
+
+    let mode_msg = WsServerMessage::ModeChange {
+        session_id,
+        mode: initial_mode,
+    };
+    let json = serde_json::to_string(&mode_msg)?;
+    ws_tx.send(Message::Text(json.into())).await?;
 
     // NOTE: Terminal buffer is NOT sent here on connect.
     // The client must first send a Resize message so tmux can be resized to match.
