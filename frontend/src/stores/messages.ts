@@ -15,7 +15,7 @@ export interface Message {
   timestamp: number;
   isStreaming?: boolean;
   /** System event type for system messages */
-  systemType?: 'subagent_started' | 'subagent_stopped' | 'subagent_completed' | 'tool_error' | 'context_compacting' | 'permission_request' | 'mode_change';
+  systemType?: 'subagent_started' | 'subagent_stopped' | 'subagent_completed' | 'tool_error' | 'context_compacting' | 'permission_request' | 'mode_change' | 'command';
   /** Additional metadata for system messages */
   metadata?: {
     agentId?: string;
@@ -28,6 +28,7 @@ export interface Message {
     trigger?: string;
     previousMode?: PermissionMode;
     newMode?: PermissionMode;
+    command?: string;
   };
   /** Whether a permission request has been responded to */
   responded?: boolean;
@@ -267,6 +268,18 @@ export function handleModeChange(
     'mode_change',
     `Mode changed: ${formatPermissionMode(previousMode)} -> ${formatPermissionMode(newMode)}`,
     { previousMode, newMode }
+  );
+}
+
+/**
+ * Handle clear command action.
+ */
+export function handleClearAction(sessionId: string) {
+  addSystemMessage(
+    sessionId,
+    'command',
+    'Context cleared',
+    { command: '/clear' }
   );
 }
 

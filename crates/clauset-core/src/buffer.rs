@@ -728,6 +728,15 @@ impl SessionBuffers {
         }
     }
 
+    /// Reset the context usage percentage without changing token totals.
+    pub async fn reset_context_percent(&self, session_id: Uuid) -> Option<SessionActivity> {
+        let mut buffers = self.buffers.write().await;
+        let buffer = buffers.get_mut(&session_id)?;
+        buffer.activity.context_percent = 0;
+        buffer.activity.last_update = std::time::Instant::now();
+        Some(buffer.activity.clone())
+    }
+
     /// Mark a session as busy (user sent input, waiting for Claude's response).
     /// This ensures the status stays "Thinking" until Claude reliably finishes.
     pub async fn mark_busy(&self, session_id: Uuid) {

@@ -212,6 +212,13 @@ export function MessageBubble(props: MessageBubbleProps) {
           color: '#22c55e',
           icon: '↹',
         };
+      case 'command':
+        return {
+          background: 'rgba(34, 197, 94, 0.15)',
+          border: '1px solid rgba(34, 197, 94, 0.4)',
+          color: '#22c55e',
+          icon: '🗑',
+        };
       default:
         return {
           background: 'rgba(100, 116, 139, 0.15)',

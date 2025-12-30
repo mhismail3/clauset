@@ -423,12 +423,15 @@ pub async fn handle_websocket(
                                 );
                                 continue;
                             }
+                            let is_slash_command = content.trim_start().starts_with('/');
                             // Mark session as busy before sending input
                             // This ensures status shows "Thinking" immediately
-                            state_clone
-                                .session_manager
-                                .mark_session_busy(session_id)
-                                .await;
+                            if !is_slash_command {
+                                state_clone
+                                    .session_manager
+                                    .mark_session_busy(session_id)
+                                    .await;
+                            }
                             let _ = state_clone
                                 .session_manager
                                 .send_input(session_id, &content)

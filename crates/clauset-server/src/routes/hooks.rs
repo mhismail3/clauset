@@ -155,6 +155,9 @@ async fn process_hook_event(
         } => {
             info!(target: "clauset::hooks", "Session {} started (source: {})", session_id, source);
 
+            let should_reset_context =
+                source == "clear" && context_window.as_ref().and_then(|ctx| ctx.current_usage.as_ref()).is_none();
+
             // Seed context/model data from hook payload when available.
             if let Some(ref ctx) = context_window {
                 state.session_manager.update_context_from_hook(
@@ -165,6 +168,10 @@ async fn process_hook_event(
                     ctx.current_usage.clone(),
                     model_display.clone(),
                 ).await;
+            }
+
+            if should_reset_context {
+                state.session_manager.reset_context_percent(session_id).await;
             }
 
             // Start transcript watcher for real-time content streaming
@@ -267,7 +274,11 @@ async fn process_hook_event(
 
             // Persist activity data before updating status
             state.session_manager.persist_session_activity(session_id).await;
-            let _ = state.session_manager.update_status(session_id, SessionStatus::Stopped);
+            if reason == "clear" {
+                state.session_manager.reset_context_percent(session_id).await;
+            } else {
+                let _ = state.session_manager.update_status(session_id, SessionStatus::Stopped);
+            }
         }
 
         HookEvent::UserPromptSubmit {

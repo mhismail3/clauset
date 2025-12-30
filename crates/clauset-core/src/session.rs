@@ -676,6 +676,90 @@ impl SessionManager {
         }
     }
 
+    /// Reset the context usage percentage (e.g., after /clear) without changing totals.
+    pub async fn reset_context_percent(&self, session_id: Uuid) {
+        let Some(mut activity) = self.buffers.reset_context_percent(session_id).await else {
+            return;
+        };
+
+        let session = match self.db.get(session_id) {
+            Ok(Some(session)) => session,
+            _ => return,
+        };
+
+        let model = if activity.model.is_empty() {
+            session.model.clone()
+        } else {
+            activity.model.clone()
+        };
+        let cost = if activity.cost > 0.0 {
+            activity.cost
+        } else {
+            session.total_cost_usd
+        };
+        let input_tokens = if activity.input_tokens > 0 {
+            activity.input_tokens
+        } else {
+            session.input_tokens
+        };
+        let output_tokens = if activity.output_tokens > 0 {
+            activity.output_tokens
+        } else {
+            session.output_tokens
+        };
+
+        activity.model = model.clone();
+        activity.cost = cost;
+        activity.input_tokens = input_tokens;
+        activity.output_tokens = output_tokens;
+        activity.context_percent = 0;
+
+        let current_activity = activity.current_activity.clone();
+        let current_step = activity.current_step.clone();
+        let recent_actions = activity.recent_actions.clone();
+        let cache_read_tokens = activity.cache_read_tokens;
+        let cache_creation_tokens = activity.cache_creation_tokens;
+        let context_window_size = activity.context_window_size;
+
+        if let Err(e) = self.db.update_stats(
+            session_id,
+            &model,
+            cost,
+            input_tokens,
+            output_tokens,
+            0,
+        ) {
+            warn!(
+                target: "clauset::session",
+                "Failed to reset context percent for session {}: {}",
+                session_id,
+                e
+            );
+        }
+
+        let _ = self.event_tx.send(ProcessEvent::ActivityUpdate {
+            session_id,
+            model,
+            cost,
+            input_tokens,
+            output_tokens,
+            context_percent: 0,
+            current_activity,
+            current_step,
+            recent_actions,
+        });
+
+        let _ = self.event_tx.send(ProcessEvent::ContextUpdate {
+            session_id,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            context_window_size,
+            context_percent: 0,
+        });
+    }
+
     /// Update permission mode from hook data and broadcast mode change.
     pub async fn update_permission_mode(
         &self,

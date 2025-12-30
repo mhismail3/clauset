@@ -4,6 +4,7 @@ import { QuickActionsMenu } from './QuickActionsMenu';
 
 interface InputBarProps {
   onSend: (message: string) => void;
+  onQuickAction?: (command: string) => boolean;
   onSendTerminalInput?: (data: Uint8Array) => void;
   disabled?: boolean;
   placeholder?: string;
@@ -98,7 +99,10 @@ export function InputBar(props: InputBarProps) {
         <QuickActionsMenu
           onSelectCommand={(cmd) => {
             if (!props.disabled) {
-              props.onSend(cmd);
+              const handled = props.onQuickAction?.(cmd);
+              if (!handled) {
+                props.onSend(cmd);
+              }
             }
           }}
           onSendTerminalInput={(input) => {

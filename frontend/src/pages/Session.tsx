@@ -29,6 +29,7 @@ import {
   handleContextCompacting,
   markPermissionResponded,
   handleModeChange,
+  handleClearAction,
   addUserMessage,
   type ChatEvent,
   type ChatMessage,
@@ -615,6 +616,15 @@ export default function SessionPage() {
     }
   }
 
+  async function sendInput(content: string) {
+    const sessionId = params.id;
+    if (wsManager && wsState() === 'connected') {
+      wsManager.send({ type: 'input', content });
+    } else {
+      await api.sessions.sendInput(sessionId, content);
+    }
+  }
+
   async function handleSendMessage(content: string) {
     const sessionId = params.id;
 
@@ -624,11 +634,15 @@ export default function SessionPage() {
 
     scrollToBottom();
 
-    if (wsManager && wsState() === 'connected') {
-      wsManager.send({ type: 'input', content });
-    } else {
-      await api.sessions.sendInput(sessionId, content);
-    }
+    await sendInput(content);
+  }
+
+  function handleQuickActionCommand(command: string) {
+    if (command !== '/clear') return false;
+    handleClearAction(params.id);
+    scrollToBottom();
+    void sendInput(command);
+    return true;
   }
 
   function handleTerminalInput(data: Uint8Array) {
@@ -1133,6 +1147,7 @@ export default function SessionPage() {
 
             <InputBar
               onSend={handleSendMessage}
+              onQuickAction={handleQuickActionCommand}
               onSendTerminalInput={handleTerminalInput}
               disabled={wsState() !== 'connected' || getInteractiveState(params.id).type === 'prompt' || getTuiMenuState(params.id).type === 'active'}
               placeholder="Type here..."
