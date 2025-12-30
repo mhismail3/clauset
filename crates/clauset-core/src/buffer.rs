@@ -240,8 +240,11 @@ pub struct SessionActivity {
     /// When true, transcript data is used and hook context is skipped.
     pub transcript_usage_received: bool,
     /// Whether we've received context data from hooks.
-    /// When true, hook data is authoritative and we skip fragile regex parsing.
+    /// Hook data is used as a fallback when no status line data is available.
     pub hook_context_received: bool,
+    /// Whether we've parsed a terminal status line for tokens/context.
+    /// When true, status line values are treated as authoritative for display parity.
+    pub status_line_seen: bool,
 }
 
 impl Default for SessionActivity {
@@ -267,6 +270,7 @@ impl Default for SessionActivity {
             bytes_since_activity: 0,
             transcript_usage_received: false,
             hook_context_received: false,
+            status_line_seen: false,
         }
     }
 }
@@ -483,10 +487,8 @@ impl SessionBuffers {
 
         // Parse status line from FULL BUFFER: "Model | $Cost | InputK/OutputK | ctx:X%"
         //
-        // Regex is only used as fallback when authoritative sources haven't provided data:
-        // - Transcript is authoritative for tokens (transcript_usage_received)
-        // - Hooks are authoritative for context window (hook_context_received)
-        // - Cost is ONLY available from regex (Claude Code doesn't provide it via hooks/transcript)
+        // Status line values are treated as authoritative for display parity with the terminal.
+        // Hooks/transcript still populate cache tokens and context window metadata.
         if let Some(status) = parse_status_line(&clean_buffer) {
             // Always update model if not set (model comes from transcript too, but regex is faster)
             if buffer.activity.model.is_empty() && !status.model.is_empty() {
@@ -500,24 +502,26 @@ impl SessionBuffers {
                 changed = true;
             }
 
-            // Only use regex for tokens if we DON'T have transcript data
-            if !buffer.activity.transcript_usage_received && !buffer.activity.hook_context_received {
-                let input_changed = buffer.activity.input_tokens != status.input_tokens;
-                let output_changed = buffer.activity.output_tokens != status.output_tokens;
-                let ctx_changed = buffer.activity.context_percent != status.context_percent;
+            let input_changed = buffer.activity.input_tokens != status.input_tokens;
+            let output_changed = buffer.activity.output_tokens != status.output_tokens;
+            let ctx_changed = buffer.activity.context_percent != status.context_percent;
 
-                if input_changed || output_changed || ctx_changed {
-                    tracing::debug!(
-                        target: "clauset::activity::stats",
-                        "Stats updated (regex fallback): tokens={}K/{}K, ctx={}%",
-                        status.input_tokens/1000, status.output_tokens/1000, status.context_percent
-                    );
-                    buffer.activity.input_tokens = status.input_tokens;
-                    buffer.activity.output_tokens = status.output_tokens;
-                    buffer.activity.context_percent = status.context_percent;
-                    buffer.activity.last_update = std::time::Instant::now();
-                    changed = true;
-                }
+            if input_changed || output_changed || ctx_changed {
+                tracing::debug!(
+                    target: "clauset::activity::stats",
+                    "Stats updated (status line): tokens={}K/{}K, ctx={}%",
+                    status.input_tokens/1000, status.output_tokens/1000, status.context_percent
+                );
+                buffer.activity.input_tokens = status.input_tokens;
+                buffer.activity.output_tokens = status.output_tokens;
+                buffer.activity.context_percent = status.context_percent;
+                buffer.activity.last_update = std::time::Instant::now();
+                changed = true;
+            }
+
+            if !buffer.activity.status_line_seen {
+                buffer.activity.status_line_seen = true;
+                changed = true;
             }
         }
 
@@ -918,6 +922,7 @@ impl SessionBuffers {
         let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
 
         let mut changed = false;
+        let use_status_line = buffer.activity.status_line_seen;
 
         // Mark that we've received hook context
         if !buffer.activity.hook_context_received {
@@ -938,15 +943,17 @@ impl SessionBuffers {
             changed = true;
         }
 
-        // Always update token counts from hooks - they are authoritative
-        // This handles /clear scenarios where tokens reset to low values or zero
-        if buffer.activity.input_tokens != input_tokens {
-            buffer.activity.input_tokens = input_tokens;
-            changed = true;
-        }
-        if buffer.activity.output_tokens != output_tokens {
-            buffer.activity.output_tokens = output_tokens;
-            changed = true;
+        // Update token counts from hooks unless status line parsing is active.
+        if !use_status_line {
+            // This handles /clear scenarios where tokens reset to low values or zero
+            if buffer.activity.input_tokens != input_tokens {
+                buffer.activity.input_tokens = input_tokens;
+                changed = true;
+            }
+            if buffer.activity.output_tokens != output_tokens {
+                buffer.activity.output_tokens = output_tokens;
+                changed = true;
+            }
         }
 
         // Recalculate context percentage (prefer current usage from hooks).
@@ -955,19 +962,18 @@ impl SessionBuffers {
         } else {
             context_window_size
         };
-        if effective_window > 0 {
-            let new_context_percent = if let Some(usage) = current_usage {
+        if effective_window > 0 && !use_status_line {
+            if let Some(usage) = current_usage {
                 let current_context =
                     usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens;
-                ((current_context.saturating_mul(100)) / effective_window).min(100) as u8
-            } else {
-                // Calculate from stored tokens (may be 0 after /clear)
-                let total_tokens = buffer.activity.input_tokens + buffer.activity.output_tokens;
-                ((total_tokens as f64 / effective_window as f64) * 100.0).min(100.0) as u8
-            };
-
-            if buffer.activity.context_percent != new_context_percent {
-                buffer.activity.context_percent = new_context_percent;
+                let new_context_percent =
+                    ((current_context.saturating_mul(100)) / effective_window).min(100) as u8;
+                if buffer.activity.context_percent != new_context_percent {
+                    buffer.activity.context_percent = new_context_percent;
+                    changed = true;
+                }
+            } else if input_tokens == 0 && output_tokens == 0 && buffer.activity.context_percent != 0 {
+                buffer.activity.context_percent = 0;
                 changed = true;
             }
         }
@@ -1020,12 +1026,14 @@ impl SessionBuffers {
             buffer.activity.transcript_usage_received = true;
         }
 
+        let use_status_line = buffer.activity.status_line_seen;
+
         // Accumulate cache token counts from transcript
         buffer.activity.cache_read_tokens += cache_read_tokens;
         buffer.activity.cache_creation_tokens += cache_creation_tokens;
 
         // Only use transcript totals when hooks haven't provided authoritative totals.
-        if !buffer.activity.hook_context_received {
+        if !buffer.activity.hook_context_received && !use_status_line {
             let combined_input = input_tokens + cache_read_tokens + cache_creation_tokens;
             buffer.activity.input_tokens += combined_input;
             buffer.activity.output_tokens += output_tokens;
@@ -1042,7 +1050,7 @@ impl SessionBuffers {
         }
 
         // Recalculate context percentage (only if hooks haven't provided current usage)
-        if buffer.activity.context_window_size > 0 && !buffer.activity.hook_context_received {
+        if buffer.activity.context_window_size > 0 && !buffer.activity.hook_context_received && !use_status_line {
             let total_tokens = buffer.activity.input_tokens + buffer.activity.output_tokens;
             buffer.activity.context_percent =
                 ((total_tokens as f64 / buffer.activity.context_window_size as f64) * 100.0)
@@ -1124,6 +1132,17 @@ static STATUS_LINE_FULL: Lazy<Regex> = Lazy::new(|| {
 /// K suffix is optional. Requires ctx suffix to prevent false positives.
 static STATUS_LINE_TOKENS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^([0-9.]+)([kKmM]?)/([0-9.]+)([kKmM]?)\s*\|\s*ctx:(\d+)%!?").unwrap()
+});
+
+/// Regex for continuation line with tokens but no ctx suffix.
+/// Used when ctx appears on a separate line.
+static STATUS_LINE_TOKENS_NO_CTX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^([0-9.]+)([kKmM]?)/([0-9.]+)([kKmM]?)\s*\|?\s*$").unwrap()
+});
+
+/// Regex for a standalone ctx line like "ctx:19%".
+static STATUS_LINE_CTX_ONLY: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^ctx:(\d+)%!?\b.*$").unwrap()
 });
 
 const MAX_REASONABLE_TOKENS: u64 = 10_000_000;
@@ -1258,6 +1277,20 @@ fn parse_status_line(text: &str) -> Option<ParsedStatus> {
                     let outk = parse_tokens_with_suffix(token_caps.get(3), token_caps.get(4));
                     let ctx: u8 = token_caps.get(5).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
                     (ink, outk, ctx)
+                } else if let Some(token_caps) = STATUS_LINE_TOKENS_NO_CTX.captures(next_line) {
+                    let ink = parse_tokens_with_suffix(token_caps.get(1), token_caps.get(2));
+                    let outk = parse_tokens_with_suffix(token_caps.get(3), token_caps.get(4));
+                    let ctx = if i + 2 < lines.len() {
+                        let ctx_line = lines[i + 2].trim();
+                        STATUS_LINE_CTX_ONLY
+                            .captures(ctx_line)
+                            .and_then(|caps| caps.get(1))
+                            .and_then(|m| m.as_str().parse().ok())
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    (ink, outk, ctx)
                 } else {
                     (0, 0, 0)
                 }
@@ -1280,10 +1313,20 @@ fn parse_status_line(text: &str) -> Option<ParsedStatus> {
         }
 
         // Try tokens-only line (second line of wrapped status, search backwards for model)
-        if let Some(token_caps) = STATUS_LINE_TOKENS.captures(trimmed) {
+        if let Some(token_caps) = STATUS_LINE_TOKENS.captures(trimmed)
+            .or_else(|| STATUS_LINE_TOKENS_NO_CTX.captures(trimmed))
+        {
             let input_tokens = parse_tokens_with_suffix(token_caps.get(1), token_caps.get(2));
             let output_tokens = parse_tokens_with_suffix(token_caps.get(3), token_caps.get(4));
-            let context: u8 = token_caps.get(5).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            let mut context: u8 = token_caps.get(5).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            if context == 0 && i + 1 < lines.len() {
+                let ctx_line = lines[i + 1].trim();
+                context = STATUS_LINE_CTX_ONLY
+                    .captures(ctx_line)
+                    .and_then(|caps| caps.get(1))
+                    .and_then(|m| m.as_str().parse().ok())
+                    .unwrap_or(0);
+            }
 
             // Sanity check: reject obvious false positives from accidental pattern matches
             if input_tokens > MAX_REASONABLE_TOKENS || output_tokens > MAX_REASONABLE_TOKENS {
@@ -2512,6 +2555,17 @@ mod tests {
         assert_eq!(status2.input_tokens, 10500);
         assert_eq!(status2.output_tokens, 8200);
         assert_eq!(status2.context_percent, 15);
+    }
+
+    #[test]
+    fn test_parse_status_line_ctx_on_separate_line() {
+        let wrapped = "Haiku 4.5 | $0.08 |\n3.9K/1.5K |\nctx:19%";
+        let status = parse_status_line(wrapped).unwrap();
+        assert_eq!(status.model, "Haiku 4.5");
+        assert!((status.cost - 0.08).abs() < 0.01);
+        assert_eq!(status.input_tokens, 3900);
+        assert_eq!(status.output_tokens, 1500);
+        assert_eq!(status.context_percent, 19);
     }
 
     #[test]

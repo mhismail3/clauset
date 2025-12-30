@@ -3,7 +3,6 @@ import {
   formatTokens,
   formatCost,
   shortenModel,
-  normalizeTokenCount,
   formatPermissionMode,
   type PermissionMode,
 } from '../../lib/format';
@@ -25,18 +24,6 @@ export function StatusBar(props: StatusBarProps) {
     props.cost !== undefined ||
     props.model !== undefined ||
     props.mode !== undefined;
-
-  const normalizedInputTokens = () =>
-    normalizeTokenCount(props.inputTokens, {
-      cost: props.cost,
-      contextPercent: props.contextPercent,
-    });
-
-  const normalizedOutputTokens = () =>
-    normalizeTokenCount(props.outputTokens, {
-      cost: props.cost,
-      contextPercent: props.contextPercent,
-    });
 
   const contextColor = () => {
     const pct = props.contextPercent ?? 0;
@@ -88,11 +75,11 @@ export function StatusBar(props: StatusBarProps) {
         <Show when={props.inputTokens !== undefined}>
           <span>
             <span style={{ color: 'var(--color-text-secondary)' }}>
-              {formatTokens(normalizedInputTokens())}
+              {formatTokens(props.inputTokens)}
             </span>
             <span style={{ opacity: 0.6 }}>/</span>
             <span style={{ color: 'var(--color-text-secondary)' }}>
-              {formatTokens(normalizedOutputTokens())}
+              {formatTokens(props.outputTokens)}
             </span>
           </span>
         </Show>

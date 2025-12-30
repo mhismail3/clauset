@@ -3,7 +3,7 @@ import { A } from '@solidjs/router';
 import { Badge } from './ui/Badge';
 import type { Session } from '../lib/api';
 import { getStatusVariant, getStatusLabel, formatRelativeTime } from '../stores/sessions';
-import { formatTokens, normalizeTokenCount, shortenModel } from '../lib/format';
+import { formatTokens, shortenModel } from '../lib/format';
 
 interface SessionCardProps {
   session: Session;
@@ -453,13 +453,7 @@ export function SessionCard(props: SessionCardProps) {
           <Show when={props.session.input_tokens > 0 || props.session.output_tokens > 0}>
             <span style={{ color: 'var(--color-text-muted)' }}>|</span>
             <span>
-              {formatTokens(normalizeTokenCount(props.session.input_tokens, {
-                cost: props.session.total_cost_usd,
-                contextPercent: props.session.context_percent,
-              }))}/{formatTokens(normalizeTokenCount(props.session.output_tokens, {
-                cost: props.session.total_cost_usd,
-                contextPercent: props.session.context_percent,
-              }))}
+              {formatTokens(props.session.input_tokens)}/{formatTokens(props.session.output_tokens)}
             </span>
           </Show>
           <Show when={props.session.context_percent >= 0}>
