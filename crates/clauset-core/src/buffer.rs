@@ -929,11 +929,13 @@ impl SessionBuffers {
             changed = true;
         }
 
-        if buffer.activity.input_tokens != input_tokens && input_tokens > 0 {
+        // Always update token counts from hooks - they are authoritative
+        // This handles /clear scenarios where tokens reset to low values or zero
+        if buffer.activity.input_tokens != input_tokens {
             buffer.activity.input_tokens = input_tokens;
             changed = true;
         }
-        if buffer.activity.output_tokens != output_tokens && output_tokens > 0 {
+        if buffer.activity.output_tokens != output_tokens {
             buffer.activity.output_tokens = output_tokens;
             changed = true;
         }
@@ -945,23 +947,19 @@ impl SessionBuffers {
             context_window_size
         };
         if effective_window > 0 {
-            if let Some(usage) = current_usage {
+            let new_context_percent = if let Some(usage) = current_usage {
                 let current_context =
                     usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens;
-                let context_percent =
-                    ((current_context.saturating_mul(100)) / effective_window).min(100) as u8;
-                if buffer.activity.context_percent != context_percent {
-                    buffer.activity.context_percent = context_percent;
-                    changed = true;
-                }
-            } else if buffer.activity.input_tokens > 0 || buffer.activity.output_tokens > 0 {
+                ((current_context.saturating_mul(100)) / effective_window).min(100) as u8
+            } else {
+                // Calculate from stored tokens (may be 0 after /clear)
                 let total_tokens = buffer.activity.input_tokens + buffer.activity.output_tokens;
-                let context_percent =
-                    ((total_tokens as f64 / effective_window as f64) * 100.0).min(100.0) as u8;
-                if buffer.activity.context_percent != context_percent {
-                    buffer.activity.context_percent = context_percent;
-                    changed = true;
-                }
+                ((total_tokens as f64 / effective_window as f64) * 100.0).min(100.0) as u8
+            };
+
+            if buffer.activity.context_percent != new_context_percent {
+                buffer.activity.context_percent = new_context_percent;
+                changed = true;
             }
         }
 
@@ -1130,9 +1128,15 @@ static STATUS_LINE_MODEL_COST: Lazy<Regex> = Lazy::new(|| {
 });
 
 /// Regex for detecting permission mode in terminal output.
+/// Claude Code shows modes like:
+/// - "plan mode on (shift+tab to cycle)"
+/// - "accept edits on (shift+tab to cycle)"
+/// - "bypass permissions on (shift+tab to cycle)"
+/// - "Mode: Accept edits"
+/// - "Permission mode: Plan"
 static PERMISSION_MODE_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"(?i)\b(?:mode|permission(?:s)?(?:\s+mode)?)\b[:\s-]*(default|normal|accept edits?|accept_edits|acceptedits|bypass permissions?|bypass_permissions|bypasspermissions|plan(?: mode)?)"
+        r"(?i)(?:\b(?:mode|permission(?:s)?(?:\s+mode)?)\b[:\s-]*)?(default|normal|accept edits?|accept_edits|acceptedits|bypass permissions?|bypass_permissions|bypasspermissions|plan(?: mode)?)\b(?:\s+(?:on|mode)\b)?"
     ).unwrap()
 });
 
@@ -2429,6 +2433,23 @@ mod tests {
 
         let input4 = "Permission mode: Accept edits";
         assert_eq!(parse_permission_mode(input4), Some(PermissionMode::AcceptEdits));
+    }
+
+    #[test]
+    fn test_parse_permission_mode_claude_code_format() {
+        // Claude Code shows modes like: "plan mode on (shift+tab to cycle)"
+        let plan = "plan mode on (shift+tab to cycle)";
+        assert_eq!(parse_permission_mode(plan), Some(PermissionMode::Plan));
+
+        let accept = "accept edits on (shift+tab to cycle)";
+        assert_eq!(parse_permission_mode(accept), Some(PermissionMode::AcceptEdits));
+
+        let bypass = "bypass permissions on (shift+tab to cycle)";
+        assert_eq!(parse_permission_mode(bypass), Some(PermissionMode::BypassPermissions));
+
+        // With emoji prefix as shown in screenshots
+        let with_emoji = ">> accept edits on (shift+tab to cycle)";
+        assert_eq!(parse_permission_mode(with_emoji), Some(PermissionMode::AcceptEdits));
     }
 
     #[test]

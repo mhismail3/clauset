@@ -279,12 +279,27 @@ async fn process_hook_event(
         } => {
             debug!(target: "clauset::hooks", "User submitted prompt for session {}", session_id);
 
-            // Mark session as busy (user sent input)
-            state.session_manager.mark_session_busy(session_id).await;
+            // Check if this is a slash command (starts with /)
+            // Slash commands like /clear, /compact, /help are processed immediately
+            // and don't require Claude to "think" - don't set busy state
+            let is_slash_command = prompt.trim().starts_with('/');
 
-            // Update activity to "Thinking"
-            let update = HookActivityUpdate::user_prompt_submit();
-            update_activity_from_hook(&state, session_id, update).await;
+            if is_slash_command {
+                debug!(
+                    target: "clauset::hooks",
+                    "Slash command detected for session {}: {}",
+                    session_id,
+                    prompt.trim().split_whitespace().next().unwrap_or("/")
+                );
+                // Don't mark as busy or set "Thinking" for slash commands
+            } else {
+                // Mark session as busy (user sent input)
+                state.session_manager.mark_session_busy(session_id).await;
+
+                // Update activity to "Thinking"
+                let update = HookActivityUpdate::user_prompt_submit();
+                update_activity_from_hook(&state, session_id, update).await;
+            }
 
             // Update context window size from hook data (transcript handles token counts)
             if let Some(ref ctx) = context_window {

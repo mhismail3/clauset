@@ -478,9 +478,23 @@ export function handleChatHistory(sessionId: string, chatMessages: ChatMessage[]
   // Keep any real-time messages that aren't in server data (added since last save)
   // These are typically messages added via handleChatEvent during the current session
   const realtimeMessages = existingMessages.filter(m => {
-    // Keep messages that aren't in server data AND were added recently (within last minute)
-    // This preserves messages from real-time events that haven't been persisted to server yet
+    // Skip if ID matches server data
     if (serverMessageIds.has(m.id)) return false;
+
+    // For user messages, also check content-based duplicates
+    // User messages added locally may have different IDs than server messages
+    if (m.role === 'user') {
+      const isDuplicateContent = serverMessages.some(
+        sm => sm.role === 'user' && sm.content === m.content
+      );
+      if (isDuplicateContent) {
+        console.log('[messages] Filtering duplicate user message by content:', m.content.slice(0, 50));
+        return false;
+      }
+    }
+
+    // Only keep messages that were added recently (within last minute)
+    // This preserves messages from real-time events that haven't been persisted to server yet
     const isRecent = Date.now() - m.timestamp < 60000; // 1 minute
     return isRecent;
   });
