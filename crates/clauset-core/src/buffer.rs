@@ -7,7 +7,7 @@
 //! - TUI menu detection for native UI rendering
 
 use crate::TuiMenuParser;
-use clauset_types::TuiMenu;
+use clauset_types::{CurrentUsage, PermissionMode, TuiMenu};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -215,6 +215,7 @@ pub struct SessionActivity {
     /// Context window size for the model (from hooks, e.g., 200000)
     pub context_window_size: u64,
     pub context_percent: u8,
+    pub permission_mode: Option<PermissionMode>,
     /// Current high-level activity (e.g., "Thinking...", "Reading file.rs")
     pub current_activity: String,
     /// Current step being executed (tool name or phase)
@@ -254,6 +255,7 @@ impl Default for SessionActivity {
             cache_creation_tokens: 0,
             context_window_size: 0,
             context_percent: 0,
+            permission_mode: None,
             current_activity: String::new(),
             current_step: None,
             recent_actions: Vec::new(),
@@ -379,13 +381,15 @@ impl SessionBuffers {
     }
 
     /// Append terminal output to a session's buffer and parse for activity.
-    /// Returns (AppendResult, Option<SessionActivity>, Option<TuiMenu>) where:
+    /// Returns (AppendResult, Option<SessionActivity>, Option<TuiMenu>, Option<PermissionMode>) where:
     /// - activity is Some if it changed
     /// - tui_menu is Some if a new TUI menu was detected
-    pub async fn append(&self, session_id: Uuid, data: &[u8]) -> (AppendResult, Option<SessionActivity>, Option<TuiMenu>) {
+    /// - permission_mode is Some if the mode changed
+    pub async fn append(&self, session_id: Uuid, data: &[u8]) -> (AppendResult, Option<SessionActivity>, Option<TuiMenu>, Option<PermissionMode>) {
         let mut buffers = self.buffers.write().await;
         let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
         let append_result = buffer.append(data);
+        let previous_mode = buffer.activity.permission_mode;
 
         // Track bytes received since last activity indicator
         buffer.activity.bytes_since_activity += data.len();
@@ -413,7 +417,13 @@ impl SessionBuffers {
         // Check for TUI menu patterns in terminal output
         let tui_menu = buffer.tui_menu_parser.process(data);
 
-        (append_result, activity, tui_menu)
+        let mode_change = if buffer.activity.permission_mode != previous_mode {
+            buffer.activity.permission_mode
+        } else {
+            None
+        };
+
+        (append_result, activity, tui_menu, mode_change)
     }
 
     // ========================================================================
@@ -508,6 +518,14 @@ impl SessionBuffers {
                     buffer.activity.last_update = std::time::Instant::now();
                     changed = true;
                 }
+            }
+        }
+
+        if let Some(mode) = parse_permission_mode(&clean_buffer) {
+            if buffer.activity.permission_mode != Some(mode) {
+                buffer.activity.permission_mode = Some(mode);
+                buffer.activity.last_update = std::time::Instant::now();
+                changed = true;
             }
         }
 
@@ -875,17 +893,16 @@ impl SessionBuffers {
 
     /// Update context window size from hook data.
     ///
-    /// Hooks provide context_window_size which is needed for calculating context percentage.
-    /// Token counts are now handled by transcript (authoritative source).
-    ///
-    /// If transcript_usage_received is true, we only update context_window_size and model,
-    /// NOT token counts (to avoid conflicting with transcript accumulation).
+    /// Hooks provide context_window_size and total token counts.
+    /// When current_usage is available, we use it to compute context percentage
+    /// (matches Claude's statusline behavior).
     pub async fn update_context_from_hook(
         &self,
         session_id: Uuid,
         input_tokens: u64,
         output_tokens: u64,
         context_window_size: u64,
+        current_usage: Option<CurrentUsage>,
         model: Option<String>,
     ) -> Option<SessionActivity> {
         let mut buffers = self.buffers.write().await;
@@ -910,37 +927,34 @@ impl SessionBuffers {
         if buffer.activity.context_window_size != context_window_size && context_window_size > 0 {
             buffer.activity.context_window_size = context_window_size;
             changed = true;
-
-            // Recalculate context percentage with the new window size
-            if buffer.activity.input_tokens > 0 {
-                let total_tokens = buffer.activity.input_tokens + buffer.activity.output_tokens;
-                let context_percent =
-                    ((total_tokens as f64 / context_window_size as f64) * 100.0).min(100.0) as u8;
-                if buffer.activity.context_percent != context_percent {
-                    buffer.activity.context_percent = context_percent;
-                }
-            }
         }
 
-        // Only update token counts from hooks if transcript hasn't provided authoritative data.
-        // Once transcript_usage_received is true, transcript is the authoritative source.
-        if !buffer.activity.transcript_usage_received {
-            if buffer.activity.input_tokens != input_tokens && input_tokens > 0 {
-                buffer.activity.input_tokens = input_tokens;
-                changed = true;
-            }
-            if buffer.activity.output_tokens != output_tokens && output_tokens > 0 {
-                buffer.activity.output_tokens = output_tokens;
-                changed = true;
-            }
+        if buffer.activity.input_tokens != input_tokens && input_tokens > 0 {
+            buffer.activity.input_tokens = input_tokens;
+            changed = true;
+        }
+        if buffer.activity.output_tokens != output_tokens && output_tokens > 0 {
+            buffer.activity.output_tokens = output_tokens;
+            changed = true;
+        }
 
-            // Recalculate context percentage using hook tokens
-            let effective_window = if buffer.activity.context_window_size > 0 {
-                buffer.activity.context_window_size
-            } else {
-                context_window_size
-            };
-            if effective_window > 0 {
+        // Recalculate context percentage (prefer current usage from hooks).
+        let effective_window = if buffer.activity.context_window_size > 0 {
+            buffer.activity.context_window_size
+        } else {
+            context_window_size
+        };
+        if effective_window > 0 {
+            if let Some(usage) = current_usage {
+                let current_context =
+                    usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens;
+                let context_percent =
+                    ((current_context.saturating_mul(100)) / effective_window).min(100) as u8;
+                if buffer.activity.context_percent != context_percent {
+                    buffer.activity.context_percent = context_percent;
+                    changed = true;
+                }
+            } else if buffer.activity.input_tokens > 0 || buffer.activity.output_tokens > 0 {
                 let total_tokens = buffer.activity.input_tokens + buffer.activity.output_tokens;
                 let context_percent =
                     ((total_tokens as f64 / effective_window as f64) * 100.0).min(100.0) as u8;
@@ -962,7 +976,7 @@ impl SessionBuffers {
                 buffer.activity.output_tokens,
                 buffer.activity.context_window_size,
                 buffer.activity.context_percent,
-                if buffer.activity.transcript_usage_received { " (transcript authoritative)" } else { "" }
+                if buffer.activity.transcript_usage_received { " (transcript active)" } else { "" }
             );
             Some(buffer.activity.clone())
         } else {
@@ -972,7 +986,8 @@ impl SessionBuffers {
 
     /// Accumulate per-message token usage from transcript into cumulative session totals.
     ///
-    /// The transcript is the AUTHORITATIVE source for token data. Each message contains:
+    /// Transcript usage provides per-message token data. We use it as a fallback
+    /// when hooks have not provided authoritative totals. Each message contains:
     /// - `input_tokens`: New input tokens (not from cache)
     /// - `cache_read_input_tokens`: Tokens read from cache
     /// - `cache_creation_input_tokens`: Tokens written to cache
@@ -998,11 +1013,16 @@ impl SessionBuffers {
             buffer.activity.transcript_usage_received = true;
         }
 
-        // Accumulate token counts directly from transcript
-        buffer.activity.input_tokens += input_tokens;
-        buffer.activity.output_tokens += output_tokens;
+        // Accumulate cache token counts from transcript
         buffer.activity.cache_read_tokens += cache_read_tokens;
         buffer.activity.cache_creation_tokens += cache_creation_tokens;
+
+        // Only use transcript totals when hooks haven't provided authoritative totals.
+        if !buffer.activity.hook_context_received {
+            let combined_input = input_tokens + cache_read_tokens + cache_creation_tokens;
+            buffer.activity.input_tokens += combined_input;
+            buffer.activity.output_tokens += output_tokens;
+        }
 
         // Update model if provided and set default context window size
         if !model.is_empty() {
@@ -1014,8 +1034,8 @@ impl SessionBuffers {
             }
         }
 
-        // Recalculate context percentage
-        if buffer.activity.context_window_size > 0 {
+        // Recalculate context percentage (only if hooks haven't provided current usage)
+        if buffer.activity.context_window_size > 0 && !buffer.activity.hook_context_received {
             let total_tokens = buffer.activity.input_tokens + buffer.activity.output_tokens;
             buffer.activity.context_percent =
                 ((total_tokens as f64 / buffer.activity.context_window_size as f64) * 100.0)
@@ -1036,6 +1056,20 @@ impl SessionBuffers {
         );
 
         Some(buffer.activity.clone())
+    }
+
+    /// Update permission mode for a session.
+    pub async fn update_permission_mode(&self, session_id: Uuid, mode: PermissionMode) -> bool {
+        let mut buffers = self.buffers.write().await;
+        let buffer = buffers.entry(session_id).or_insert_with(TerminalBuffer::new);
+
+        if buffer.activity.permission_mode == Some(mode) {
+            return false;
+        }
+
+        buffer.activity.permission_mode = Some(mode);
+        buffer.activity.last_update = std::time::Instant::now();
+        true
     }
 }
 
@@ -1071,19 +1105,21 @@ struct ParsedStatus {
 }
 
 /// Regex for full status line: "Model | $Cost | Input/Output | ctx:X%"
-/// K suffix is optional since Claude Code sometimes omits it for small values.
+/// K suffix is optional since Claude Code omits it for small values.
 /// The ctx:X% suffix helps distinguish from false positives like "804/993 files".
 static STATUS_LINE_FULL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"^([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*(?:\|\s*([0-9.]+)K?/([0-9.]+)K?)?\s*(?:\|\s*ctx:(\d+)%)?"
+        r"^([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*(?:\|\s*([0-9.]+)([kKmM]?)/([0-9.]+)([kKmM]?)\s*)?(?:\|\s*ctx:(\d+)%!?)?"
     ).unwrap()
 });
 
 /// Regex for continuation line with tokens: "Input/Output | ctx:X%"
 /// K suffix is optional. Requires ctx suffix to prevent false positives.
 static STATUS_LINE_TOKENS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^([0-9.]+)K?/([0-9.]+)K?\s*\|\s*ctx:(\d+)%").unwrap()
+    Regex::new(r"^([0-9.]+)([kKmM]?)/([0-9.]+)([kKmM]?)\s*\|\s*ctx:(\d+)%!?").unwrap()
 });
+
+const MAX_REASONABLE_TOKENS: u64 = 10_000_000;
 
 /// Regex for model and cost pattern (allows trailing text like "Update available!")
 /// Used when tokens are on a separate line or when there's trailing notifications
@@ -1092,6 +1128,52 @@ static STATUS_LINE_MODEL_COST: Lazy<Regex> = Lazy::new(|| {
     // The \| at the end is optional and indicates tokens may follow (on same or next line)
     Regex::new(r"^([A-Za-z][A-Za-z0-9.\- ]*?)\s*\|\s*\$([0-9.]+)\s*\|?").unwrap()
 });
+
+/// Regex for detecting permission mode in terminal output.
+static PERMISSION_MODE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?i)\b(?:mode|permission(?:s)?(?:\s+mode)?)\b[:\s-]*(default|normal|accept edits?|accept_edits|acceptedits|bypass permissions?|bypass_permissions|bypasspermissions|plan(?: mode)?)"
+    ).unwrap()
+});
+
+fn parse_tokens_with_suffix(value: Option<regex::Match>, suffix: Option<regex::Match>) -> u64 {
+    let num = value
+        .and_then(|m| m.as_str().parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let suffix = suffix.map(|m| m.as_str()).unwrap_or("");
+    if suffix.eq_ignore_ascii_case("k") {
+        (num * 1000.0) as u64
+    } else if suffix.eq_ignore_ascii_case("m") {
+        (num * 1_000_000.0) as u64
+    } else {
+        num.round() as u64
+    }
+}
+
+fn parse_permission_mode(text: &str) -> Option<PermissionMode> {
+    let lines: Vec<&str> = text.lines().collect();
+
+    for line in lines.iter().rev().take(50) {
+        let clean = strip_ansi_codes(line).trim().to_string();
+        if clean.is_empty() || clean.len() > 120 {
+            continue;
+        }
+
+        if let Some(mode) = PermissionMode::from_hook_value(&clean) {
+            return Some(mode);
+        }
+
+        if let Some(caps) = PERMISSION_MODE_RE.captures(&clean) {
+            if let Some(raw) = caps.get(1) {
+                if let Some(mode) = PermissionMode::from_hook_value(raw.as_str()) {
+                    return Some(mode);
+                }
+            }
+        }
+    }
+
+    None
+}
 
 /// Parse Claude's status line format, handling multi-line wrapping.
 ///
@@ -1120,21 +1202,32 @@ fn parse_status_line(text: &str) -> Option<ParsedStatus> {
         if let Some(caps) = STATUS_LINE_FULL.captures(trimmed) {
             let model = caps.get(1)?.as_str().trim().to_string();
             let cost: f64 = caps.get(2)?.as_str().parse().ok()?;
-            let input_k: f64 = caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
-            let output_k: f64 = caps.get(4).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
-            let context: u8 = caps.get(5).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            let input_tokens = parse_tokens_with_suffix(caps.get(3), caps.get(4));
+            let output_tokens = parse_tokens_with_suffix(caps.get(5), caps.get(6));
+            let context: u8 = caps.get(7).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            let has_ctx = caps.get(7).is_some();
+            let has_tokens = caps.get(3).is_some();
+            let has_suffix = caps
+                .get(4)
+                .map(|m| !m.as_str().is_empty())
+                .unwrap_or(false)
+                || caps.get(6).map(|m| !m.as_str().is_empty()).unwrap_or(false);
 
-            // Sanity check: Claude Code sessions don't exceed 1000K tokens per metric
-            // Reject obvious false positives from accidental pattern matches
-            if input_k > 1000.0 || output_k > 1000.0 {
+            // If tokens are present but ctx and suffixes are missing, ignore as likely false positive.
+            if has_tokens && !has_ctx && !has_suffix {
+                continue;
+            }
+
+            // Sanity check: reject obvious false positives from accidental pattern matches
+            if input_tokens > MAX_REASONABLE_TOKENS || output_tokens > MAX_REASONABLE_TOKENS {
                 continue;
             }
 
             return Some(ParsedStatus {
                 model,
                 cost,
-                input_tokens: (input_k * 1000.0) as u64,
-                output_tokens: (output_k * 1000.0) as u64,
+                input_tokens,
+                output_tokens,
                 context_percent: context,
             });
         }
@@ -1145,42 +1238,42 @@ fn parse_status_line(text: &str) -> Option<ParsedStatus> {
             let cost: f64 = caps.get(2)?.as_str().parse().ok()?;
 
             // Check if next line has tokens/context (wrapped status)
-            let (input_k, output_k, context) = if i + 1 < lines.len() {
+            let (input_tokens, output_tokens, context) = if i + 1 < lines.len() {
                 let next_line = lines[i + 1].trim();
                 if let Some(token_caps) = STATUS_LINE_TOKENS.captures(next_line) {
-                    let ink: f64 = token_caps.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
-                    let outk: f64 = token_caps.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
-                    let ctx: u8 = token_caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+                    let ink = parse_tokens_with_suffix(token_caps.get(1), token_caps.get(2));
+                    let outk = parse_tokens_with_suffix(token_caps.get(3), token_caps.get(4));
+                    let ctx: u8 = token_caps.get(5).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
                     (ink, outk, ctx)
                 } else {
-                    (0.0, 0.0, 0)
+                    (0, 0, 0)
                 }
             } else {
-                (0.0, 0.0, 0)
+                (0, 0, 0)
             };
 
-            // Sanity check: Claude Code sessions don't exceed 1000K tokens per metric
-            if input_k > 1000.0 || output_k > 1000.0 {
+            // Sanity check: reject obvious false positives from accidental pattern matches
+            if input_tokens > MAX_REASONABLE_TOKENS || output_tokens > MAX_REASONABLE_TOKENS {
                 continue;
             }
 
             return Some(ParsedStatus {
                 model,
                 cost,
-                input_tokens: (input_k * 1000.0) as u64,
-                output_tokens: (output_k * 1000.0) as u64,
+                input_tokens,
+                output_tokens,
                 context_percent: context,
             });
         }
 
         // Try tokens-only line (second line of wrapped status, search backwards for model)
         if let Some(token_caps) = STATUS_LINE_TOKENS.captures(trimmed) {
-            let input_k: f64 = token_caps.get(1)?.as_str().parse().ok()?;
-            let output_k: f64 = token_caps.get(2)?.as_str().parse().ok()?;
-            let context: u8 = token_caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            let input_tokens = parse_tokens_with_suffix(token_caps.get(1), token_caps.get(2));
+            let output_tokens = parse_tokens_with_suffix(token_caps.get(3), token_caps.get(4));
+            let context: u8 = token_caps.get(5).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
 
-            // Sanity check: Claude Code sessions don't exceed 1000K tokens per metric
-            if input_k > 1000.0 || output_k > 1000.0 {
+            // Sanity check: reject obvious false positives from accidental pattern matches
+            if input_tokens > MAX_REASONABLE_TOKENS || output_tokens > MAX_REASONABLE_TOKENS {
                 continue;
             }
 
@@ -1194,8 +1287,8 @@ fn parse_status_line(text: &str) -> Option<ParsedStatus> {
                     return Some(ParsedStatus {
                         model,
                         cost,
-                        input_tokens: (input_k * 1000.0) as u64,
-                        output_tokens: (output_k * 1000.0) as u64,
+                        input_tokens,
+                        output_tokens,
                         context_percent: context,
                     });
                 }
@@ -1840,6 +1933,7 @@ fn looks_like_shell_command(cmd: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clauset_types::CurrentUsage;
     use proptest::prelude::*;
 
     // ========================================================================
@@ -2297,6 +2391,47 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_status_line_without_k_suffix() {
+        let input = "Haiku 4.5 | $0.02 | 12/4 | ctx:1%";
+        let status = parse_status_line(input).unwrap();
+        assert_eq!(status.input_tokens, 12);
+        assert_eq!(status.output_tokens, 4);
+        assert_eq!(status.context_percent, 1);
+    }
+
+    #[test]
+    fn test_parse_status_line_mixed_suffixes() {
+        let input = "Haiku 4.5 | $0.02 | 1.2k/400 | ctx:1%";
+        let status = parse_status_line(input).unwrap();
+        assert_eq!(status.input_tokens, 1200);
+        assert_eq!(status.output_tokens, 400);
+    }
+
+    #[test]
+    fn test_parse_status_line_m_suffix() {
+        let input = "Sonnet 4.5 | $1.00 | 1.2M/850K | ctx:80%!";
+        let status = parse_status_line(input).unwrap();
+        assert_eq!(status.input_tokens, 1_200_000);
+        assert_eq!(status.output_tokens, 850_000);
+        assert_eq!(status.context_percent, 80);
+    }
+
+    #[test]
+    fn test_parse_permission_mode_from_output() {
+        let input = "Some content\nMode: Accept edits\nMore content";
+        assert_eq!(parse_permission_mode(input), Some(PermissionMode::AcceptEdits));
+
+        let input2 = "Permissions: Bypass permissions";
+        assert_eq!(parse_permission_mode(input2), Some(PermissionMode::BypassPermissions));
+
+        let input3 = "Plan mode";
+        assert_eq!(parse_permission_mode(input3), Some(PermissionMode::Plan));
+
+        let input4 = "Permission mode: Accept edits";
+        assert_eq!(parse_permission_mode(input4), Some(PermissionMode::AcceptEdits));
+    }
+
+    #[test]
     fn test_parse_status_line_false_positives() {
         // Should NOT match status line embedded in code
         let code = r#"let price = "haiku | $0.00";"#;
@@ -2384,6 +2519,48 @@ mod tests {
         assert_eq!(status2.input_tokens, 5300);
         assert_eq!(status2.output_tokens, 2100);
         assert_eq!(status2.context_percent, 21);
+    }
+
+    #[tokio::test]
+    async fn test_update_context_from_hook_uses_current_usage_for_context() {
+        let buffers = SessionBuffers::new();
+        let session_id = Uuid::new_v4();
+        let usage = CurrentUsage {
+            input_tokens: 4000,
+            output_tokens: 0,
+            cache_creation_input_tokens: 1000,
+            cache_read_input_tokens: 2000,
+        };
+
+        let activity = buffers
+            .update_context_from_hook(session_id, 12000, 3000, 200000, Some(usage), None)
+            .await
+            .unwrap();
+
+        assert_eq!(activity.input_tokens, 12000);
+        assert_eq!(activity.output_tokens, 3000);
+        assert_eq!(activity.context_percent, 3);
+    }
+
+    #[tokio::test]
+    async fn test_transcript_usage_does_not_override_hook_totals() {
+        let buffers = SessionBuffers::new();
+        let session_id = Uuid::new_v4();
+
+        buffers
+            .update_context_from_hook(session_id, 12000, 3000, 200000, None, None)
+            .await
+            .unwrap();
+
+        let activity = buffers
+            .accumulate_usage(session_id, 500, 200, 50, 25, "claude-sonnet-4-5")
+            .await
+            .unwrap();
+
+        assert_eq!(activity.input_tokens, 12000);
+        assert_eq!(activity.output_tokens, 3000);
+        assert_eq!(activity.cache_read_tokens, 50);
+        assert_eq!(activity.cache_creation_tokens, 25);
     }
 
     #[test]

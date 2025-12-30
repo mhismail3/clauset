@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import { formatPermissionMode, type PermissionMode } from '../lib/format';
 
 // localStorage constants
 const STORAGE_KEY_PREFIX = 'clauset_messages_';
@@ -14,7 +15,7 @@ export interface Message {
   timestamp: number;
   isStreaming?: boolean;
   /** System event type for system messages */
-  systemType?: 'subagent_started' | 'subagent_stopped' | 'subagent_completed' | 'tool_error' | 'context_compacting' | 'permission_request';
+  systemType?: 'subagent_started' | 'subagent_stopped' | 'subagent_completed' | 'tool_error' | 'context_compacting' | 'permission_request' | 'mode_change';
   /** Additional metadata for system messages */
   metadata?: {
     agentId?: string;
@@ -25,6 +26,8 @@ export interface Message {
     error?: string;
     isTimeout?: boolean;
     trigger?: string;
+    previousMode?: PermissionMode;
+    newMode?: PermissionMode;
   };
   /** Whether a permission request has been responded to */
   responded?: boolean;
@@ -247,6 +250,23 @@ export function handlePermissionRequest(sessionId: string, toolName: string, too
     'permission_request',
     `Permission required: ${toolName}`,
     { toolName, toolInput }
+  );
+}
+
+/**
+ * Handle permission mode changes.
+ */
+export function handleModeChange(
+  sessionId: string,
+  previousMode: PermissionMode,
+  newMode: PermissionMode
+) {
+  if (previousMode === newMode) return;
+  addSystemMessage(
+    sessionId,
+    'mode_change',
+    `Mode changed: ${formatPermissionMode(previousMode)} -> ${formatPermissionMode(newMode)}`,
+    { previousMode, newMode }
   );
 }
 

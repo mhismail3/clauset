@@ -235,6 +235,23 @@ pub struct ClaudeSessionsListResponse {
     pub sessions: Vec<ClaudeSessionResponse>,
 }
 
+#[derive(Deserialize)]
+pub struct ClaudeTranscriptQuery {
+    pub project_path: PathBuf,
+}
+
+#[derive(Serialize)]
+pub struct ClaudeTranscriptMessage {
+    pub role: String,
+    pub content: String,
+    pub timestamp: String,
+}
+
+#[derive(Serialize)]
+pub struct ClaudeTranscriptResponse {
+    pub messages: Vec<ClaudeTranscriptMessage>,
+}
+
 /// List sessions from ~/.claude/history.jsonl for a specific project.
 /// Returns sessions that exist in Claude's storage, indicating which ones
 /// are already imported into Clauset.
@@ -273,6 +290,28 @@ pub async fn list_claude_sessions(
         .collect();
 
     Ok(Json(ClaudeSessionsListResponse { sessions }))
+}
+
+/// Read the full transcript for a Claude session.
+pub async fn get_claude_transcript(
+    Path(session_id): Path<String>,
+    Query(query): Query<ClaudeTranscriptQuery>,
+) -> Result<Json<ClaudeTranscriptResponse>, (StatusCode, String)> {
+    let reader = ClaudeSessionReader::new();
+    let messages = reader
+        .read_transcript(&session_id, &query.project_path)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let response = messages
+        .into_iter()
+        .map(|message| ClaudeTranscriptMessage {
+            role: message.role,
+            content: message.content,
+            timestamp: message.timestamp.to_rfc3339(),
+        })
+        .collect();
+
+    Ok(Json(ClaudeTranscriptResponse { messages: response }))
 }
 
 #[derive(Deserialize)]

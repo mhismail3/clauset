@@ -10,7 +10,8 @@ use clauset_core::{
 };
 use clauset_types::{
     ChatEvent, HookActivityUpdate, HookEvent, HookEventPayload, HookEventType,
-    InteractiveEvent, InteractivePrompt, InteractiveQuestion, QuestionOption, SessionStatus,
+    InteractiveEvent, InteractivePrompt, InteractiveQuestion, PermissionMode, QuestionOption,
+    SessionStatus,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -39,6 +40,17 @@ pub async fn receive(
         payload.hook_event_name, session_id
     );
 
+    let permission_mode = payload.permission_mode.clone();
+    let model_display = payload.model.as_ref().and_then(|model| {
+        if !model.display_name.is_empty() {
+            Some(model.display_name.clone())
+        } else if !model.id.is_empty() {
+            Some(model.id.clone())
+        } else {
+            None
+        }
+    });
+
     // Parse into typed event
     let event = match HookEvent::try_from(payload) {
         Ok(e) => e,
@@ -54,6 +66,12 @@ pub async fn receive(
     if let Err(e) = state.session_manager.set_claude_session_id(session_id, &claude_session_id) {
         // This will fail if already set (which is expected) - only log on real errors
         debug!(target: "clauset::hooks", "Could not set Claude session ID: {}", e);
+    }
+
+    if let Some(raw_mode) = permission_mode {
+        if let Some(mode) = PermissionMode::from_hook_value(&raw_mode) {
+            state.session_manager.update_permission_mode(session_id, mode).await;
+        }
     }
 
     // Get current session costs for interaction delta calculation
@@ -100,7 +118,7 @@ pub async fn receive(
     }
 
     // Process the event for real-time activity updates
-    if let Err(e) = process_hook_event(&state, event).await {
+    if let Err(e) = process_hook_event(&state, event, model_display).await {
         warn!(target: "clauset::hooks", "Failed to process hook event: {}", e);
         // Return OK anyway - we don't want to block Claude
         // Errors are logged but not propagated
@@ -110,12 +128,28 @@ pub async fn receive(
 }
 
 /// Process a parsed hook event and update session state.
-async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn process_hook_event(
+    state: &AppState,
+    event: HookEvent,
+    model_display: Option<String>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match event {
         HookEvent::SessionStart {
-            session_id, source, transcript_path, ..
+            session_id, source, transcript_path, context_window, ..
         } => {
             info!(target: "clauset::hooks", "Session {} started (source: {})", session_id, source);
+
+            // Seed context/model data from hook payload when available.
+            if let Some(ref ctx) = context_window {
+                state.session_manager.update_context_from_hook(
+                    session_id,
+                    ctx.total_input_tokens,
+                    ctx.total_output_tokens,
+                    ctx.context_window_size,
+                    ctx.current_usage.clone(),
+                    model_display.clone(),
+                ).await;
+            }
 
             // Start transcript watcher for real-time content streaming
             if let Some(path) = transcript_path {
@@ -206,7 +240,8 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                     ctx.total_input_tokens,
                     ctx.total_output_tokens,
                     ctx.context_window_size,
-                    None,
+                    ctx.current_usage.clone(),
+                    model_display.clone(),
                 ).await;
             }
 
@@ -243,15 +278,6 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 tool_name, session_id
             );
 
-            // Detect Plan Mode entry
-            if tool_name == "EnterPlanMode" {
-                info!(target: "clauset::hooks", "Session {} entering Plan Mode", session_id);
-                let _ = state.session_manager.broadcast_event(ProcessEvent::ModeChange {
-                    session_id,
-                    mode: clauset_types::ChatMode::Plan,
-                });
-            }
-
             // Update context window from accurate hook data
             if let Some(ref ctx) = context_window {
                 state.session_manager.update_context_from_hook(
@@ -259,7 +285,8 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                     ctx.total_input_tokens,
                     ctx.total_output_tokens,
                     ctx.context_window_size,
-                    None,
+                    ctx.current_usage.clone(),
+                    model_display.clone(),
                 ).await;
             }
 
@@ -280,15 +307,6 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                 "Post-tool use {} for session {}",
                 tool_name, session_id
             );
-
-            // Detect Plan Mode exit
-            if tool_name == "ExitPlanMode" {
-                info!(target: "clauset::hooks", "Session {} exiting Plan Mode", session_id);
-                let _ = state.session_manager.broadcast_event(ProcessEvent::ModeChange {
-                    session_id,
-                    mode: clauset_types::ChatMode::Normal,
-                });
-            }
 
             // Detect Task tool (subagent) completion and broadcast detailed info
             if tool_name == "Task" {
@@ -338,7 +356,8 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                     ctx.total_input_tokens,
                     ctx.total_output_tokens,
                     ctx.context_window_size,
-                    None,
+                    ctx.current_usage.clone(),
+                    model_display.clone(),
                 ).await;
             }
 
@@ -369,7 +388,8 @@ async fn process_hook_event(state: &AppState, event: HookEvent) -> Result<(), Bo
                     ctx.total_input_tokens,
                     ctx.total_output_tokens,
                     ctx.context_window_size,
-                    None,
+                    ctx.current_usage.clone(),
+                    model_display.clone(),
                 ).await;
             }
 

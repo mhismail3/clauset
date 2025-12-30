@@ -1,5 +1,12 @@
 import { Show } from 'solid-js';
-import { formatTokens, formatCost, shortenModel } from '../../lib/format';
+import {
+  formatTokens,
+  formatCost,
+  shortenModel,
+  normalizeTokenCount,
+  formatPermissionMode,
+  type PermissionMode,
+} from '../../lib/format';
 
 interface StatusBarProps {
   model?: string;
@@ -9,13 +16,27 @@ interface StatusBarProps {
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
   contextPercent?: number;
+  mode?: PermissionMode;
 }
 
 export function StatusBar(props: StatusBarProps) {
   const hasData = () =>
     props.inputTokens !== undefined ||
     props.cost !== undefined ||
-    props.model !== undefined;
+    props.model !== undefined ||
+    props.mode !== undefined;
+
+  const normalizedInputTokens = () =>
+    normalizeTokenCount(props.inputTokens, {
+      cost: props.cost,
+      contextPercent: props.contextPercent,
+    });
+
+  const normalizedOutputTokens = () =>
+    normalizeTokenCount(props.outputTokens, {
+      cost: props.cost,
+      contextPercent: props.contextPercent,
+    });
 
   const contextColor = () => {
     const pct = props.contextPercent ?? 0;
@@ -49,6 +70,14 @@ export function StatusBar(props: StatusBarProps) {
           <span style={{ opacity: 0.4 }}>|</span>
         </Show>
 
+        {/* Mode */}
+        <Show when={props.mode}>
+          <span style={{ color: 'var(--color-text-secondary)' }}>
+            Mode: {formatPermissionMode(props.mode)}
+          </span>
+          <span style={{ opacity: 0.4 }}>|</span>
+        </Show>
+
         {/* Cost */}
         <Show when={props.cost !== undefined}>
           <span style={{ color: '#22c55e' }}>{formatCost(props.cost)}</span>
@@ -59,11 +88,11 @@ export function StatusBar(props: StatusBarProps) {
         <Show when={props.inputTokens !== undefined}>
           <span>
             <span style={{ color: 'var(--color-text-secondary)' }}>
-              {formatTokens(props.inputTokens)}
+              {formatTokens(normalizedInputTokens())}
             </span>
             <span style={{ opacity: 0.6 }}>/</span>
             <span style={{ color: 'var(--color-text-secondary)' }}>
-              {formatTokens(props.outputTokens)}
+              {formatTokens(normalizedOutputTokens())}
             </span>
           </span>
         </Show>

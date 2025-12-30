@@ -1,8 +1,9 @@
 import { Show, createSignal, onCleanup } from 'solid-js';
+import { formatPermissionMode, type PermissionMode } from '../../lib/format';
 
 interface SessionSettingsMenuProps {
   model?: string;
-  mode?: 'normal' | 'plan';
+  mode?: PermissionMode;
   onShowShortcuts: () => void;
 }
 
@@ -31,6 +32,19 @@ export function SessionSettingsMenu(props: SessionSettingsMenuProps) {
   onCleanup(() => {
     document.removeEventListener('click', handleClickOutside);
   });
+
+  const modeColor = () => {
+    switch (props.mode) {
+      case 'plan':
+        return '#8b5cf6';
+      case 'bypass_permissions':
+        return '#ef4444';
+      case 'accept_edits':
+        return '#22c55e';
+      default:
+        return '#22c55e';
+    }
+  };
 
   return (
     <div ref={menuRef} style={{ position: 'relative' }}>
@@ -151,7 +165,7 @@ export function SessionSettingsMenu(props: SessionSettingsMenuProps) {
                     width: '6px',
                     height: '6px',
                     'border-radius': '50%',
-                    background: props.mode === 'plan' ? '#8b5cf6' : '#22c55e',
+                    background: modeColor(),
                   }}
                 />
                 <span
@@ -160,10 +174,9 @@ export function SessionSettingsMenu(props: SessionSettingsMenuProps) {
                     'font-size': '12px',
                     color: 'var(--color-text-primary)',
                     'font-weight': '500',
-                    'text-transform': 'capitalize',
                   }}
                 >
-                  {props.mode === 'plan' ? 'Plan Mode' : 'Normal'}
+                  {formatPermissionMode(props.mode)}
                 </span>
               </div>
             </div>

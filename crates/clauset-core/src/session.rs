@@ -469,7 +469,14 @@ impl SessionManager {
     /// - activity is Some if it changed
     /// - tui_menu is Some if a new TUI menu was detected
     pub async fn append_terminal_output(&self, session_id: Uuid, data: &[u8]) -> (AppendResult, Option<SessionActivity>, Option<clauset_types::TuiMenu>) {
-        let (append_result, activity, tui_menu) = self.buffers.append(session_id, data).await;
+        let (append_result, activity, tui_menu, mode_change) = self.buffers.append(session_id, data).await;
+
+        if let Some(mode) = mode_change {
+            let _ = self.event_tx.send(ProcessEvent::ModeChange {
+                session_id,
+                mode,
+            });
+        }
 
         // If activity changed, update the database with new stats
         if let Some(ref act) = activity {
@@ -615,6 +622,7 @@ impl SessionManager {
         input_tokens: u64,
         output_tokens: u64,
         context_window_size: u64,
+        current_usage: Option<clauset_types::CurrentUsage>,
         model: Option<String>,
     ) {
         if let Some(activity) = self.buffers.update_context_from_hook(
@@ -622,8 +630,27 @@ impl SessionManager {
             input_tokens,
             output_tokens,
             context_window_size,
+            current_usage,
             model,
         ).await {
+            if !activity.model.is_empty() {
+                if let Err(e) = self.db.update_stats(
+                    session_id,
+                    &activity.model,
+                    activity.cost,
+                    activity.input_tokens,
+                    activity.output_tokens,
+                    activity.context_percent,
+                ) {
+                    tracing::warn!(
+                        target: "clauset::session",
+                        "Failed to update session {} stats from hook data: {}",
+                        session_id,
+                        e
+                    );
+                }
+            }
+
             tracing::debug!(
                 target: "clauset::hooks",
                 "Broadcasting context update from hook: session={}, model='{}', tokens={}K/{}K, ctx={}%",
@@ -645,6 +672,20 @@ impl SessionManager {
                 current_activity: activity.current_activity,
                 current_step: activity.current_step,
                 recent_actions: activity.recent_actions,
+            });
+        }
+    }
+
+    /// Update permission mode from hook data and broadcast mode change.
+    pub async fn update_permission_mode(
+        &self,
+        session_id: Uuid,
+        mode: clauset_types::PermissionMode,
+    ) {
+        if self.buffers.update_permission_mode(session_id, mode).await {
+            let _ = self.event_tx.send(ProcessEvent::ModeChange {
+                session_id,
+                mode,
             });
         }
     }
@@ -702,6 +743,7 @@ impl SessionManager {
                 cache_read_tokens: activity.cache_read_tokens,
                 cache_creation_tokens: activity.cache_creation_tokens,
                 context_window_size: activity.context_window_size, // From hooks
+                context_percent: activity.context_percent,
             });
         }
     }

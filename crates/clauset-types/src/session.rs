@@ -33,6 +33,36 @@ pub enum SessionMode {
     Terminal,
 }
 
+/// Permission mode for Claude Code sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionMode {
+    /// Default permission handling.
+    Default,
+    /// Accept edits without prompting.
+    AcceptEdits,
+    /// Bypass all permission prompts.
+    BypassPermissions,
+    /// Plan mode (Claude plans before executing).
+    Plan,
+}
+
+impl PermissionMode {
+    /// Normalize raw hook values (camelCase/words) into a PermissionMode.
+    pub fn from_hook_value(value: &str) -> Option<Self> {
+        let normalized = value.trim().to_lowercase();
+        match normalized.as_str() {
+            "default" | "normal" => Some(Self::Default),
+            "plan" | "plan mode" => Some(Self::Plan),
+            "accept_edits" | "acceptedits" | "accept edits" => Some(Self::AcceptEdits),
+            "bypass_permissions" | "bypasspermissions" | "bypass permissions" => {
+                Some(Self::BypassPermissions)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// A Claude Code session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -86,6 +116,23 @@ pub struct SessionSummary {
     /// Recent actions performed by Claude
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_actions: Vec<crate::RecentAction>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PermissionMode;
+
+    #[test]
+    fn test_permission_mode_from_hook_value() {
+        assert_eq!(PermissionMode::from_hook_value("default"), Some(PermissionMode::Default));
+        assert_eq!(PermissionMode::from_hook_value("normal"), Some(PermissionMode::Default));
+        assert_eq!(PermissionMode::from_hook_value("acceptEdits"), Some(PermissionMode::AcceptEdits));
+        assert_eq!(PermissionMode::from_hook_value("accept edits"), Some(PermissionMode::AcceptEdits));
+        assert_eq!(PermissionMode::from_hook_value("bypassPermissions"), Some(PermissionMode::BypassPermissions));
+        assert_eq!(PermissionMode::from_hook_value("bypass permissions"), Some(PermissionMode::BypassPermissions));
+        assert_eq!(PermissionMode::from_hook_value("plan"), Some(PermissionMode::Plan));
+        assert_eq!(PermissionMode::from_hook_value("unknown"), None);
+    }
 }
 
 impl From<Session> for SessionSummary {

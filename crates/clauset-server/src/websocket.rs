@@ -45,6 +45,17 @@ pub async fn handle_websocket(
         ws_tx.send(Message::Text(json.into())).await?;
     }
 
+    if let Some(activity) = state.session_manager.get_activity(session_id).await {
+        if let Some(mode) = activity.permission_mode {
+            let mode_msg = WsServerMessage::ModeChange {
+                session_id,
+                mode,
+            };
+            let json = serde_json::to_string(&mode_msg)?;
+            ws_tx.send(Message::Text(json.into())).await?;
+        }
+    }
+
     // NOTE: Terminal buffer is NOT sent here on connect.
     // The client must first send a Resize message so tmux can be resized to match.
     // Then the client sends RequestBuffer, and we send the buffer formatted for the correct size.
@@ -319,6 +330,7 @@ pub async fn handle_websocket(
                             cache_read_tokens,
                             cache_creation_tokens,
                             context_window_size,
+                            context_percent,
                         } => {
                             if *event_session_id == session_id {
                                 Some(WsServerMessage::ContextUpdate {
@@ -328,6 +340,7 @@ pub async fn handle_websocket(
                                     cache_read_tokens: *cache_read_tokens,
                                     cache_creation_tokens: *cache_creation_tokens,
                                     context_window_size: *context_window_size,
+                                    context_percent: *context_percent,
                                 })
                             } else {
                                 None

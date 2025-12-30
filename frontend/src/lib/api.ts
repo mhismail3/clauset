@@ -242,6 +242,16 @@ export interface ClaudeSessionsResponse {
   sessions: ClaudeSession[];
 }
 
+export interface ClaudeTranscriptMessage {
+  role: string;
+  content: string;
+  timestamp: string;
+}
+
+export interface ClaudeTranscriptResponse {
+  messages: ClaudeTranscriptMessage[];
+}
+
 export interface ImportSessionRequest {
   claude_session_id: string;
   project_path: string;
@@ -369,6 +379,11 @@ export const api = {
     // Claude sessions from ~/.claude
     listClaudeSessions: (projectPath: string) =>
       fetchJSON<ClaudeSessionsResponse>(`/claude-sessions?project_path=${encodeURIComponent(projectPath)}`),
+
+    getClaudeTranscript: (sessionId: string, projectPath: string) =>
+      fetchJSON<ClaudeTranscriptResponse>(
+        `/claude-sessions/${encodeURIComponent(sessionId)}/transcript?project_path=${encodeURIComponent(projectPath)}`
+      ),
 
     import: (req: ImportSessionRequest) =>
       fetchJSON<ImportSessionResponse>('/sessions/import', {

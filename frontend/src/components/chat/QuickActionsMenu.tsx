@@ -5,20 +5,20 @@ interface QuickAction {
   label: string;
   icon: string;
   description: string;
+  kind: 'command' | 'terminal_input';
+  terminalInput?: string;
 }
 
 const QUICK_ACTIONS: QuickAction[] = [
-  { command: '/clear', label: 'Clear', icon: '🗑', description: 'Clear conversation' },
-  { command: '/compact', label: 'Compact', icon: '📦', description: 'Compact context' },
-  { command: '/cost', label: 'Cost', icon: '💰', description: 'Show session cost' },
-  { command: '/model', label: 'Model', icon: '🤖', description: 'Change model' },
-  { command: '/plan', label: 'Plan', icon: '📋', description: 'Enter plan mode' },
-  { command: '/help', label: 'Help', icon: '❓', description: 'Show help' },
+  { command: '/clear', label: 'Clear', icon: '🗑', description: 'Clear conversation', kind: 'command' },
+  { command: 'Shift+Tab', label: 'Toggle Mode', icon: '↹', description: 'Cycle chat modes', kind: 'terminal_input', terminalInput: '\x1b[Z' },
 ];
 
 interface QuickActionsMenuProps {
   onSelectCommand: (command: string) => void;
+  onSendTerminalInput: (input: string) => void;
   buttonSize: number;
+  disabled?: boolean;
 }
 
 export function QuickActionsMenu(props: QuickActionsMenuProps) {
@@ -34,6 +34,7 @@ export function QuickActionsMenu(props: QuickActionsMenuProps) {
 
   // Add/remove event listener
   function toggleMenu() {
+    if (props.disabled) return;
     const newState = !isOpen();
     setIsOpen(newState);
     if (newState) {
@@ -50,6 +51,10 @@ export function QuickActionsMenu(props: QuickActionsMenuProps) {
   function handleSelectAction(action: QuickAction) {
     setIsOpen(false);
     document.removeEventListener('click', handleClickOutside);
+    if (action.kind === 'terminal_input' && action.terminalInput) {
+      props.onSendTerminalInput(action.terminalInput);
+      return;
+    }
     props.onSelectCommand(action.command);
   }
 
@@ -71,7 +76,8 @@ export function QuickActionsMenu(props: QuickActionsMenuProps) {
           color: isOpen() ? 'var(--color-accent)' : 'var(--color-text-muted)',
           border: 'none',
           "border-radius": '8px',
-          cursor: 'pointer',
+          cursor: props.disabled ? 'not-allowed' : 'pointer',
+          opacity: props.disabled ? 0.5 : 1,
           transition: 'all 0.15s ease',
         }}
       >
@@ -184,24 +190,6 @@ export function QuickActionsMenu(props: QuickActionsMenuProps) {
                 </button>
               )}
             </For>
-          </div>
-
-          {/* Footer tip */}
-          <div
-            style={{
-              padding: '8px 12px',
-              "border-top": '1px solid var(--color-bg-overlay)',
-              background: 'var(--color-bg-overlay)',
-            }}
-          >
-            <span
-              style={{
-                "font-size": '11px',
-                color: 'var(--color-text-muted)',
-              }}
-            >
-              Type <kbd class="text-mono" style={{ background: 'var(--color-bg-surface)', padding: '1px 4px', "border-radius": '2px', "font-size": '10px' }}>/</kbd> for all commands
-            </span>
           </div>
         </div>
       </Show>

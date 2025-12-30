@@ -375,15 +375,16 @@ pub enum WsServerMessage {
         cache_read_tokens: u64,
         cache_creation_tokens: u64,
         context_window_size: u64,
+        context_percent: u8,
     },
 
     // === Mode Change Protocol ===
 
-    /// Session mode changed (e.g., entered/exited Plan Mode).
+    /// Session permission mode changed (default/accept edits/bypass/plan).
     /// Notifies frontend to update mode indicator.
     ModeChange {
         session_id: Uuid,
-        mode: ChatMode,
+        mode: crate::PermissionMode,
     },
 
     // === TUI Menu Protocol ===
@@ -393,16 +394,6 @@ pub enum WsServerMessage {
     TuiMenu {
         event: crate::TuiMenuEvent,
     },
-}
-
-/// Chat mode for session UI.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ChatMode {
-    /// Normal chat mode
-    Normal,
-    /// Plan mode - Claude is planning before implementing
-    Plan,
 }
 
 /// A single action/step performed by Claude (for activity updates)
@@ -447,6 +438,7 @@ pub struct StoredToolCall {
 #[cfg(test)]
 mod serialization_tests {
     use super::*;
+    use crate::PermissionMode;
     use uuid::Uuid;
     use serde_json::json;
     use std::path::PathBuf;
@@ -687,6 +679,7 @@ mod serialization_tests {
             cache_read_tokens: 200,
             cache_creation_tokens: 100,
             context_window_size: 200000,
+            context_percent: 5,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"context_update""#));
@@ -1082,7 +1075,7 @@ mod serialization_tests {
     fn test_mode_change_plan_serialization() {
         let msg = WsServerMessage::ModeChange {
             session_id: Uuid::nil(),
-            mode: ChatMode::Plan,
+            mode: PermissionMode::Plan,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"mode_change""#));
@@ -1090,42 +1083,48 @@ mod serialization_tests {
     }
 
     #[test]
-    fn test_mode_change_normal_serialization() {
+    fn test_mode_change_default_serialization() {
         let msg = WsServerMessage::ModeChange {
             session_id: Uuid::nil(),
-            mode: ChatMode::Normal,
+            mode: PermissionMode::Default,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"mode_change""#));
-        assert!(json.contains(r#""mode":"normal""#));
+        assert!(json.contains(r#""mode":"default""#));
     }
 
     #[test]
-    fn test_chat_mode_enum_serialization() {
-        assert_eq!(serde_json::to_string(&ChatMode::Normal).unwrap(), r#""normal""#);
-        assert_eq!(serde_json::to_string(&ChatMode::Plan).unwrap(), r#""plan""#);
+    fn test_permission_mode_enum_serialization() {
+        assert_eq!(serde_json::to_string(&PermissionMode::Default).unwrap(), r#""default""#);
+        assert_eq!(serde_json::to_string(&PermissionMode::AcceptEdits).unwrap(), r#""accept_edits""#);
+        assert_eq!(serde_json::to_string(&PermissionMode::BypassPermissions).unwrap(), r#""bypass_permissions""#);
+        assert_eq!(serde_json::to_string(&PermissionMode::Plan).unwrap(), r#""plan""#);
     }
 
     #[test]
-    fn test_chat_mode_enum_deserialization() {
-        let normal: ChatMode = serde_json::from_str(r#""normal""#).unwrap();
-        let plan: ChatMode = serde_json::from_str(r#""plan""#).unwrap();
-        assert_eq!(normal, ChatMode::Normal);
-        assert_eq!(plan, ChatMode::Plan);
+    fn test_permission_mode_enum_deserialization() {
+        let default_mode: PermissionMode = serde_json::from_str(r#""default""#).unwrap();
+        let accept_edits: PermissionMode = serde_json::from_str(r#""accept_edits""#).unwrap();
+        let bypass: PermissionMode = serde_json::from_str(r#""bypass_permissions""#).unwrap();
+        let plan: PermissionMode = serde_json::from_str(r#""plan""#).unwrap();
+        assert_eq!(default_mode, PermissionMode::Default);
+        assert_eq!(accept_edits, PermissionMode::AcceptEdits);
+        assert_eq!(bypass, PermissionMode::BypassPermissions);
+        assert_eq!(plan, PermissionMode::Plan);
     }
 
     #[test]
     fn test_mode_change_roundtrip() {
         let original = WsServerMessage::ModeChange {
             session_id: Uuid::nil(),
-            mode: ChatMode::Plan,
+            mode: PermissionMode::Plan,
         };
         let json = serde_json::to_string(&original).unwrap();
         let parsed: WsServerMessage = serde_json::from_str(&json).unwrap();
         match parsed {
             WsServerMessage::ModeChange { session_id, mode } => {
                 assert_eq!(session_id, Uuid::nil());
-                assert_eq!(mode, ChatMode::Plan);
+                assert_eq!(mode, PermissionMode::Plan);
             }
             _ => panic!("Expected ModeChange"),
         }

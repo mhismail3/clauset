@@ -205,6 +205,13 @@ export function MessageBubble(props: MessageBubbleProps) {
           color: '#a855f7',
           icon: '🔐',
         };
+      case 'mode_change':
+        return {
+          background: 'rgba(34, 197, 94, 0.15)',
+          border: '1px solid rgba(34, 197, 94, 0.4)',
+          color: '#22c55e',
+          icon: '↹',
+        };
       default:
         return {
           background: 'rgba(100, 116, 139, 0.15)',

@@ -9,8 +9,6 @@ import { TimelineView } from '../components/interactions/TimelineView';
 import { DiffViewer } from '../components/interactions/DiffViewer';
 import { StatusBar } from '../components/session/StatusBar';
 import { TodoWidget, type TodoItem } from '../components/session/TodoWidget';
-import { KeyboardShortcutsModal } from '../components/session/KeyboardShortcutsModal';
-import { SessionSettingsMenu } from '../components/session/SessionSettingsMenu';
 import { api, Session } from '../lib/api';
 import { createWebSocketManager, WsMessage, SyncResponse, ConnectionState } from '../lib/ws';
 import { useKeyboard } from '../lib/keyboard';
@@ -30,10 +28,12 @@ import {
   handleToolError,
   handleContextCompacting,
   markPermissionResponded,
+  handleModeChange,
   addUserMessage,
   type ChatEvent,
   type ChatMessage,
 } from '../stores/messages';
+import { normalizePermissionMode, type PermissionMode } from '../lib/format';
 import { appendTerminalOutput, clearTerminalHistory } from '../stores/terminal';
 import {
   getInteractiveState,
@@ -68,25 +68,30 @@ function parseStatusLine(text: string): StatusInfo | null {
 
   // Match the status line pattern
   const match = cleanText.match(
-    /([A-Za-z0-9. ]+)\s*\|\s*\$([0-9.]+)\s*\|\s*([0-9.]+)K?\/([0-9.]+)K?\s*\|\s*ctx:(\d+)%/
+    /([A-Za-z0-9. ]+)\s*\|\s*\$([0-9.]+)\s*\|\s*([0-9.]+)([kKmM]?)\/([0-9.]+)([kKmM]?)\s*\|\s*ctx:(\d+)%!?/
   );
 
   if (!match) return null;
 
-  const [, model, costStr, inputStr, outputStr, ctxStr] = match;
+  const [, model, costStr, inputStr, inputSuffix, outputStr, outputSuffix, ctxStr] = match;
 
   // Parse token counts - they may be in K format (e.g., "29.2K") or raw numbers
-  const parseTokens = (s: string): number => {
+  const parseTokens = (s: string, suffix: string): number => {
     const num = parseFloat(s);
-    // If the original text had "K", multiply by 1000
-    return Math.round(num * 1000);
+    if (suffix.toLowerCase() === 'k') {
+      return Math.round(num * 1000);
+    }
+    if (suffix.toLowerCase() === 'm') {
+      return Math.round(num * 1000000);
+    }
+    return Math.round(num);
   };
 
   return {
     model: model.trim(),
     cost: parseFloat(costStr),
-    inputTokens: parseTokens(inputStr),
-    outputTokens: parseTokens(outputStr),
+    inputTokens: parseTokens(inputStr, inputSuffix),
+    outputTokens: parseTokens(outputStr, outputSuffix),
     contextPercent: parseInt(ctxStr, 10),
   };
 }
@@ -142,12 +147,11 @@ export default function SessionPage() {
   const [diffState, setDiffState] = createSignal<{ interactionId: string; file: string } | null>(null);
   const [terminalData, setTerminalData] = createSignal<Uint8Array[]>([]);
   const [resuming, setResuming] = createSignal(false);
-  const [mode, setMode] = createSignal<'normal' | 'plan'>('normal');
+  const [mode, setMode] = createSignal<PermissionMode>('default');
   const [hookData, setHookData] = createSignal<{
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
   }>({});
-  const [showShortcuts, setShowShortcuts] = createSignal(false);
   const [todoWidgetExpanded, setTodoWidgetExpanded] = createSignal(true);
 
   // iOS keyboard handling for chat view (follows visualViewport in real-time)
@@ -161,6 +165,7 @@ export default function SessionPage() {
   let lastStatus: StatusInfo | null = null;
   let statusUpdateTimer: number | null = null;
   let terminalDimensions: { cols: number; rows: number } | null = null;
+  let hasReceivedMode = false;
 
   function scrollToBottom() {
     messagesEndRef?.scrollIntoView({ behavior: 'smooth' });
@@ -555,18 +560,15 @@ export default function SessionPage() {
           cache_read_tokens: number;
           cache_creation_tokens: number;
           context_window_size: number;
+          context_percent: number;
         };
         const currentSession = session();
         if (currentSession) {
-          // Calculate context percent
-          const contextPercent = data.context_window_size > 0
-            ? Math.round((data.input_tokens / data.context_window_size) * 100)
-            : 0;
           setSession({
             ...currentSession,
             input_tokens: data.input_tokens,
             output_tokens: data.output_tokens,
-            context_percent: contextPercent,
+            context_percent: data.context_percent,
           });
           // Store cache tokens in hookData
           setHookData({
@@ -577,9 +579,22 @@ export default function SessionPage() {
         break;
       }
       case 'mode_change': {
-        // Plan mode indicator from hook detection
-        const data = msg as unknown as { session_id: string; mode: 'normal' | 'plan' };
-        setMode(data.mode);
+        const data = msg as unknown as { session_id: string; mode: string };
+        const normalizedMode = normalizePermissionMode(data.mode);
+        if (!normalizedMode) break;
+
+        if (!hasReceivedMode) {
+          setMode(normalizedMode);
+          hasReceivedMode = true;
+          break;
+        }
+
+        const previousMode = mode();
+        if (previousMode !== normalizedMode) {
+          setMode(normalizedMode);
+          handleModeChange(params.id, previousMode, normalizedMode);
+          scrollToBottom();
+        }
         break;
       }
     }
@@ -891,12 +906,6 @@ export default function SessionPage() {
             ))}
           </div>
 
-          {/* Settings Menu */}
-          <SessionSettingsMenu
-            model={session()?.model}
-            mode={mode()}
-            onShowShortcuts={() => setShowShortcuts(true)}
-          />
         </div>
       </header>
 
@@ -979,6 +988,7 @@ export default function SessionPage() {
             {/* Status Bar - Token/Cost Display */}
             <StatusBar
               model={session()?.model}
+              mode={mode()}
               cost={session()?.total_cost_usd}
               inputTokens={session()?.input_tokens}
               outputTokens={session()?.output_tokens}
@@ -1123,6 +1133,7 @@ export default function SessionPage() {
 
             <InputBar
               onSend={handleSendMessage}
+              onSendTerminalInput={handleTerminalInput}
               disabled={wsState() !== 'connected' || getInteractiveState(params.id).type === 'prompt' || getTuiMenuState(params.id).type === 'active'}
               placeholder="Type here..."
               isProcessing={isClaudeProcessing()}
@@ -1194,11 +1205,6 @@ export default function SessionPage() {
         </Show>
       </Show>
 
-      {/* Keyboard Shortcuts Modal */}
-      <KeyboardShortcutsModal
-        isOpen={showShortcuts()}
-        onClose={() => setShowShortcuts(false)}
-      />
     </div>
   );
 }

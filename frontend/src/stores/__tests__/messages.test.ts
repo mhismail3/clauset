@@ -18,6 +18,7 @@ import {
   handleToolError,
   handleContextCompacting,
   handlePermissionRequest,
+  handleModeChange,
   addUserMessage,
   type Message,
   type ChatEvent,
@@ -314,6 +315,31 @@ describe('Messages Store', () => {
       expect(messages[0].systemType).toBe('permission_request');
       expect(messages[0].content).toBe('Permission required: Bash');
       expect(messages[0].metadata?.toolName).toBe('Bash');
+    });
+  });
+
+  describe('handleModeChange', () => {
+    it('adds a mode change system message with previous and next labels', () => {
+      const sessionId = 'mode-change-session';
+
+      handleModeChange(sessionId, 'default', 'accept_edits');
+      const messages = getMessagesForSession(sessionId);
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0].role).toBe('system');
+      expect(messages[0].systemType).toBe('mode_change');
+      expect(messages[0].content).toBe('Mode changed: Default -> Accept Edits');
+      expect(messages[0].metadata?.previousMode).toBe('default');
+      expect(messages[0].metadata?.newMode).toBe('accept_edits');
+    });
+
+    it('does not add a message when mode does not change', () => {
+      const sessionId = 'mode-noop-session';
+
+      handleModeChange(sessionId, 'plan', 'plan');
+      const messages = getMessagesForSession(sessionId);
+
+      expect(messages).toHaveLength(0);
     });
   });
 

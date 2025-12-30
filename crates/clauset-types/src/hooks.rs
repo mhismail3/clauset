@@ -17,16 +17,16 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ContextWindow {
     /// Total input tokens used in session (cumulative)
-    #[serde(default)]
+    #[serde(default, alias = "totalInputTokens")]
     pub total_input_tokens: u64,
     /// Total output tokens used in session (cumulative)
-    #[serde(default)]
+    #[serde(default, alias = "totalOutputTokens")]
     pub total_output_tokens: u64,
     /// Context window size for current model (e.g., 200000)
-    #[serde(default)]
+    #[serde(default, alias = "contextWindowSize")]
     pub context_window_size: u64,
     /// Token usage from last API call (null if no messages yet)
-    #[serde(default)]
+    #[serde(default, alias = "currentUsage")]
     pub current_usage: Option<CurrentUsage>,
 }
 
@@ -34,16 +34,16 @@ pub struct ContextWindow {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct CurrentUsage {
     /// Input tokens for current context
-    #[serde(default)]
+    #[serde(default, alias = "inputTokens")]
     pub input_tokens: u64,
     /// Output tokens generated
-    #[serde(default)]
+    #[serde(default, alias = "outputTokens")]
     pub output_tokens: u64,
     /// Tokens written to cache
-    #[serde(default)]
+    #[serde(default, alias = "cacheCreationInputTokens")]
     pub cache_creation_input_tokens: u64,
     /// Tokens read from cache
-    #[serde(default)]
+    #[serde(default, alias = "cacheReadInputTokens")]
     pub cache_read_input_tokens: u64,
 }
 
@@ -51,10 +51,10 @@ pub struct CurrentUsage {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ModelInfo {
     /// Model ID (e.g., "claude-3-5-sonnet-20241022")
-    #[serde(default)]
+    #[serde(default, alias = "modelId")]
     pub id: String,
     /// Display name (e.g., "Claude 3.5 Sonnet")
-    #[serde(default)]
+    #[serde(default, alias = "displayName")]
     pub display_name: String,
 }
 
@@ -89,6 +89,7 @@ pub struct HookEventPayload {
     pub session_id: String,
 
     /// The type of hook event
+    #[serde(alias = "hookEventName")]
     pub hook_event_name: String,
 
     /// Current working directory
@@ -96,11 +97,11 @@ pub struct HookEventPayload {
     pub cwd: Option<String>,
 
     /// Path to the transcript file
-    #[serde(default)]
+    #[serde(default, alias = "transcriptPath")]
     pub transcript_path: Option<String>,
 
     /// Permission mode (default, plan, acceptEdits, bypassPermissions)
-    #[serde(default)]
+    #[serde(default, alias = "permissionMode")]
     pub permission_mode: Option<String>,
 
     // Tool-related fields (PreToolUse, PostToolUse)
@@ -158,7 +159,7 @@ pub struct HookEventPayload {
     // NEW: Context and metadata from cli.js aF() function
 
     /// Context window token usage (accurate source for token counts)
-    #[serde(default)]
+    #[serde(default, alias = "contextWindow")]
     pub context_window: Option<ContextWindow>,
 
     /// Model information
@@ -170,7 +171,7 @@ pub struct HookEventPayload {
     pub workspace: Option<WorkspaceInfo>,
 
     /// Output style
-    #[serde(default)]
+    #[serde(default, alias = "outputStyle")]
     pub output_style: Option<OutputStyle>,
 
     /// Claude Code version (e.g., "2.0.76")
@@ -180,11 +181,11 @@ pub struct HookEventPayload {
     // NEW: SubagentStart/SubagentStop fields
 
     /// Agent ID for Task tool subagents
-    #[serde(default)]
+    #[serde(default, alias = "agentId")]
     pub agent_id: Option<String>,
 
     /// Agent type (e.g., "Explore", "Plan", "general-purpose")
-    #[serde(default)]
+    #[serde(default, alias = "agentType")]
     pub agent_type: Option<String>,
 
     // NEW: PostToolUseFailure fields
@@ -202,7 +203,7 @@ pub struct HookEventPayload {
     pub is_timeout: Option<bool>,
 
     /// Whether the tool was interrupted
-    #[serde(default)]
+    #[serde(default, alias = "isInterrupt")]
     pub is_interrupt: Option<bool>,
 
     // NEW: PreCompact fields
@@ -620,6 +621,50 @@ mod tests {
             }
             _ => panic!("Expected Stop event"),
         }
+    }
+
+    #[test]
+    fn test_parse_camel_case_payload() {
+        let json = r#"
+        {
+          "clauset_session_id": "550e8400-e29b-41d4-a716-446655440000",
+          "session_id": "abc123def456",
+          "hookEventName": "UserPromptSubmit",
+          "permissionMode": "acceptEdits",
+          "contextWindow": {
+            "totalInputTokens": 12000,
+            "totalOutputTokens": 3400,
+            "contextWindowSize": 200000,
+            "currentUsage": {
+              "inputTokens": 12000,
+              "outputTokens": 200,
+              "cacheCreationInputTokens": 5000,
+              "cacheReadInputTokens": 8000
+            }
+          },
+          "model": {
+            "modelId": "claude-sonnet-4-5-20250929",
+            "displayName": "Claude Sonnet 4.5"
+          }
+        }"#;
+
+        let payload: HookEventPayload = serde_json::from_str(json).expect("payload parse");
+        assert_eq!(payload.hook_event_name, "UserPromptSubmit");
+        assert_eq!(payload.permission_mode.as_deref(), Some("acceptEdits"));
+
+        let ctx = payload.context_window.expect("context_window");
+        assert_eq!(ctx.total_input_tokens, 12000);
+        assert_eq!(ctx.total_output_tokens, 3400);
+        assert_eq!(ctx.context_window_size, 200000);
+        let usage = ctx.current_usage.expect("current_usage");
+        assert_eq!(usage.input_tokens, 12000);
+        assert_eq!(usage.output_tokens, 200);
+        assert_eq!(usage.cache_creation_input_tokens, 5000);
+        assert_eq!(usage.cache_read_input_tokens, 8000);
+
+        let model = payload.model.expect("model");
+        assert_eq!(model.id, "claude-sonnet-4-5-20250929");
+        assert_eq!(model.display_name, "Claude Sonnet 4.5");
     }
 }
 

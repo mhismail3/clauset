@@ -2,7 +2,7 @@ import { Show, For, createSignal, createEffect, createMemo, onCleanup } from 'so
 import { useNavigate } from '@solidjs/router';
 import { Button } from '../ui/Button';
 import { Spinner } from '../ui/Spinner';
-import { api, Project, ClaudeSession } from '../../lib/api';
+import { api, Project, ClaudeSession, ClaudeTranscriptMessage } from '../../lib/api';
 import { useKeyboard } from '../../lib/keyboard';
 
 interface NewSessionModalProps {
@@ -28,6 +28,10 @@ export function NewSessionModal(props: NewSessionModalProps) {
   const [claudeSessions, setClaudeSessions] = createSignal<ClaudeSession[]>([]);
   const [importLoading, setImportLoading] = createSignal(false);
   const [importingId, setImportingId] = createSignal<string | null>(null);
+  const [previewSession, setPreviewSession] = createSignal<ClaudeSession | null>(null);
+  const [previewMessages, setPreviewMessages] = createSignal<ClaudeTranscriptMessage[]>([]);
+  const [previewLoading, setPreviewLoading] = createSignal(false);
+  const [previewError, setPreviewError] = createSignal<string | null>(null);
 
   // Find matching project by path or name
   const matchedProject = createMemo(() => {
@@ -83,6 +87,10 @@ export function NewSessionModal(props: NewSessionModalProps) {
       setPrompt('');
       setError(null);
       setClaudeSessions([]);
+      setPreviewSession(null);
+      setPreviewMessages([]);
+      setPreviewError(null);
+      setPreviewLoading(false);
       fetchProjects();
     }
   });
@@ -122,6 +130,28 @@ export function NewSessionModal(props: NewSessionModalProps) {
     } finally {
       setImportingId(null);
     }
+  }
+
+  async function openPreview(session: ClaudeSession) {
+    setPreviewSession(session);
+    setPreviewMessages([]);
+    setPreviewError(null);
+    setPreviewLoading(true);
+    try {
+      const response = await api.sessions.getClaudeTranscript(session.session_id, session.project_path);
+      setPreviewMessages(response.messages);
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : 'Failed to load transcript');
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  function closePreview() {
+    setPreviewSession(null);
+    setPreviewMessages([]);
+    setPreviewError(null);
+    setPreviewLoading(false);
   }
 
   // Handle escape key
@@ -326,7 +356,10 @@ export function NewSessionModal(props: NewSessionModalProps) {
             {/* Tabs */}
             <div style={{ display: "flex", padding: "0 16px", gap: "4px" }}>
               <button
-                onClick={() => setMode('new')}
+                onClick={() => {
+                  setMode('new');
+                  closePreview();
+                }}
                 class="text-mono"
                 style={{
                   padding: "8px 12px",
@@ -345,6 +378,7 @@ export function NewSessionModal(props: NewSessionModalProps) {
               <button
                 onClick={() => {
                   setMode('import');
+                  closePreview();
                   // Fetch claude sessions for current project
                   const matched = matchedProject();
                   if (matched) {
@@ -661,207 +695,364 @@ export function NewSessionModal(props: NewSessionModalProps) {
                 "-webkit-overflow-scrolling": "touch",
               }}
             >
-              {/* Error message */}
-              <Show when={error()}>
-                <div
-                  class="text-mono"
-                  style={{
-                    padding: "8px 10px",
-                    "border-radius": "6px",
-                    border: "1px solid var(--color-accent)",
-                    background: "var(--color-accent-muted)",
-                    color: "var(--color-accent)",
-                    "font-size": "12px",
-                    "font-weight": "500",
-                    "margin-bottom": "12px",
-                  }}
-                >
-                  {error()}
-                </div>
-              </Show>
+              <Show
+                when={previewSession()}
+                fallback={
+                  <>
+                    {/* Error message */}
+                    <Show when={error()}>
+                      <div
+                        class="text-mono"
+                        style={{
+                          padding: "8px 10px",
+                          "border-radius": "6px",
+                          border: "1px solid var(--color-accent)",
+                          background: "var(--color-accent-muted)",
+                          color: "var(--color-accent)",
+                          "font-size": "12px",
+                          "font-weight": "500",
+                          "margin-bottom": "12px",
+                        }}
+                      >
+                        {error()}
+                      </div>
+                    </Show>
 
-              {/* Project Selection for Import */}
-              <div style={{ "margin-bottom": "16px" }}>
-                <label
-                  class="text-label text-mono"
-                  style={{
-                    display: "block",
-                    "margin-bottom": "6px",
-                    "font-size": "11px",
-                  }}
-                >
-                  Select Project
-                </label>
-                <Show
-                  when={!projectsLoading()}
-                  fallback={
-                    <div
-                      class="text-text-muted"
-                      style={{
-                        display: "flex",
-                        "align-items": "center",
-                        gap: "10px",
-                        ...inputStyles,
-                      }}
-                    >
-                      <Spinner size="sm" />
-                      <span>Loading projects...</span>
-                    </div>
-                  }
-                >
-                  <div style={{ position: "relative" }}>
-                    <input
-                      type="text"
-                      value={projectInput()}
-                      onInput={(e) => {
-                        setProjectInput(e.currentTarget.value);
-                        // Fetch sessions when project changes
-                        const matched = projects().find(
-                          p => p.name.toLowerCase() === e.currentTarget.value.toLowerCase()
-                        );
-                        if (matched) {
-                          fetchClaudeSessions(matched.path);
+                    {/* Project Selection for Import */}
+                    <div style={{ "margin-bottom": "16px" }}>
+                      <label
+                        class="text-label text-mono"
+                        style={{
+                          display: "block",
+                          "margin-bottom": "6px",
+                          "font-size": "11px",
+                        }}
+                      >
+                        Select Project
+                      </label>
+                      <Show
+                        when={!projectsLoading()}
+                        fallback={
+                          <div
+                            class="text-text-muted"
+                            style={{
+                              display: "flex",
+                              "align-items": "center",
+                              gap: "10px",
+                              ...inputStyles,
+                            }}
+                          >
+                            <Spinner size="sm" />
+                            <span>Loading projects...</span>
+                          </div>
                         }
-                      }}
-                      onFocus={() => setShowProjectDropdown(true)}
-                      onBlur={() => setTimeout(() => setShowProjectDropdown(false), 150)}
-                      placeholder="Select a project..."
-                      class="modal-input placeholder:text-text-muted"
-                      style={inputStyles}
-                    />
-                    <Show when={showProjectDropdown() && filteredProjects().length > 0}>
-                      <div style={dropdownStyles}>
-                        <For each={filteredProjects()}>
-                          {(project) => (
+                      >
+                        <div style={{ position: "relative" }}>
+                          <input
+                            type="text"
+                            value={projectInput()}
+                            onInput={(e) => {
+                              setProjectInput(e.currentTarget.value);
+                              // Fetch sessions when project changes
+                              const matched = projects().find(
+                                p => p.name.toLowerCase() === e.currentTarget.value.toLowerCase()
+                              );
+                              if (matched) {
+                                fetchClaudeSessions(matched.path);
+                              }
+                            }}
+                            onFocus={() => setShowProjectDropdown(true)}
+                            onBlur={() => setTimeout(() => setShowProjectDropdown(false), 150)}
+                            placeholder="Select a project..."
+                            class="modal-input placeholder:text-text-muted"
+                            style={inputStyles}
+                          />
+                          <Show when={showProjectDropdown() && filteredProjects().length > 0}>
+                            <div style={dropdownStyles}>
+                              <For each={filteredProjects()}>
+                                {(project) => (
+                                  <div
+                                    class="text-text-primary hover:bg-bg-elevated"
+                                    style={dropdownItemStyles}
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      setProjectInput(project.name);
+                                      setShowProjectDropdown(false);
+                                      fetchClaudeSessions(project.path);
+                                    }}
+                                  >
+                                    {project.name}
+                                  </div>
+                                )}
+                              </For>
+                            </div>
+                          </Show>
+                        </div>
+                      </Show>
+                    </div>
+
+                    {/* Session List */}
+                    <Show when={importLoading()}>
+                      <div
+                        style={{
+                          display: "flex",
+                          "align-items": "center",
+                          "justify-content": "center",
+                          padding: "32px",
+                        }}
+                      >
+                        <Spinner size="md" />
+                      </div>
+                    </Show>
+
+                    <Show when={!importLoading() && claudeSessions().length === 0 && matchedProject()}>
+                      <div
+                        style={{
+                          "text-align": "center",
+                          padding: "32px 16px",
+                          color: "var(--color-text-muted)",
+                        }}
+                      >
+                        <p class="text-mono" style={{ "font-size": "13px", margin: "0" }}>
+                          No terminal sessions found
+                        </p>
+                        <p style={{ "font-size": "12px", margin: "8px 0 0", "font-family": "var(--font-serif)" }}>
+                          All Claude sessions for this project are already in Clauset
+                        </p>
+                      </div>
+                    </Show>
+
+                    <Show when={!importLoading() && !matchedProject()}>
+                      <div
+                        style={{
+                          "text-align": "center",
+                          padding: "32px 16px",
+                          color: "var(--color-text-muted)",
+                        }}
+                      >
+                        <p class="text-mono" style={{ "font-size": "13px", margin: "0" }}>
+                          Select a project above
+                        </p>
+                        <p style={{ "font-size": "12px", margin: "8px 0 0", "font-family": "var(--font-serif)" }}>
+                          Sessions from the terminal will appear here
+                        </p>
+                      </div>
+                    </Show>
+
+                    <Show when={!importLoading() && claudeSessions().length > 0}>
+                      <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+                        <For each={claudeSessions()}>
+                          {(session) => (
                             <div
-                              class="text-text-primary hover:bg-bg-elevated"
-                              style={dropdownItemStyles}
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                setProjectInput(project.name);
-                                setShowProjectDropdown(false);
-                                fetchClaudeSessions(project.path);
+                              onClick={() => openPreview(session)}
+                              style={{
+                                padding: "12px",
+                                "border-radius": "8px",
+                                border: "1px solid var(--color-bg-overlay)",
+                                background: "var(--color-bg-elevated)",
+                                cursor: "pointer",
                               }}
                             >
-                              {project.name}
+                              <div style={{ display: "flex", "justify-content": "space-between", "align-items": "flex-start" }}>
+                                <div style={{ flex: "1", "min-width": "0" }}>
+                                  <p
+                                    class="text-mono"
+                                    style={{
+                                      "font-size": "13px",
+                                      "font-weight": "500",
+                                      margin: "0 0 4px",
+                                      color: "var(--color-text-primary)",
+                                      overflow: "hidden",
+                                      "text-overflow": "ellipsis",
+                                      "white-space": "nowrap",
+                                    }}
+                                  >
+                                    {session.preview || 'Untitled session'}
+                                  </p>
+                                  <p
+                                    style={{
+                                      "font-size": "11px",
+                                      color: "var(--color-text-muted)",
+                                      margin: "0",
+                                    }}
+                                  >
+                                    {new Date(session.timestamp).toLocaleString()}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleImport(session);
+                                  }}
+                                  disabled={importingId() === session.session_id}
+                                  style={{
+                                    padding: "6px 12px",
+                                    "font-size": "12px",
+                                    "font-weight": "500",
+                                    "border-radius": "6px",
+                                    border: "none",
+                                    background: "var(--color-accent)",
+                                    color: "#ffffff",
+                                    cursor: importingId() === session.session_id ? "not-allowed" : "pointer",
+                                    opacity: importingId() === session.session_id ? "0.7" : "1",
+                                    "white-space": "nowrap",
+                                  }}
+                                >
+                                  {importingId() === session.session_id ? 'Importing...' : 'Import'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </>
+                }
+              >
+                {(session) => (
+                  <div style={{ display: "flex", "flex-direction": "column", gap: "12px" }}>
+                    <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between" }}>
+                      <button
+                        type="button"
+                        onClick={closePreview}
+                        class="text-mono"
+                        style={{
+                          padding: "6px 10px",
+                          "font-size": "12px",
+                          "border-radius": "6px",
+                          border: "1px solid var(--color-bg-overlay)",
+                          background: "transparent",
+                          color: "var(--color-text-secondary)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleImport(session())}
+                        disabled={importingId() === session().session_id}
+                        style={{
+                          padding: "6px 12px",
+                          "font-size": "12px",
+                          "font-weight": "500",
+                          "border-radius": "6px",
+                          border: "none",
+                          background: "var(--color-accent)",
+                          color: "#ffffff",
+                          cursor: importingId() === session().session_id ? "not-allowed" : "pointer",
+                          opacity: importingId() === session().session_id ? "0.7" : "1",
+                        }}
+                      >
+                        {importingId() === session().session_id ? 'Importing...' : 'Import'}
+                      </button>
+                    </div>
+
+                    <div>
+                      <p
+                        class="text-mono"
+                        style={{
+                          "font-size": "13px",
+                          "font-weight": "600",
+                          margin: "0 0 4px",
+                          color: "var(--color-text-primary)",
+                        }}
+                      >
+                        {session().preview || 'Untitled session'}
+                      </p>
+                      <p
+                        style={{
+                          "font-size": "11px",
+                          color: "var(--color-text-muted)",
+                          margin: "0",
+                        }}
+                      >
+                        {new Date(session().timestamp).toLocaleString()}
+                      </p>
+                    </div>
+
+                    <Show when={previewLoading()}>
+                      <div style={{ display: "flex", "justify-content": "center", padding: "24px 0" }}>
+                        <Spinner size="md" />
+                      </div>
+                    </Show>
+
+                    <Show when={previewError()}>
+                      <div
+                        class="text-mono"
+                        style={{
+                          padding: "8px 10px",
+                          "border-radius": "6px",
+                          border: "1px solid var(--color-accent)",
+                          background: "var(--color-accent-muted)",
+                          color: "var(--color-accent)",
+                          "font-size": "12px",
+                          "font-weight": "500",
+                        }}
+                      >
+                        {previewError()}
+                      </div>
+                    </Show>
+
+                    <Show when={!previewLoading() && !previewError() && previewMessages().length === 0}>
+                      <div
+                        style={{
+                          "text-align": "center",
+                          padding: "24px 0",
+                          color: "var(--color-text-muted)",
+                        }}
+                      >
+                        <p class="text-mono" style={{ "font-size": "12px", margin: "0" }}>
+                          No transcript messages found
+                        </p>
+                      </div>
+                    </Show>
+
+                    <Show when={!previewLoading() && previewMessages().length > 0}>
+                      <div style={{ display: "flex", "flex-direction": "column", gap: "10px" }}>
+                        <For each={previewMessages()}>
+                          {(message) => (
+                            <div
+                              style={{
+                                padding: "10px",
+                                "border-radius": "8px",
+                                border: "1px solid var(--color-bg-overlay)",
+                                background: "var(--color-bg-base)",
+                              }}
+                            >
+                              <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "margin-bottom": "6px" }}>
+                                <span
+                                  class="text-mono"
+                                  style={{
+                                    "font-size": "11px",
+                                    "font-weight": "600",
+                                    color: message.role === 'user' ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                                    "text-transform": "capitalize",
+                                  }}
+                                >
+                                  {message.role === 'user' ? 'You' : 'Claude'}
+                                </span>
+                                <span style={{ "font-size": "10px", color: "var(--color-text-muted)" }}>
+                                  {new Date(message.timestamp).toLocaleString()}
+                                </span>
+                              </div>
+                              <div
+                                style={{
+                                  "white-space": "pre-wrap",
+                                  "font-size": "13px",
+                                  "font-family": "var(--font-serif)",
+                                  color: "var(--color-text-primary)",
+                                }}
+                              >
+                                {message.content}
+                              </div>
                             </div>
                           )}
                         </For>
                       </div>
                     </Show>
                   </div>
-                </Show>
-              </div>
-
-              {/* Session List */}
-              <Show when={importLoading()}>
-                <div
-                  style={{
-                    display: "flex",
-                    "align-items": "center",
-                    "justify-content": "center",
-                    padding: "32px",
-                  }}
-                >
-                  <Spinner size="md" />
-                </div>
-              </Show>
-
-              <Show when={!importLoading() && claudeSessions().length === 0 && matchedProject()}>
-                <div
-                  style={{
-                    "text-align": "center",
-                    padding: "32px 16px",
-                    color: "var(--color-text-muted)",
-                  }}
-                >
-                  <p class="text-mono" style={{ "font-size": "13px", margin: "0" }}>
-                    No terminal sessions found
-                  </p>
-                  <p style={{ "font-size": "12px", margin: "8px 0 0", "font-family": "var(--font-serif)" }}>
-                    All Claude sessions for this project are already in Clauset
-                  </p>
-                </div>
-              </Show>
-
-              <Show when={!importLoading() && !matchedProject()}>
-                <div
-                  style={{
-                    "text-align": "center",
-                    padding: "32px 16px",
-                    color: "var(--color-text-muted)",
-                  }}
-                >
-                  <p class="text-mono" style={{ "font-size": "13px", margin: "0" }}>
-                    Select a project above
-                  </p>
-                  <p style={{ "font-size": "12px", margin: "8px 0 0", "font-family": "var(--font-serif)" }}>
-                    Sessions from the terminal will appear here
-                  </p>
-                </div>
-              </Show>
-
-              <Show when={!importLoading() && claudeSessions().length > 0}>
-                <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
-                  <For each={claudeSessions()}>
-                    {(session) => (
-                      <div
-                        style={{
-                          padding: "12px",
-                          "border-radius": "8px",
-                          border: "1px solid var(--color-bg-overlay)",
-                          background: "var(--color-bg-elevated)",
-                        }}
-                      >
-                        <div style={{ display: "flex", "justify-content": "space-between", "align-items": "flex-start" }}>
-                          <div style={{ flex: "1", "min-width": "0" }}>
-                            <p
-                              class="text-mono"
-                              style={{
-                                "font-size": "13px",
-                                "font-weight": "500",
-                                margin: "0 0 4px",
-                                color: "var(--color-text-primary)",
-                                overflow: "hidden",
-                                "text-overflow": "ellipsis",
-                                "white-space": "nowrap",
-                              }}
-                            >
-                              {session.preview || 'Untitled session'}
-                            </p>
-                            <p
-                              style={{
-                                "font-size": "11px",
-                                color: "var(--color-text-muted)",
-                                margin: "0",
-                              }}
-                            >
-                              {new Date(session.timestamp).toLocaleString()}
-                            </p>
-                          </div>
-                          <button
-                            onClick={() => handleImport(session)}
-                            disabled={importingId() === session.session_id}
-                            style={{
-                              padding: "6px 12px",
-                              "font-size": "12px",
-                              "font-weight": "500",
-                              "border-radius": "6px",
-                              border: "none",
-                              background: "var(--color-accent)",
-                              color: "#ffffff",
-                              cursor: importingId() === session.session_id ? "not-allowed" : "pointer",
-                              opacity: importingId() === session.session_id ? "0.7" : "1",
-                              "white-space": "nowrap",
-                            }}
-                          >
-                            {importingId() === session.session_id ? 'Importing...' : 'Import'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </For>
-                </div>
+                )}
               </Show>
             </div>
 

@@ -99,11 +99,12 @@ pub enum ProcessEvent {
         cache_read_tokens: u64,
         cache_creation_tokens: u64,
         context_window_size: u64,
+        context_percent: u8,
     },
     /// Session mode changed (e.g., entered/exited Plan Mode).
     ModeChange {
         session_id: Uuid,
-        mode: clauset_types::ChatMode,
+        mode: clauset_types::PermissionMode,
     },
     /// TUI menu event for native UI rendering.
     /// Sent when a TUI selection menu is detected in terminal output.
