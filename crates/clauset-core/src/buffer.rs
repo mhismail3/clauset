@@ -141,6 +141,7 @@ impl SequencedRingBuffer {
     }
 
     /// Get the next sequence number that will be assigned.
+    #[cfg(test)]
     pub fn next_seq(&self) -> u64 {
         self.next_seq
     }
@@ -151,11 +152,13 @@ impl SequencedRingBuffer {
     }
 
     /// Get total bytes in buffer.
+    #[cfg(test)]
     pub fn total_bytes(&self) -> usize {
         self.total_bytes
     }
 
     /// Get number of chunks in buffer.
+    #[cfg(test)]
     pub fn chunk_count(&self) -> usize {
         self.chunks.len()
     }
@@ -1172,7 +1175,7 @@ static STATUS_LINE_TOKENS_NO_CTX: Lazy<Regex> = Lazy::new(|| {
 
 /// Regex for a standalone ctx line like "ctx:19%".
 static STATUS_LINE_CTX_ONLY: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^\|?\s*ctx:(\d+)%!?\b.*$").unwrap()
+    Regex::new(r"^\|?\s*ctx:(\d+)%!?\s*.*$").unwrap()
 });
 
 const MAX_REASONABLE_TOKENS: u64 = 10_000_000;

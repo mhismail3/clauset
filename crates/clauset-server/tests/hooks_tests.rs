@@ -9,7 +9,7 @@
 //! - Helper function correctness
 
 use clauset_types::{HookEvent, HookEventPayload, HookEventType, ContextWindow, CurrentUsage};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::path::PathBuf;
 use uuid::Uuid;
 

@@ -11,7 +11,7 @@
 //! - Messages are broadcast via ProcessEvent for WebSocket delivery
 
 use crate::{InteractionStore, TranscriptEvent, TranscriptWatcher, TranscriptWatcherHandle};
-use clauset_types::{ChatEvent, ChatMessage, ChatRole, ChatToolCall, HookEvent};
+use clauset_types::{ChatEvent, ChatMessage, ChatToolCall, HookEvent};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
@@ -45,8 +45,6 @@ struct SessionChatState {
     messages: Vec<ChatMessage>,
     /// Text buffer for accumulating Claude's response
     text_buffer: String,
-    /// Last position in terminal output that was processed
-    last_processed_offset: usize,
     /// Whether we're inside a tool output block
     in_tool_output: bool,
     /// Current tool output being captured
@@ -60,7 +58,6 @@ impl SessionChatState {
             current_message: None,
             messages: Vec::new(),
             text_buffer: String::new(),
-            last_processed_offset: 0,
             in_tool_output: false,
             current_tool_output: String::new(),
         }
@@ -483,7 +480,7 @@ impl ChatProcessor {
         let (event_tx, event_rx) = mpsc::unbounded_channel::<TranscriptEvent>();
 
         // Create and start the watcher
-        let watcher = TranscriptWatcher::new(path, session_id, event_tx);
+        let watcher = TranscriptWatcher::new(path, event_tx);
         let handle = watcher.start()?;
 
         // Store the handle for cleanup
@@ -761,6 +758,7 @@ fn read_last_assistant_response(path: &str) -> std::io::Result<TranscriptRespons
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clauset_types::ChatRole;
     use tempfile::NamedTempFile;
     use std::io::Write;
 
@@ -909,7 +907,6 @@ The function works correctly.
 
         // Pure box-drawing lines (when majority of bytes are box chars) get filtered
         // For ASCII pipe char which is 1 byte, the ratio works better:
-        let pipe_line = "||||||||||||||||||||";
         // This doesn't get filtered because | is not in the box-drawing list
         // The filter specifically targets Unicode box-drawing characters
     }

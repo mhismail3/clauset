@@ -416,30 +416,7 @@ impl InteractionStore {
             return Ok(false); // No migration needed, tables will be created fresh
         }
 
-        // Check if the FTS table has prefix indexes by looking at the config
-        // FTS5 stores config in tablename_config; prefix option creates entries
-        let has_prefix: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM interactions_fts_config WHERE k = 'pgsz'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
-
-        // If the table exists but doesn't have expected config, it needs migration
-        // Actually, let's check for prefix specifically - the config table stores 'prefix' key
-        let has_prefix_config: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='interactions_fts_idx' AND sql LIKE '%prefix%'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
-
-        // Simple heuristic: if the FTS table exists but we can't verify prefix config,
-        // assume it needs migration. The prefix tables would be: tablename_idx
-        // Actually, the safest check is: try to query with a prefix and see if it's indexed
-        // But that's complex. Let's use a simpler approach: check the row count of _config
+        // Simple heuristic: check the row count of _config to infer prefix support.
         let config_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM interactions_fts_config",

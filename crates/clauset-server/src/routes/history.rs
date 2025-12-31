@@ -6,7 +6,6 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use clauset_core::HistoryWatcher;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 

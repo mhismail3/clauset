@@ -205,7 +205,6 @@ struct TranscriptMessageUsage {
 #[derive(Debug, Deserialize)]
 struct TranscriptMessageEntry {
     id: Option<String>,
-    role: Option<String>,
     content: Value,
     /// Model used for this message (assistant messages only)
     #[serde(default)]
@@ -218,7 +217,6 @@ struct TranscriptMessageEntry {
 /// Watches a Claude Code transcript file and emits content events in real-time.
 pub struct TranscriptWatcher {
     path: PathBuf,
-    session_id: Uuid,
     file_position: u64,
     line_buffer: String,
     event_tx: mpsc::UnboundedSender<TranscriptEvent>,
@@ -230,12 +228,10 @@ impl TranscriptWatcher {
     /// Events will be sent through the provided channel.
     pub fn new(
         path: PathBuf,
-        session_id: Uuid,
         event_tx: mpsc::UnboundedSender<TranscriptEvent>,
     ) -> Self {
         Self {
             path,
-            session_id,
             file_position: 0,
             line_buffer: String::new(),
             event_tx,

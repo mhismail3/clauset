@@ -4,7 +4,7 @@
 //! (like /model, /config) in terminal output and converts them to structured data
 //! for native UI rendering.
 
-use clauset_types::{TuiMenu, TuiMenuOption, TuiMenuType};
+use clauset_types::{TuiMenu, TuiMenuOption};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::time::{Duration, Instant};
@@ -413,6 +413,7 @@ fn split_label_description(text: &str) -> (String, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clauset_types::TuiMenuType;
 
     // Sample menu output from /model command
     const MODEL_MENU_OUTPUT: &str = r#"
